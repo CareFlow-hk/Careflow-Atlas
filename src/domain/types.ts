@@ -88,20 +88,54 @@ export function effectiveObservations(snapshot: OutreachSnapshot): Observation[]
 export interface CorrectionConflict { observationId: string; correctionIds: string[]; }
 /** Two live corrections for one original cannot be ordered by time; a human must pick one. */
 export function getCorrectionConflicts(snapshot: OutreachSnapshot): CorrectionConflict[] {
-  const superseded = supersededObservationIds(snapshot.observations);
-  const live = new Map<string, string[]>();
+  const branches = new Map<string, string[]>();
   for (const item of snapshot.observations) {
-    if (!item.correctsObservationId || superseded.has(item.id)) continue;
-    live.set(item.correctsObservationId, [...live.get(item.correctsObservationId) ?? [], item.id]);
+    if (!item.correctsObservationId) continue;
+    branches.set(item.correctsObservationId, [...branches.get(item.correctsObservationId) ?? [], item.id]);
   }
-  return [...live.entries()].filter(([, ids]) => ids.length > 1).map(([observationId, correctionIds]) => ({ observationId, correctionIds }));
+  // A second descendant does not resolve a fork: both branches still have a live tail.
+  return [...branches.entries()].filter(([, ids]) => ids.length > 1).map(([observationId, correctionIds]) => ({ observationId, correctionIds }));
 }
 
 export interface OpenFollowUp { observationId: string; buildingId: string; floorId?: string; unitId?: string; action: string; dueDate?: string; }
+/** Stable event identity across correction chains; cycle-safe for unvalidated input. */
+export function observationRootIds(observations: Observation[]): Map<string, string> {
+  const byId = new Map(observations.map(item => [item.id, item]));
+  const roots = new Map<string, string>();
+  for (const item of observations) {
+    let current = item.id;
+    const path = new Set<string>();
+    while (!roots.has(current) && !path.has(current)) {
+      path.add(current);
+      const parent = byId.get(current)?.correctsObservationId;
+      if (!parent || !byId.has(parent)) break;
+      current = parent;
+    }
+    const root = roots.get(current) ?? current;
+    for (const id of path) roots.set(id, root);
+  }
+  return roots;
+}
+
+/** Resolution by event version, using only effective closure records. */
+export function followUpResolutions(snapshot: OutreachSnapshot): Map<string, Observation> {
+  const roots = observationRootIds(snapshot.observations);
+  const byRoot = new Map<string, Observation>();
+  for (const item of effectiveObservations(snapshot)) {
+    if (item.resolvesObservationId) byRoot.set(roots.get(item.resolvesObservationId) ?? item.resolvesObservationId, item);
+  }
+  const result = new Map<string, Observation>();
+  for (const [id, root] of roots) {
+    const resolution = byRoot.get(root);
+    if (resolution) result.set(id, resolution);
+  }
+  return result;
+}
+
 export function getOpenFollowUps(snapshot: OutreachSnapshot): OpenFollowUp[] {
-  // A closure keeps counting after a correction, so a task never reopens or closes on its own.
-  const resolved = new Set(snapshot.observations.map((item) => item.resolvesObservationId).filter((id): id is string => Boolean(id)));
-  return effectiveObservations(snapshot).filter((item) => item.followUp?.status === "OPEN" && !resolved.has(item.id)).map((item) => ({ observationId: item.id, buildingId: item.buildingId, floorId: item.floorId, unitId: item.unitId, action: item.followUp!.action, dueDate: item.followUp!.dueDate }));
+  const resolved = followUpResolutions(snapshot);
+  return effectiveObservations(snapshot).filter(item => item.followUp?.status === "OPEN" && !resolved.has(item.id))
+    .map(item => ({ observationId: item.id, buildingId: item.buildingId, floorId: item.floorId, unitId: item.unitId, action: item.followUp!.action, dueDate: item.followUp!.dueDate }));
 }
 
 /** Occurrence time first, entry time only as a tie-breaker. Exported so views order the same way. */

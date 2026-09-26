@@ -1,5 +1,34 @@
 # Validation and handover
 
+## Current audit — 2026-09-26
+
+Base: `lhjlol/Careflow-Atlas` at `f0a56ebbb36e896d755aa6317018d82f1c54b385`. Changes and evidence: [AUDIT_2026-09-26.md](AUDIT_2026-09-26.md).
+
+Actual host runtime: Node 25.6.1 / npm 11.9.0. Container build: Node 24.15.0. Docker 28.3.3 / Compose 2.39.2 through OrbStack, Apple Silicon arm64. Browser: Playwright 1.63.0, Chromium 153.0.8010.12, isolated contexts.
+
+| Check | Result |
+| --- | --- |
+| Locked dependency install | Passed with `npm ci` on host and in container |
+| Demo generation | Passed; tracked workbook bytes unchanged |
+| TypeScript / ESLint | Passed |
+| Unit and integration tests | 18 files, 113 tests passed (baseline: 14 files, 91 tests) |
+| Production build | Passed, including the separately bundled MapLibre worker |
+| npm audit | 0 reported vulnerabilities |
+| Docker verification | 34 checks passed, including independent `nginx -t`, routing, cache headers, health, port mapping, rebuild/restart and image save/load |
+| Browser on Nginx production output | 15 passed, 0 failed, 0 unverified |
+| Git whitespace/diff check | Passed |
+
+Browser checks cover startup, mapping change invalidating old pending data, Chinese sample import, exact persistence after reload, building/floor/unit navigation, append-only observations, 20-building district merge retaining older history, Excel/JSON downloads, legacy workbook merge, paper preview, actual 3D floor label clicks, 390×844 mobile form layout, local resource failures, successful external vector tile responses, missing `crypto.randomUUID` compatibility and blocked-map-network fallback.
+
+Run `VERIFY_BROWSER=1 bash deploy/verify.sh` after installing the optional Playwright tool and its Chromium browser. It uses a private browser context and unique test containers/images. Plain `bash deploy/verify.sh` reports the browser check as manual rather than pretending it ran.
+
+The checks do not establish remote VPS deployment, amd64 compatibility, actual NGO data suitability, real mobile hardware behavior, multi-tab transactional writes or protection against arbitrary compressed-workbook attacks. Local storage remains unencrypted and unshared. W0 mapping edits are preview-only and require a corrected source file to be reloaded; unimplemented template formats cannot write records.
+
+## Historical validation — 2026-09-11
+
+The following records the original prototype verification and its contemporary limits; counts and dependency versions here are historical.
+
+
 Verified 2026-09-11 HKT using Node 22.12.0, npm 10.9.0, and the Codex in-app Chromium browser.
 
 ## Automated checks

@@ -8,9 +8,11 @@
 
 **紙本／Excel**
 
+- 格式識別與欄位對應只供預覽。改動對應後會撤銷舊的待匯入資料，請整理原檔再重新載入；三種推測格式尚不支援寫入。
+
 - 喺瀏覽器直接解析合成 `.xlsx`，逐行列出驗證問題，唔會靜靜哋丟咗有問題嘅行。
 - 匯出／合併中文六表工作簿，有歷史保護同行級覆核。
-- **追加式更正**：錯嘅記錄唔改唔刪。另開一行，喺「更正原記錄編號」填返要更正嗰條，更正鏈鏈尾生效；被更正嘅原行退出覆蓋計算，但保留喺歷史度兼標明「已被更正」。同一條原記錄有兩條並行更正就報衝突，要人手揀。
+- **追加式更正**：錯嘅記錄唔改唔刪。另開一行，喺「更正原記錄編號」填返要更正嗰條，更正鏈鏈尾生效；被更正嘅原行退出覆蓋計算，但保留喺歷史度兼標明「已被更正」。同一條原記錄有兩條並行更正就報衝突，要人手揀；修改跟進或結案關係必須寫明更正原因。
 
 **地圖同外展**
 
@@ -39,7 +41,7 @@ npm ci
 npm run demo:generate   # 由 src/data/demoFixture.ts 確定性重建示範工作簿
 npm run typecheck
 npm run lint
-npm test                # 14 個測試檔案 / 91 個用例
+npm test                # 執行全部回歸測試；最新驗證見 docs/VALIDATION.md
 npm run build
 npm run dev             # vite --host 127.0.0.1
 ```
@@ -70,7 +72,7 @@ npm ci && npm run demo:generate && npm run build
 
 將 `dist/` 由靜態網站根目錄提供就得，唔需要 runtime server 或者密碼。應用用根相對路徑 `/demo/careflow-field-outreach-demo.xlsx`，擺喺子目錄就要改 base path。
 
-要交去 VPS（對方部機唔使裝 Node）就用容器：`docker compose up -d --build`，預設開 `:8080`。完整步驟、驗證清單同排錯見 [docs/DOCKER.md](docs/DOCKER.md)。容器一樣冇後端、冇登入，資料照樣留喺訪問者自己個瀏覽器。
+要交去 VPS（對方部機唔使裝 Node）就用容器：`docker compose up -d --build`，預設只開宿主機 `127.0.0.1:8080`（公開演示須設定 `WEB_BIND=0.0.0.0`）。完整步驟、驗證清單同排錯見 [docs/DOCKER.md](docs/DOCKER.md)。容器一樣冇後端、冇登入，資料照樣留喺訪問者自己個瀏覽器。
 
 `.openai/hosting.json` 係 owner-only hosting 用；private 示範**唔等於**有 NGO 認證或者正式資料管控。
 

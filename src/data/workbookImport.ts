@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import { readWorkbook } from "./readWorkbook";
 import { instantSchema, snapshotSchema } from "../domain/schema";
 import { CONTACT_OUTCOMES, COVERAGE_STATUSES, FOLLOW_UP_STATUSES, HOUSING_ASSESSMENTS, type Building, type Floor, type Household, type HouseholdMembership, type HouseholdResidence, type Membership, type Observation, type OutreachSnapshot, type Person, type Unit, type Visit } from "../domain/types";
 
@@ -14,6 +15,13 @@ const schemas: Record<string, string[]> = {
   Households: ["id"], People: ["id", "displayName"], HouseholdMemberships: ["id", "householdId", "personId"], HouseholdResidences: ["id", "householdId", "buildingId"], Memberships: ["id", "personId", "status"],
   Visits: ["id", "occurredAt", "recordedAt", "workerName"], Observations: ["id", "visitId", "buildingId", "occurredAt", "recordedAt", "workerName", "coverage", "evidence"],
 };
+const optionalColumns: Record<string, string[]> = {
+  Buildings: ['footprint', 'floorCount', 'initialCoverage'], Units: ['initialCoverage'], Households: ['label'],
+  HouseholdMemberships: ['relationship'], HouseholdResidences: ['unitId', 'startsOn', 'endsOn', 'locationNote'],
+  Memberships: ['startsOn', 'endsOn'], Visits: ['note'],
+  Observations: ['floorId', 'unitId', 'assessment', 'contactOutcome', 'sourceType', 'note', 'followUpAction', 'followUpDueDate', 'followUpStatus', 'resolvesObservationId'],
+};
+
 function text(value: unknown): string | undefined { if (value === undefined || value === null || String(value).trim() === "") return undefined; return String(value).trim(); }
 function footprint(value: unknown, row: number, issues: WorkbookImportIssue[]): number[][] | undefined {
   if (!text(value)) return undefined;
@@ -32,22 +40,34 @@ function issue(issues: WorkbookImportIssue[], severity: WorkbookIssueSeverity, c
 function parseSheet(workbook: XLSX.WorkBook, name: string, issues: WorkbookImportIssue[]): Row[] {
   const sheet = workbook.Sheets[name];
   if (!sheet) return [];
-  const rows = XLSX.utils.sheet_to_json<Row>(sheet, { defval: "", raw: false, blankrows: true });
-  const headers = (XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, range: 0, blankrows: true })[0] ?? []).map(String);
+  const rows = XLSX.utils.sheet_to_json<Row>(sheet, { defval: "", raw: true, blankrows: true });
+  const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', blankrows: true });
+  const width = matrix.reduce((max, row) => Math.max(max, row.length), 0);
+  const headers = Array.from({ length: width }, (_, col) => String(matrix[0]?.[col] ?? ''));
+  const known = new Set([...(schemas[name] ?? []), ...(optionalColumns[name] ?? [])]);
+  const seen = new Set<string>();
+  for (const header of headers.filter(Boolean)) {
+    if (seen.has(header)) issue(issues, 'error', 'DUPLICATE_HEADER', name, 1, header, 'Duplicate column header.');
+    seen.add(header);
+  }
   for (const header of schemas[name] ?? []) if (!headers.includes(header)) issue(issues, "error", "MISSING_HEADER", name, undefined, header, `Required column '${header}' is missing.`);
+  matrix.slice(1).forEach((row, index) => headers.forEach((header, col) => {
+    const cell = sheet[XLSX.utils.encode_cell({ r: index + 1, c: col })];
+    if (cell?.f) issue(issues, 'error', 'FORMULA_NOT_ALLOWED', name, index + 2, header, 'Enter literal values, not formulas.');
+    if (!known.has(header) && text(row[col])) issue(issues, 'error', 'UNKNOWN_COLUMN', name, index + 2, header || `Column ${col + 1}`, 'Unmapped data must be reviewed before import.');
+  }));
   return rows;
 }
 function unique<T extends { id: string }>(items: T[], sheet: string, issues: WorkbookImportIssue[]) { const ids = new Set<string>(); items.forEach((item, index) => { if (ids.has(item.id)) issue(issues, "error", "DUPLICATE_ID", sheet, index + 2, "id", `Duplicate id '${item.id}'.`); ids.add(item.id); }); }
 function requireValue(row: Row, key: string, sheet: string, rowIndex: number, issues: WorkbookImportIssue[]): string | undefined { const value = text(row[key]); if (!value) issue(issues, "error", "REQUIRED_VALUE", sheet, rowIndex, key, "A non-blank value is required."); return value; }
 
-/** Parses only the deliberately designed synthetic workbook layout. Unknown sheets are ignored with a warning. */
+/** Parses only the deliberately designed synthetic workbook layout. Unknown sheets and unmapped data block import. */
 export function parseWorkbook(buffer: ArrayBuffer): WorkbookImportResult {
   const issues: WorkbookImportIssue[] = []; let workbook: XLSX.WorkBook;
   if (buffer.byteLength > 5 * 1024 * 1024) return { issues: [{severity: "error", code: "FILE_TOO_LARGE", sheet: "workbook", message: "示範匯入上限為 5 MB。"}], counts: {} };
-  try { workbook = XLSX.read(buffer, { type: "array", cellDates: false, sheetRows: 5002 }); } catch { return { issues: [{ severity: "error", code: "INVALID_WORKBOOK", sheet: "workbook", message: "The file could not be parsed as an .xlsx workbook." }], counts: {} }; }
-  for (const name of workbook.SheetNames) { const ref = workbook.Sheets[name]["!fullref"] || workbook.Sheets[name]["!ref"]; if (ref && (XLSX.utils.decode_range(ref).e.r > 5000 || XLSX.utils.decode_range(ref).e.c > 63)) issue(issues, "error", "SHEET_TOO_LARGE", name, undefined, undefined, "每張示範工作表限 5000 列及 64 欄。"); }
+  try { workbook = readWorkbook(buffer); } catch (error) { return { issues: [{ severity: "error", code: "INVALID_WORKBOOK", sheet: "workbook", message: error instanceof Error ? error.message : "The file could not be parsed as an .xlsx workbook." }], counts: {} }; }
   for (const sheet of requiredSheets) if (!workbook.SheetNames.includes(sheet)) issue(issues, "error", "MISSING_SHEET", sheet, undefined, undefined, `Required sheet '${sheet}' is missing.`);
-  workbook.SheetNames.filter((name) => !Object.hasOwn(schemas, name)).forEach((name) => issue(issues, "warning", "UNKNOWN_SHEET", name, undefined, undefined, "Sheet was ignored."));
+  workbook.SheetNames.filter((name) => !Object.hasOwn(schemas, name)).forEach((name) => issue(issues, "error", "UNKNOWN_SHEET", name, undefined, undefined, "Sheet was ignored."));
   const data = Object.fromEntries(Object.keys(schemas).map((name) => [name, parseSheet(workbook, name, issues)])) as Record<string, Row[]>;
   if (data.Metadata.find((row) => text(row.key) === "synthetic")?.value !== "true") issue(issues, "error", "NON_SYNTHETIC_WORKBOOK", "Metadata", undefined, "synthetic", "This importer accepts only a workbook explicitly marked synthetic=true.");
   const buildings: Building[] = data.Buildings.map((row, index) => {

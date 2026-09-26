@@ -3,7 +3,7 @@ import { createExpression } from '@maplibre/maplibre-gl-style-spec';
 import { contextPosition, focusHeight } from './focusContext';
 import { footprintOf, type MapBuilding } from './mapModel';
 
-const parsed = createExpression(focusHeight);
+const parsed = createExpression(focusHeight, 'fill-extrusion-height');
 if (parsed.result === 'error') throw new Error(JSON.stringify(parsed.value));
 const evaluate = (bearing: number, east: number, north: number, radius = 12, height = 120) =>
   parsed.value.evaluate({ zoom: 18, globalState: { focusBearing: bearing } }, { type: 'Polygon', properties: { east, north, radius, height } });

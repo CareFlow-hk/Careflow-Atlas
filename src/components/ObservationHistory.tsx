@@ -1,5 +1,5 @@
 import { CalendarClock, CheckCircle2, CircleAlert, History, PencilLine, UserRound } from "lucide-react";
-import { compareObservationTime, supersededObservationIds, supportCategoryLabels, type Observation, type OutreachSnapshot } from "../domain/types";
+import { compareObservationTime, followUpResolutions, supersededObservationIds, supportCategoryLabels, type Observation, type OutreachSnapshot } from "../domain/types";
 
 export interface ObservationHistoryProps { snapshot: OutreachSnapshot; subjectId: string; subjectType?: "UNIT" | "BUILDING"; emptyLabel?: string; }
 const assessmentLabels: Record<NonNullable<Observation["assessment"]>, string> = { NOT_UPDATED: "今次未更新住房判斷", UNKNOWN: "住房情況未能確定", SUSPECTED: "疑似劏房，尚待核實", NO_INDICATION: "今次未見相關跡象", STAFF_VERIFIED: "由工作人員確認" };
@@ -12,9 +12,10 @@ export function ObservationHistory({ snapshot, subjectId, subjectType = "UNIT", 
   const observations = snapshot.observations.filter((item) => subjectType === "UNIT" ? item.unitId === subjectId : item.buildingId === subjectId && !item.unitId).sort((a, b) => compareObservationTime(b, a));
   if (!observations.length) return <div className="cf-empty"><History size={18} /><p>{emptyLabel}</p></div>;
   const superseded = supersededObservationIds(snapshot.observations);
+  const resolutions = followUpResolutions(snapshot);
   const currentId = observations.find((item) => !superseded.has(item.id))?.id;
   return <div className="cf-history" aria-label="位置記錄歷史">{observations.map((observation) => {
-    const resolvedBy = snapshot.observations.find((item) => item.resolvesObservationId === observation.id);
+    const resolvedBy = resolutions.get(observation.id);
     const correctedBy = snapshot.observations.find((item) => item.correctsObservationId === observation.id);
     const isSuperseded = superseded.has(observation.id);
     const label = observation.id === currentId ? "當前有效" : isSuperseded ? "已被更正" : "較早記錄";
@@ -26,7 +27,7 @@ export function ObservationHistory({ snapshot, subjectId, subjectType = "UNIT", 
         {observation.evidence.length > 0 && <p className="cf-event__note">依據：{observation.evidence.join("；")}</p>}
         <p className="cf-event__recorded">{`探訪：${formatDate(observation.occurredAt)} · `}記錄於 {formatDate(observation.recordedAt)}</p>
         {observation.paperRef && <p className="cf-event__recorded">紙本 {observation.paperRef}{observation.paperLine ? ` · 第 ${observation.paperLine} 行` : ''}{observation.importSource ? ` · Excel ${observation.importSource.sheet} 第 ${observation.importSource.row} 行` : ''}</p>}
-        {observation.followUp && <div className={`cf-followup ${resolvedBy || observation.followUp.status === "DONE" ? "is-resolved" : ""}`}><CalendarClock size={16} /><span><strong>{resolvedBy || observation.followUp.status === "DONE" ? "已由後續記錄結束" : "待跟進"}</strong> · {observation.followUp.action}<small>限期：{formatDate(observation.followUp.dueDate)}{resolvedBy ? ` · 結束於 ${formatDate(resolvedBy.occurredAt)}` : ""}</small></span></div>}
+        {observation.followUp && <div className={`cf-followup ${resolvedBy || observation.followUp.status === "DONE" ? "is-resolved" : ""}`}><CalendarClock size={16} /><span><strong>{resolvedBy || observation.followUp.status === "DONE" ? "已由後續記錄結束" : isSuperseded ? "已被更正，詳見後續記錄" : "待跟進"}</strong> · {observation.followUp.action}<small>限期：{formatDate(observation.followUp.dueDate)}{resolvedBy ? ` · 結束於 ${formatDate(resolvedBy.occurredAt)}` : ""}</small></span></div>}
         {observation.followUp && <p className="cf-event__note">{observation.followUp.category ? supportCategoryLabels[observation.followUp.category] : '一般跟進'}{observation.followUp.assignee ? ` · ${observation.followUp.assignee}` : ''}{observation.followUp.timingNote ? ` · ${observation.followUp.timingNote}` : ''}</p>}
         {observation.resolvesObservationId && <p className="cf-resolved-note"><CheckCircle2 size={14} />這次結果已結束一項較早的復訪。</p>}
         {observation.correctsObservationId && <p className="cf-resolved-note"><PencilLine size={14} />更正記錄 {observation.correctsObservationId}{observation.correctionReason ? ` · ${observation.correctionReason}` : ''}。</p>}

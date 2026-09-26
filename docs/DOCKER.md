@@ -29,7 +29,7 @@ cd careflow-atlas
 docker compose up -d --build
 ```
 
-打开 `http://<服务器地址>:8080`。
+默认打开宿主机 `http://127.0.0.1:8080`，远程访问通过反向代理。只为公开合成演示直接开放端口时，显式运行 `WEB_BIND=0.0.0.0 docker compose up -d --build`。
 
 默认映射到宿主机 **8080**，因为 VPS 的 80/443 通常已经给了反代或其他站点。想换端口：
 
@@ -40,7 +40,7 @@ WEB_PORT=8081 docker compose up -d
 想让它直接占 80（宿主机 80 空闲时）：
 
 ```bash
-WEB_PORT=80 docker compose up -d
+WEB_BIND=0.0.0.0 WEB_PORT=80 docker compose up -d
 ```
 
 ### 方式二：不用 compose
@@ -190,6 +190,8 @@ location / {
 }
 ```
 
+使用访问限制时保留默认 `WEB_BIND=127.0.0.1`，否则公开的容器端口可绕过反向代理认证。
+
 两点必须说清楚：
 
 1. Basic Auth 在**没有 HTTPS 的情况下口令是明文传输的**，只适合临时挡一下搜索引擎和路人。
@@ -208,6 +210,8 @@ location / {
 | 换了台电脑，数据不见了 | 正常：数据在原来那台浏览器的 `localStorage` 里，不在容器里 |
 
 ## 10. 验证记录
+
+2026-09-26 审查版本已重新验证；当前结果见 [VALIDATION.md](VALIDATION.md)。下面保留 2026-09-23 的历史记录，不代表本次审查重新验证了其中每项。
 
 这套容器定义已在真实 Docker 上实跑过（2026-09-23，Docker 29.5.2 / Compose 5.5.1，Apple Silicon 上的 colima）。结论：**下面这些全部实跑通过**。
 
@@ -239,3 +243,17 @@ location / {
 
 - **`nginx -t` 未单独执行**：容器能正常启动并服务全部路由，等价于配置被 nginx 接受，但没跑过独立的语法预检。
 - **未在 x86/amd64 VPS 上实跑**：以上全部在 Apple Silicon 的 arm64 上完成。镜像用到的两个基础镜像都是多架构的，但「在你那台 VPS 上跑一次」仍是必要的最后一步 —— 跑 `bash deploy/verify.sh` 即可。
+
+## 11. 回归工具
+
+`bash deploy/verify.sh` 使用每次运行独有的容器和镜像名称，仅绑定回环端口；清理覆盖本次构建参数镜像和日志，避免误删另一轮测试资源。
+
+浏览器检查可独立执行：
+
+```bash
+npm install --no-save --package-lock=false playwright
+npx playwright install chromium
+node deploy/verify-browser.mjs http://127.0.0.1:8080
+```
+
+检查使用隔离浏览器上下文，不读取个人浏览器。覆盖映射变更阻止旧数据写入、中文和英文导入、街区合并、观察追加、刷新持久化、下载和地图不可达时的降级。底图必须收到成功瓦片响应才能标记已验证，单有请求不算成功。

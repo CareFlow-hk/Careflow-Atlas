@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CONTACT_OUTCOMES, COVERAGE_STATUSES, FOLLOW_UP_STATUSES, HOUSING_ASSESSMENTS, SUPPORT_CATEGORIES, supersededObservationIds, type OutreachSnapshot } from './types';
+import { CONTACT_OUTCOMES, COVERAGE_STATUSES, FOLLOW_UP_STATUSES, HOUSING_ASSESSMENTS, SUPPORT_CATEGORIES, supersededObservationIds, getCorrectionConflicts, observationRootIds, type OutreachSnapshot } from './types';
 
 const id = z.string().trim().min(1).max(200);
 const text = z.string().max(6000);
@@ -50,7 +50,9 @@ export const snapshotSchema = z.object({
   data.householdResidences.forEach((r, i) => { if (!households.has(r.householdId) || !buildings.has(r.buildingId) || (r.unitId && units.get(r.unitId)?.buildingId !== r.buildingId)) bad(['householdResidences', i], 'Inconsistent residence reference'); });
   data.memberships.forEach((m, i) => { if (!people.has(m.personId)) bad(['memberships', i, 'personId'], 'Unknown person'); });
   for (const key of ['householdResidences', 'memberships'] as const) data[key].forEach((r, i) => { if (r.startsOn && r.endsOn && r.endsOn < r.startsOn) bad([key, i, 'endsOn'], 'End precedes start'); });
+  const roots = observationRootIds(data.observations);
   const resolved = new Set<string>();
+  const superseded = supersededObservationIds(data.observations);
   data.observations.forEach((o, i) => {
     if (!visits.has(o.visitId) || !buildings.has(o.buildingId)) bad(['observations', i], 'Unknown visit or building');
     if (o.floorId && floors.get(o.floorId)?.buildingId !== o.buildingId) bad(['observations', i, 'floorId'], 'Floor and building must match');
@@ -58,16 +60,21 @@ export const snapshotSchema = z.object({
     if (o.resolvesObservationId) {
       const origin = observations.get(o.resolvesObservationId);
       if (!origin || origin.id === o.id || origin.followUp?.status !== 'OPEN' || origin.buildingId !== o.buildingId || origin.floorId !== o.floorId || origin.unitId !== o.unitId || Date.parse(origin.recordedAt) > Date.parse(o.recordedAt)) bad(['observations', i, 'resolvesObservationId'], 'Resolution must follow an open task at the same location');
-      if (resolved.has(o.resolvesObservationId)) bad(['observations', i, 'resolvesObservationId'], 'Follow-up already resolved');
-      resolved.add(o.resolvesObservationId);
+      if (!superseded.has(o.id)) {
+        const target = roots.get(o.resolvesObservationId) ?? o.resolvesObservationId;
+        if (resolved.has(target)) bad(['observations', i, 'resolvesObservationId'], 'Follow-up already resolved');
+        resolved.add(target);
+      }
     }
   });
   // A correction never rewrites its original; it must name one, and the chain must terminate.
-  const correctionsFor = new Map<string, string[]>();
   data.observations.forEach((o, i) => {
     if (!o.correctsObservationId) return;
     if (!observations.has(o.correctsObservationId) || o.correctsObservationId === o.id) { bad(['observations', i, 'correctsObservationId'], 'Correction must name an existing other event'); return; }
-    correctionsFor.set(o.correctsObservationId, [...correctionsFor.get(o.correctsObservationId) ?? [], o.id]);
+    const original = observations.get(o.correctsObservationId)!;
+    if (Date.parse(o.recordedAt) < Date.parse(original.recordedAt)) bad(['observations', i, 'recordedAt'], 'Correction cannot precede its original recording');
+    const taskChanged = JSON.stringify(original.followUp) !== JSON.stringify(o.followUp) || original.resolvesObservationId !== o.resolvesObservationId;
+    if (taskChanged && !o.correctionReason?.trim()) bad(['observations', i, 'correctionReason'], '更改跟進或結案關係時，請填更正原因。');
     const seen = new Set<string>([o.id]);
     let cursor: string | undefined = o.correctsObservationId;
     while (cursor) {
@@ -77,7 +84,6 @@ export const snapshotSchema = z.object({
     }
   });
   // Two live corrections for one original cannot be ordered by time; a human must pick one.
-  const superseded = supersededObservationIds(data.observations);
-  for (const [targetId, ids] of correctionsFor) if (ids.filter(id => !superseded.has(id)).length > 1) bad(['observations'], `Two live corrections for ${targetId}; keep one and resubmit the other`);
+  for (const conflict of getCorrectionConflicts(data)) bad(['observations'], `Two correction branches for ${conflict.observationId}; keep one and resubmit the other`);
 });
 export function validateSnapshot(value: unknown): OutreachSnapshot { return snapshotSchema.parse(value); }

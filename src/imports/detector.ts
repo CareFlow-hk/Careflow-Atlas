@@ -7,6 +7,7 @@
  * accuracy claim.
  */
 import * as XLSX from 'xlsx';
+import { readWorkbook } from '../data/readWorkbook';
 import {
   DETECTOR_VERSION, FORMAT_PROFILES, normalizeHeader, profileById,
   type CanonicalField, type DetectionStatus, type FieldSpec, type FieldStatus,
@@ -87,7 +88,7 @@ interface RowEvaluation {
 }
 
 function readSheets(buffer: ArrayBuffer): SheetMatrix[] {
-  const workbook = XLSX.read(buffer, { type: 'array', cellDates: false, sheetRows: 200 });
+  const workbook = readWorkbook(buffer);
   return workbook.SheetNames.map((name) => ({
     name,
     matrix: XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[name], { header: 1, raw: true, defval: '', blankrows: true }),
@@ -233,31 +234,39 @@ export function detectWorkbook(buffer: ArrayBuffer, override: MappingOverride = 
 }
 
 function finalize(profile: FormatProfile, sheet: SheetMatrix, evaluation: RowEvaluation, score: number, override: MappingOverride): DetectionResult {
-  const headerCells = sheet.matrix[evaluation.row] ?? [];
+  const width = sheet.matrix.reduce((max, row) => Math.max(max, row.length), 0);
+  const headerCells = Array.from({ length: width }, (_, index) => sheet.matrix[evaluation.row]?.[index] ?? '');
   const fields = evaluation.fields.map((field) => ({ ...field, candidates: [...field.candidates] }));
   const appliedOverrides: string[] = [];
 
   for (const field of fields) {
     const forced = override.columns?.[field.key];
     if (forced === undefined) continue;
-    appliedOverrides.push(field.label);
     if (forced === null) {
+      appliedOverrides.push(field.label);
       field.status = 'UNKNOWN'; field.columnIndex = undefined; field.sourceHeader = undefined; field.candidates = [];
       field.basis = '負責人標示為未知／忽略'; field.overridden = 'ignored';
       continue;
     }
     if (!Number.isInteger(forced) || forced < 0 || forced >= headerCells.length) continue;
+    appliedOverrides.push(field.label);
     field.status = 'KNOWN'; field.columnIndex = forced; field.sourceHeader = text(headerCells[forced]);
     field.candidates = []; field.basis = '負責人指定欄位'; field.overridden = 'column';
   }
 
+  const columnUsers = new Map<number, DetectedField[]>();
+  for (const field of fields) if (field.columnIndex !== undefined) columnUsers.set(field.columnIndex, [...columnUsers.get(field.columnIndex) ?? [], field]);
+  for (const users of columnUsers.values()) if (users.length > 1) for (const field of users) {
+    field.status = 'AMBIGUOUS'; field.basis = '同一欄被多個欄位使用，請核對對應。';
+  }
   const claimed = new Set(fields.map((field) => field.columnIndex).filter((index): index is number => index !== undefined));
   const candidateFor = new Map<number, CanonicalField>();
   for (const field of fields) for (const candidate of field.candidates) candidateFor.set(candidate.columnIndex, field.key);
-  const unmatchedColumns: UnmatchedColumn[] = headerCells
-    .map((cell, index) => ({ columnIndex: index, sourceHeader: text(cell), hasData: !isBlank(cell), candidateFor: candidateFor.get(index) }))
-    .filter((column) => column.sourceHeader !== '' && !claimed.has(column.columnIndex))
-    .map((column) => ({ ...column, hasData: sheet.matrix.slice(evaluation.row + 1, evaluation.row + 1 + VALUE_SAMPLE_LIMIT).some((line) => !isBlank(line?.[column.columnIndex])) }));
+  const headers = Array.from({ length: width }, (_, index) => text(headerCells[index]));
+  const unmatchedColumns: UnmatchedColumn[] = headers
+    .map((sourceHeader, index) => ({ columnIndex: index, sourceHeader, candidateFor: candidateFor.get(index),
+      hasData: sheet.matrix.slice(evaluation.row + 1).some(line => !isBlank(line[index])) }))
+    .filter(column => !claimed.has(column.columnIndex) && (column.sourceHeader !== '' || column.hasData));
 
   // Counted after the person in charge's corrections, and counting ambiguity:
   // a field with several candidate columns is recognised, not absent — it just
@@ -280,7 +289,9 @@ function finalize(profile: FormatProfile, sheet: SheetMatrix, evaluation: RowEva
         message: field.status === 'AMBIGUOUS' ? `關鍵欄位「${field.label}」有多個可能欄位，請在對應表選擇。` : `缺少關鍵欄位「${field.label}」，請在對應表指定或補齊原表。`,
       });
     }
-  } else if (fields.some((field) => field.status === 'CANDIDATE' || field.status === 'AMBIGUOUS')) {
+  } else if (fields.some(field => field.status === 'AMBIGUOUS')) {
+    status = 'AMBIGUOUS';
+  } else if (fields.some((field) => field.status === 'CANDIDATE')) {
     status = 'CANDIDATE';
   } else {
     status = 'KNOWN';
@@ -296,7 +307,7 @@ function finalize(profile: FormatProfile, sheet: SheetMatrix, evaluation: RowEva
   return {
     detectorVersion: DETECTOR_VERSION, profileId: profile.id, profileLabel: profile.label, profileKind: profile.kind,
     profileDescription: profile.description, sheetName: sheet.name, headerRow: evaluation.row, status, score,
-    headers: headerCells.map((cell) => text(cell)), fields, unmatchedColumns, issues, appliedOverrides,
+    headers, fields, unmatchedColumns, issues, appliedOverrides,
   };
 }
 
@@ -314,8 +325,10 @@ export function remapWorkbook(buffer: ArrayBuffer, override: MappingOverride): D
  */
 export function recognitionBlocker(result?: DetectionResult): string | undefined {
   if (!result) return undefined;
+  if (result.profileKind === 'template') return '此推測格式只供預覽，尚未支援匯入。請使用工作台範本。';
   if (result.status === 'UNKNOWN') return '未能識別這份活頁簿的格式，不會依猜測匯入。請整理表頭，或在下方改用其他候選格式並人手對應。';
   if (result.status === 'AMBIGUOUS') return '仍有關鍵欄位未確定對應，請在下方對應表中為每一項選擇欄位，再確認合併。';
+  if (result.fields.some(field => field.status === 'CANDIDATE' || field.status === 'AMBIGUOUS')) return '仍有欄位需要人工確認。請核對原表，整理後重新載入。';
   return undefined;
 }
 

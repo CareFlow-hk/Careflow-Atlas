@@ -3,8 +3,26 @@ import { describe, expect, it } from "vitest";
 import * as XLSX from "xlsx";
 import { parseWorkbook } from "./workbookImport";
 import { demoSnapshot } from './demoFixture';
+import { workflowDemo } from './workflowDemo';
+import { mergeWorkflow } from './workflowMerge';
 
 describe("workbook import", () => {
+  it('retains numeric precision so both demo formats merge without false coordinate conflicts', () => {
+    const bytes = readFileSync('public/demo/careflow-field-outreach-demo.xlsx');
+    const result = parseWorkbook(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+    expect(result.snapshot?.buildings.map(b => b.coordinates)).toEqual(demoSnapshot.buildings.map(b => b.coordinates));
+    expect(mergeWorkflow(workflowDemo, result.snapshot!).snapshot).toEqual(workflowDemo);
+    expect(mergeWorkflow(result.snapshot, workflowDemo).issues).toEqual([]);
+  });
+  it.each(['duplicate', 'extra', 'formula', 'unknown-sheet'])('rejects %s content instead of silently discarding it', kind => {
+    const wb = XLSX.read(readFileSync('public/demo/careflow-field-outreach-demo.xlsx'));
+    const sheet = wb.Sheets.Observations;
+    const width = XLSX.utils.decode_range(sheet['!ref']!).e.c + 1;
+    if (kind === 'duplicate' || kind === 'extra') XLSX.utils.sheet_add_aoa(sheet, [[kind === 'duplicate' ? 'coverage' : ''], ['important value']], { origin: { r: 0, c: width } });
+    if (kind === 'formula') sheet.A2.f = '"replacement"';
+    if (kind === 'unknown-sheet') XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['unhandled'], ['important value']]), 'Unknown');
+    expect(parseWorkbook(XLSX.write(wb, { type: 'array', bookType: 'xlsx' })).snapshot).toBeUndefined();
+  });
   it("parses the generated synthetic workbook in the browser-compatible parser", () => {
     const bytes = readFileSync("public/demo/careflow-field-outreach-demo.xlsx");
     const result = parseWorkbook(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));

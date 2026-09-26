@@ -9,7 +9,7 @@ import { supportCategoryLabels } from '../domain/types';
 import { coverageLabels } from '../domain/presentation';
 import { assessmentLabels, contactLabels, sourceLabels } from '../data/workflowFormat';
 
-export const DETECTOR_VERSION = 'careflow-detector-v1';
+export const DETECTOR_VERSION = 'careflow-detector-v2';
 
 /** Per-field recognition state. Only KNOWN is safe to fill in automatically. */
 export type FieldStatus = 'KNOWN' | 'CANDIDATE' | 'AMBIGUOUS' | 'UNKNOWN';
@@ -91,11 +91,11 @@ export function normalizeHeader(value: unknown): string {
     .replace(/[一-鿿]/gu, (character) => folded[character] ?? character);
 }
 
-const coverageChoices = Object.values(coverageLabels);
-const contactChoices = Object.values(contactLabels);
-const assessmentChoices = Object.values(assessmentLabels);
-const sourceChoices = Object.values(sourceLabels);
-const categoryChoices = Object.values(supportCategoryLabels);
+const coverageChoices = [...Object.keys(coverageLabels), ...Object.values(coverageLabels)];
+const contactChoices = [...Object.keys(contactLabels), ...Object.values(contactLabels)];
+const assessmentChoices = [...Object.keys(assessmentLabels), ...Object.values(assessmentLabels)];
+const sourceChoices = [...Object.keys(sourceLabels), ...Object.values(sourceLabels)];
+const categoryChoices = [...Object.keys(supportCategoryLabels), ...Object.values(supportCategoryLabels)];
 
 const paperExcelFields: FieldSpec[] = [
   { key: 'buildingId', label: '大廈編號', aliases: ['大廈編號', '大厦编号', '建築編號', '建筑编号', '大廈', '大廈ID', 'building id', 'buildingid'], required: true, kind: 'id' },
@@ -159,7 +159,7 @@ const buildingFields: FieldSpec[] = [
 const visitFields: FieldSpec[] = [
   { key: 'occurredAt', label: '到訪日期', aliases: ['到訪日期', '到访日期', '探訪日期', '日期', 'visit date', 'date'], required: true, kind: 'date' },
   { key: 'buildingId', label: '大廈編號', aliases: ['大廈編號', '大厦编号', '大廈', '建築編號', 'building id'], required: true, kind: 'id' },
-  { key: 'worker', label: '工作員', aliases: ['工作員', '工作员', '工作人員', '工作人员', '同事', 'worker', 'staff'], required: true },
+  { key: 'worker', label: '工作員', aliases: ['工作員', '工作员', '工作人員', '工作人员', '同事', 'worker', 'staff'] },
   { key: 'unit', label: '單位', aliases: ['單位', '单位', '室號', 'unit'] },
   { key: 'floor', label: '樓層', aliases: ['樓層', '楼层', 'floor'] },
   { key: 'coverage', label: '覆蓋結果', aliases: ['覆蓋結果', '覆盖结果', '覆蓋', '結果', 'coverage'], kind: 'enum', choices: coverageChoices },

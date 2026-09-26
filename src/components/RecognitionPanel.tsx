@@ -47,11 +47,11 @@ export function RecognitionPanel({ recognition, onRemap }: RecognitionPanelProps
 
     <label className="cf-recognition__profile">
       <span>候選格式</span>
-      <select value={recognition.profileId ?? ''} onChange={(event) => onRemap({ profileId: event.currentTarget.value === AUTOMATIC ? undefined : event.currentTarget.value as DetectionResult['profileId'], columns: {} })}>
+      <select value={recognition.profileId ?? AUTOMATIC} onChange={(event) => onRemap({ profileId: event.currentTarget.value === AUTOMATIC ? undefined : event.currentTarget.value as DetectionResult['profileId'], columns: {} })}>
         <option value={AUTOMATIC}>自動判斷</option>
         {profileOptions().map((profile) => <option key={profile.id} value={profile.id}>{profile.label}</option>)}
       </select>
-      <small>自動判斷出錯時，可在此指定格式，再由下方對應表逐欄修正。</small>
+      <small>此處只供對應預覽。更改後請按預覽整理原檔，再重新載入，才可合併資料。</small>
     </label>
 
     {fields.length > 0 && <div className="cf-mapping" role="table" aria-label="欄位對應表">
@@ -88,7 +88,7 @@ export function RecognitionPanel({ recognition, onRemap }: RecognitionPanelProps
     {warned.length > 0 && <section className="cf-recognition__extra">
       <h4><ScanSearch size={16} />未能對應但有內容的欄位 <span>{warned.length}</span></h4>
       <p>這些欄不會被靜默丟棄；如屬必要資料，請在上方指定對應欄位。</p>
-      <ul>{warned.map((column) => <li key={column.columnIndex}><b>{column.columnIndex + 1}. {column.sourceHeader}</b></li>)}</ul>
+      <ul>{warned.map((column) => <li key={column.columnIndex}><b>{column.columnIndex + 1}. {column.sourceHeader || '（空白表頭）'}</b></li>)}</ul>
     </section>}
 
     {recognition.issues.length > 0 && <ul className="cf-recognition__issues">

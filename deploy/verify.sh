@@ -16,11 +16,13 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT" || exit 1
 
-IMAGE="careflow-verify:tmp"
-CONTAINER="careflow-verify-run"
+RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/careflow-verify-XXXXXXXX")" || exit 1
+RUN_ID="${RUN_DIR##*/}"
+IMAGE="careflow-verify:${RUN_ID}"
+CONTAINER="$RUN_ID"
 PORT="${VERIFY_PORT:-18080}"
 ALT_PORT="${VERIFY_ALT_PORT:-18081}"
-TARBALL="$(mktemp -t careflow-verify-XXXXXX.tar)"
+TARBALL="$RUN_DIR/image.tar"
 PASS=0
 FAIL=0
 declare -a RESULTS
@@ -56,7 +58,8 @@ cleanup() {
   docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
   docker rm -f "${CONTAINER}-alt" >/dev/null 2>&1 || true
   docker rmi -f "$IMAGE" >/dev/null 2>&1 || true
-  rm -f "$TARBALL"
+  docker rmi -f "${IMAGE}-arg" >/dev/null 2>&1 || true
+  rm -rf "$RUN_DIR"
 }
 trap cleanup EXIT
 
@@ -85,11 +88,11 @@ printf '  仓库根: %s\n' "$REPO_ROOT"
 
 # ---------- 1. 构建与镜像 ----------
 section "1. 构建镜像 / docker images"
-if docker build -t "$IMAGE" . >/tmp/careflow-verify-build.log 2>&1; then
+if docker build -t "$IMAGE" . >"$RUN_DIR/build.log" 2>&1; then
   check "docker build 成功" 0
 else
   check "docker build 成功" 1
-  echo "    构建失败，日志尾部："; tail -25 /tmp/careflow-verify-build.log | sed 's/^/    /'
+  echo "    构建失败，日志尾部："; tail -25 "$RUN_DIR/build.log" | sed 's/^/    /'
   printf '\n构建都没过，后面的项目无法继续。\n'; exit 1
 fi
 
@@ -116,10 +119,17 @@ else
   [ -z "$LEAK" ] && check "最终镜像不含源码/依赖目录" 0 || check "最终镜像含不该有的目录：$LEAK" 1
 fi
 
+if docker run --rm "$IMAGE" nginx -t >"$RUN_DIR/nginx.log" 2>&1; then
+  check "nginx -t 配置预检" 0
+else
+  check "nginx -t 配置预检" 1
+  cat "$RUN_DIR/nginx.log"
+fi
+
 # ---------- 2. 启动、状态、日志 ----------
 section "2. 启动容器 / Up 状态 / 日志"
 docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
-if docker run -d --name "$CONTAINER" -p "${PORT}:80" "$IMAGE" >/dev/null 2>&1; then
+if docker run -d --name "$CONTAINER" -p "127.0.0.1:${PORT}:80" "$IMAGE" >/dev/null 2>&1; then
   check "docker run 成功" 0
 else
   check "docker run 成功" 1
@@ -207,7 +217,7 @@ printf '  HEALTHCHECK: %s\n' "$HC"
 # ---------- 4. 换端口 ----------
 section "4. 换端口映射"
 docker rm -f "${CONTAINER}-alt" >/dev/null 2>&1 || true
-if docker run -d --name "${CONTAINER}-alt" -p "${ALT_PORT}:80" "$IMAGE" >/dev/null 2>&1 \
+if docker run -d --name "${CONTAINER}-alt" -p "127.0.0.1:${ALT_PORT}:80" "$IMAGE" >/dev/null 2>&1 \
    && wait_ready "http://127.0.0.1:${ALT_PORT}/"; then
   check "映射到宿主机 ${ALT_PORT} 后仍可访问（容器内仍是 80）" 0
 else
@@ -218,7 +228,7 @@ docker rm -f "${CONTAINER}-alt" >/dev/null 2>&1 || true
 # ---------- 5. 删除重建 ----------
 section "5. 删容器重建后功能一致"
 docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
-docker run -d --name "$CONTAINER" -p "${PORT}:80" "$IMAGE" >/dev/null 2>&1 || true
+docker run -d --name "$CONTAINER" -p "127.0.0.1:${PORT}:80" "$IMAGE" >/dev/null 2>&1 || true
 if wait_ready "http://127.0.0.1:${PORT}/" \
    && [ "$(code_of "http://127.0.0.1:${PORT}/demo/careflow-paper-excel-mock.xlsx")" = "200" ] \
    && printf '%s' "$(curl -s "http://127.0.0.1:${PORT}/")" | grep -q 'id="root"'; then
@@ -267,7 +277,7 @@ else
   check "docker load 重新导入镜像" 1
 fi
 
-if docker run -d --name "$CONTAINER" -p "${PORT}:80" "$IMAGE" >/dev/null 2>&1 \
+if docker run -d --name "$CONTAINER" -p "127.0.0.1:${PORT}:80" "$IMAGE" >/dev/null 2>&1 \
    && wait_ready "http://127.0.0.1:${PORT}/" \
    && [ "$(code_of "http://127.0.0.1:${PORT}/demo/careflow-field-outreach-demo.xlsx")" = "200" ]; then
   check "load 回来的镜像仍能正常跑" 0
@@ -280,7 +290,7 @@ section "8. 环境变量 / 构建参数"
 # VITE_MAP_STYLE_URL 是**构建期**参数：改了必须重建镜像才生效。
 # 这里用仓库里的真实源码重新构建一个带标记的镜像来验证这条链路。
 MARK="https://verify.invalid/style.json"
-if docker build --build-arg "VITE_MAP_STYLE_URL=${MARK}" -t "${IMAGE}-arg" . >/tmp/careflow-verify-arg.log 2>&1; then
+if docker build --build-arg "VITE_MAP_STYLE_URL=${MARK}" -t "${IMAGE}-arg" . >"$RUN_DIR/arg.log" 2>&1; then
   if docker run --rm --entrypoint sh "${IMAGE}-arg" -c "grep -rq 'verify.invalid' /usr/share/nginx/html/assets/" 2>/dev/null; then
     check "构建参数 VITE_MAP_STYLE_URL 确实烘进了产物" 0
   else
@@ -288,7 +298,7 @@ if docker build --build-arg "VITE_MAP_STYLE_URL=${MARK}" -t "${IMAGE}-arg" . >/t
   fi
 else
   check "带 --build-arg 重新构建" 1
-  tail -15 /tmp/careflow-verify-arg.log | sed 's/^/    /'
+  tail -15 "$RUN_DIR/arg.log" | sed 's/^/    /'
 fi
 docker rmi -f "${IMAGE}-arg" >/dev/null 2>&1 || true
 
@@ -321,7 +331,16 @@ else
 fi
 
 # ---------- 10. 人工项 ----------
-manual "浏览器手动点过核心功能（脚本无法代劳，见下面清单）"
+if [ "${VERIFY_BROWSER:-0}" = "1" ]; then
+  if node deploy/verify-browser.mjs "http://127.0.0.1:${PORT}" >"$RUN_DIR/browser.log" 2>&1; then
+    check "容器内静态产物通过浏览器回归" 0
+  else
+    check "容器内静态产物通过浏览器回归" 1
+  fi
+  cat "$RUN_DIR/browser.log"
+else
+  manual "浏览器核心流程：可安装 Playwright 后设置 VERIFY_BROWSER=1 自动验证"
+fi
 
 # ---------- 汇总 ----------
 section "汇总"
@@ -334,7 +353,7 @@ fi
 printf '  %s\n' "$(c_ok '自动项全部通过。')"
 cat <<'EOF'
 
-  仍需你在浏览器里人工确认（脚本替代不了）：
+  浏览器核心流程清单（未设置 VERIFY_BROWSER=1 时需另行验证）：
     1. 页面正常打开，不是白屏，控制台无红色报错；
     2. 「紙本與 Excel」→「檢視 mock 範例」能载入中文工作簿（验证 /demo/ 路由与应用解析）；
     3. 地图有底图（验证访问者浏览器能连 OpenFreeMap）；

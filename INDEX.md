@@ -9,7 +9,7 @@
 - 分支：`feat/w0-candidate-format-recognition`
 - 本质：**纯前端原型**。React + Zustand + SheetJS + MapLibre，数据整份存在浏览器 `localStorage`。
 - 仓库内**没有后端**：无 HTTP API、无数据库、无服务端迁移脚本。`fetch` 只用于取演示工作簿和地图底图。
-- 测试基线：`npm test` → **14 个文件 / 91 个用例通过**；`npm run typecheck` 通过。
+- 测试基线：最新检查和运行边界见 [docs/VALIDATION.md](./docs/VALIDATION.md)。
 - 全部业务数据（人名、地址身份、楼层、外展记录）均为**合成数据**，不得替换为真实住户资料。
 
 图例：**🟢 源文件**（受版本管理，改动对象） · **🔵 生成物**（可再生产，勿手改） · **⚪ 已忽略**（在 `.gitignore` 内）
@@ -59,12 +59,13 @@ Careflow-Atlas/
 | [presentation.ts](./src/domain/presentation.ts) | 覆盖状态的标签与配色映射 |
 | [types.test.ts](./src/domain/types.test.ts) · [schema.test.ts](./src/domain/schema.test.ts) | 对应测试 |
 
-> ⚠️ [CLAUDE.md](./CLAUDE.md) 第 3.4 条：`compareObservationTime` / `latestObservation` 目前按「发生时间 → 录入时间」取最新，**尚未排除被更正的原事件**。改覆盖或摘要时，`getCoverageStatus`、`getCoverageSummary` 及其全部调用点必须一起改。
+> 追加更正已生效：覆盖与摘要只使用有效版本，历史保留原事件。更正分叉会被拒绝；跟进结案按整条更正链识别，修改跟进关系须注明原因。
 
 ### `src/data/` — 数据适配与仓储边界
 
 | 文件 | 职责 |
 | --- | --- |
+| [readWorkbook.ts](./src/data/readWorkbook.ts) | 所有 Excel 读取共用的文件大小和行列上限 |
 | [repository.ts](./src/data/repository.ts) | 数据访问边界；`PersistenceAdapter` 目前是**同步整份快照**接口，底层 `localStorage`。正式 repository 需另建 Promise 接口，不要假装它是同步的 |
 | [workbookImport.ts](./src/data/workbookImport.ts) | 旧英文单工作簿解析与校验 |
 | [workflowWorkbook.ts](./src/data/workflowWorkbook.ts) | 中文六表工作簿的导出与解析 |
@@ -189,7 +190,7 @@ Careflow-Atlas/
 npm ci                 # 安装依赖
 npm run demo:generate  # 重建旧英文演示工作簿
 npm run typecheck      # tsc -b --pretty false
-npm run test           # vitest run → 14 文件 / 91 用例
+npm run test           # vitest run，运行全部回归测试
 npm run lint           # eslint .
 npm run dev            # vite --host 127.0.0.1
 ```

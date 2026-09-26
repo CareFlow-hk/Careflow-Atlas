@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDownToLine, ArrowUpRight, Building2, Check, ChevronRight, CircleHelp, ClipboardList, FileSpreadsheet, Footprints, Map, MapPin, RotateCcw, Search, ShieldCheck, Upload, X } from 'lucide-react';
 import { useWorkspace } from './store';
 import { registerWorkspaceTools } from './webmcp';
+import { createRecordId } from './recordId';
 import { getCoverageSummary, getOpenFollowUps, type OutreachSnapshot } from '../domain/types';
 import { coverageColors, coverageLabels } from '../domain/presentation';
 import type { MapBuilding } from '../map/mapModel';
@@ -36,7 +37,7 @@ export default function App() {
   const [importError, setImportError] = useState<string>();
   const [importLoading, setImportLoading] = useState(false);
   const [editTarget, setEditTarget] = useState<EditTarget>();
-  const [activeVisitId] = useState(() => `visit-${crypto.randomUUID()}`);
+  const [activeVisitId] = useState(() => `visit-${createRecordId()}`);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<'ALL' | 'FOLLOWUP'>('ALL');
   const [toast, setToast] = useState('');
@@ -100,7 +101,12 @@ export default function App() {
     // forced one, so confirming the detected format keeps the column choices.
     importOverride.current = mergeOverride(importOverride.current, change, importReview?.recognition?.profileId);
     const recognition = remapWorkbook(source.buffer, importOverride.current);
-    setImportReview(current => current ? { ...current, recognition } : current);
+    // W0 mapping is a preview only: discard the payload parsed before the change.
+    setPendingSnapshot(undefined);
+    setImportBaseline(undefined);
+    setImportReview(current => current ? { ...current, recognition, canReplace: false, changes: undefined, preview: undefined,
+      issues: [...current.issues.filter(issue => issue.field !== 'mapping-preview'), { field: 'mapping-preview', severity: 'error',
+        message: '欄位對應已更改，目前只更新預覽。請按對應整理原檔，再重新載入；不會合併更改前的資料。' }] } : current);
   };
   const loadFile = async (file: File) => {
     setImportLoading(true); setImportError(undefined); setPendingSnapshot(undefined); setImportReview(undefined);
@@ -130,7 +136,7 @@ export default function App() {
     finally { setImportLoading(false); }
   };
   const confirmImport = () => {
-    if (!pendingSnapshot) return;
+    if (!pendingSnapshot || !importReview?.canReplace) throw new Error('請重新載入並核對匯入資料。');
     // The dialog disables the button too; this is the same rule for the keyboard path.
     const blocked = recognitionBlocker(importReview?.recognition);
     if (blocked) throw new Error(blocked);
@@ -149,7 +155,7 @@ export default function App() {
     setEditTarget(undefined);
     setToast('已追加本次記錄，之前的觀察仍保留在時間線。');
   };
-  const startObservation = (target: Omit<EditTarget, 'eventId' | 'visitId'>) => setEditTarget({ ...target, eventId: crypto.randomUUID(), visitId: activeVisitId });
+  const startObservation = (target: Omit<EditTarget, 'eventId' | 'visitId'>) => setEditTarget({ ...target, eventId: createRecordId(), visitId: activeVisitId });
   const exportExcel = async () => {
     if (!snapshot) return;
     try {

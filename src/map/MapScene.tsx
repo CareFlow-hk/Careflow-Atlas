@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Map as LibreMap, Marker, MercatorCoordinate, NavigationControl, ScaleControl, type ExpressionSpecification, type GeoJSONSource, type MapMouseEvent } from 'maplibre-gl';
+import { Map as LibreMap, Marker, MercatorCoordinate, NavigationControl, ScaleControl, setWorkerUrl, type ExpressionSpecification, type GeoJSONSource, type MapMouseEvent } from 'maplibre-gl';
+import mapWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { Compass, Layers3, Minus, Plus, RotateCcw, RotateCw, Scan, WifiOff } from 'lucide-react';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { FeatureCollection, Polygon } from 'geojson';
@@ -7,6 +8,9 @@ import { buildingFeatures, districtBounds, visibleDistrictLabels, DISTRICT_CAMER
 import { easeInOutCubic, motionDuration, spatialMotion } from '../app/motion';
 import { contextPosition, focusHeight } from './focusContext';
 import './map.css';
+
+// MapLibre 6 ships a separate worker. Let Vite bundle and resolve it in both modes.
+setWorkerUrl(mapWorkerUrl);
 
 // The overview is a readable district model: real footprints, compressed context heights.
 // Focused context keeps its existing camera-relative cutaway and source heights.

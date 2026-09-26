@@ -17,6 +17,16 @@ const newRow = (wb: XLSX.WorkBook, fields: Record<string, unknown> = {}) => {
 };
 
 describe('paper and Excel workflow', () => {
+  it('preserves physical row numbers through blank rows and accepts sorted correction rows', () => {
+    const wb = workbook();
+    const target = 'paper:QA-01:1:bldg-yu-an';
+    newRow(wb, { '紙本行號': '2', '更正原記錄編號': target });
+    XLSX.utils.sheet_add_aoa(wb.Sheets['紙本回錄'], [['']], { origin: -1 });
+    newRow(wb, { '紙本行號': '1' });
+    const result = parse(wb);
+    expect(result.issues).toEqual([]);
+    expect(result.snapshot?.observations.at(-1)?.importSource?.row).toBe(XLSX.utils.decode_range(wb.Sheets['紙本回錄']['!ref']!).e.r + 1);
+  });
   it('round trips all entities, relations, footprints, history and text telephone numbers', () => {
     const snapshot = structuredClone(workflowDemo);
     snapshot.people[0].phone = '0012345678';
