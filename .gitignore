@@ -1,4 +1,4 @@
-node_modules/
+node_modules
 dist/
 .env
 .env.*
@@ -9,3 +9,7 @@ playwright-report/
 .DS_Store
 .private/
 outputs/
+
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm

@@ -1,8 +1,10 @@
+> **2026-09-26 账号系统更新**：现已加入独立账号后端（Node + SQLite）、邀请激活、登录、会话管理、密码修改／恢复、管理员权限与审计。启动必须同时运行账号服务；仅静态部署不再是完整运行方式。参见 [账号系统与 VPS 部署](docs/ACCOUNTS.md)。业务数据仍是按账号隔离的浏览器合成演示，尚无共享业务数据库。下文旧的静态原型说明以此更新为准。
+
 # CareFlow Atlas
 
 > 西營盤社區客廳「洗樓」外展工作台 —— 用合成資料砌出嚟嘅前端原型。
 
-呢個 repo 係一個**示範原型**同前端基礎，**唔係**已經上線嘅 NGO 系統。冇正式後端、冇登入、冇多租戶、冇離線同步、冇審批流程；亦都**唔可以**入任何真實居民資料。
+呢個 repo 係一個**示範原型**同前端基礎，**唔係**已經上線嘅 NGO 系統。已加入独立账号后端与登录；仍无共享业务数据库、多租户、离线同步或审批流程；亦都**唔可以**入任何真實居民資料。
 
 ## 而家做得到啲乜
 
@@ -29,7 +31,7 @@
 ## 唔好當真嘅嘢
 
 - 所有業務記錄、人物、地址、層數、單位間隔**全部係合成**。地圖圖磚同周邊樓宇係真實地理資料，高亮嘅 CareFlow 目標係示意。
-- **未做**：後端、認證、租戶隔離、離線同步、審批、OCR／圖片識別、手機現場記錄、任何自動醫療或法律判斷。
+- **未做**：共享业务数据库、租戶隔離、離線同步、審批、OCR／圖片識別、手機現場記錄、任何自動醫療或法律判斷。
 - **唔會**上傳機構文件去外部 AI 度、亦唔會訓練模型。
 
 ## 本機運行
@@ -46,7 +48,7 @@ npm run build
 npm run dev             # vite --host 127.0.0.1
 ```
 
-開 Vite 印出嚟嘅網址，揀 **紙本與 Excel** → **檢視 mock 範例**，可以先睇中文工作簿再決定合併。想睇 production bundle 就跑 `npm run preview`。
+请先按 [账号开发步骤](docs/ACCOUNTS.md#本机开发) 配置 `.env`、初始化管理员并启动 `npm run auth:dev`。登录后揀 **紙本與 Excel** → **檢視 mock 範例**，可以先睇中文工作簿再決定合併。生产验证请使用 Docker 同源双服务部署。
 
 | 檔案 | 用途 |
 | --- | --- |
@@ -64,20 +66,21 @@ VITE_MAP_STYLE_URL=https://example.org/style.json npm run dev
 
 `VITE_` 開頭嘅嘢會入到瀏覽器 bundle，**唔好**放密碼，見 [.env.example](.env.example)。應用程式碼唔會將業務記錄送去地圖供應商；供應商收到嘅係正常請求地圖資源時附帶嘅網絡資訊。
 
-## 靜態部署
+## VPS 部署
+
+现在必须运行 Nginx 前端和 Node 账号服务。复制 `.env.example` 为 `.env` 并设置实际 HTTPS 域名与空闲端口，然后运行：
 
 ```bash
-npm ci && npm run demo:generate && npm run build
+docker compose up -d --build --wait
+docker compose exec auth node server/manage.mjs bootstrap admin@example.org 管理员
 ```
 
-將 `dist/` 由靜態網站根目錄提供就得，唔需要 runtime server 或者密碼。應用用根相對路徑 `/demo/careflow-field-outreach-demo.xlsx`，擺喺子目錄就要改 base path。
-
-要交去 VPS（對方部機唔使裝 Node）就用容器：`docker compose up -d --build`，預設只開宿主機 `127.0.0.1:8080`（公開演示須設定 `WEB_BIND=0.0.0.0`）。完整步驟、驗證清單同排錯見 [docs/DOCKER.md](docs/DOCKER.md)。容器一樣冇後端、冇登入，資料照樣留喺訪問者自己個瀏覽器。
-
-`.openai/hosting.json` 係 owner-only hosting 用；private 示範**唔等於**有 NGO 認證或者正式資料管控。
+使用命令输出的一次性链接设置密码。完整的 HTTPS 反代、邀请、备份与恢复步骤见 [docs/ACCOUNTS.md](docs/ACCOUNTS.md)。只上传 `dist/` 或使用 `.openai/hosting.json` 的旧静态托管目标无法运行账号系统。
 
 ## 專案結構
 
+- [`server/`](server/) — 账号 API、SQLite、会话、审计及运维脚本
+- [`src/auth/`](src/auth/) — 登录、激活、账号管理界面
 - [`src/domain/`](src/domain/) — 領域記錄同覆蓋摘要（瀏覽器無關）
 - [`src/data/`](src/data/) — 工作簿適配、repository 邊界、本機持久化、合成 fixtures
 - [`src/app/`](src/app/) — Zustand 工作區狀態同應用組裝

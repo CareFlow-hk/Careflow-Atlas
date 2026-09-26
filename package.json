@@ -11,7 +11,10 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "demo:generate": "node --import tsx scripts/generate-demo.ts"
+    "demo:generate": "node --import tsx scripts/generate-demo.ts",
+    "auth:dev": "node --env-file-if-exists=.env server/index.mjs",
+    "auth:manage": "node --env-file-if-exists=.env server/manage.mjs",
+    "test:auth": "node --test server/*.test.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
@@ -39,5 +42,8 @@
     "typescript-eslint": "8.42.0",
     "vite": "^6.3.6",
     "vitest": "4.1.11"
+  },
+  "engines": {
+    "node": ">=24.15.0"
   }
 }

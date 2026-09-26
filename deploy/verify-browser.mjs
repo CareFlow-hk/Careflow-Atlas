@@ -8,9 +8,17 @@ import assert from 'node:assert/strict';
 import { fileURLToPath, URL } from 'node:url';
 
 const base = (process.argv[2] || 'http://127.0.0.1:8080').replace(/\/$/, '');
-const key = 'careflow-field-outreach.snapshot';
+let key;
+const email = process.env.AUTH_TEST_EMAIL, password = process.env.AUTH_TEST_PASSWORD;
+if (!email || !password) throw new Error('Set AUTH_TEST_EMAIL and AUTH_TEST_PASSWORD for an isolated test account.');
+async function authenticate(context) {
+  const response = await context.request.post(`${base}/api/login`, { headers: { origin: base }, data: { email, password } });
+  assert.equal(response.status(), 200);
+  const session = await response.json();
+  key = `careflow-atlas.account.${session.user.id}.demo`;
+}
 let chromium;
-try { ({ chromium } = await import('playwright')); }
+try { ({ chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')); }
 catch { console.error('Install optional Playwright and Chromium first; see docs/DOCKER.md.'); process.exit(2); }
 const browser = await chromium.launch({ channel: 'chromium', args: ['--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader'] });
 const results = [];
@@ -41,6 +49,7 @@ const merge = async () => {
 };
 try {
   await check('page mounts', async () => {
+    await authenticate(context);
     assert.equal((await page.goto(base))?.status(), 200);
     await page.locator('.brand strong').waitFor();
   });
@@ -144,6 +153,7 @@ try {
   await page.screenshot({ path: '/tmp/careflow-atlas-browser-review.png', fullPage: true });
   await check('HTTP-compatible startup without crypto.randomUUID', async () => {
     const http = await browser.newContext();
+    await authenticate(http);
     await http.addInitScript(() => Object.defineProperty(globalThis.crypto, 'randomUUID', { value: undefined }));
     const httpPage = await http.newPage();
     await httpPage.goto(base);
@@ -152,6 +162,7 @@ try {
   });
   await check('map network failure still permits list, forms and persistence', async () => {
     const offline = await browser.newContext();
+    await authenticate(offline);
     await offline.route('https://tiles.openfreemap.org/**', route => route.abort());
     const fallback = await offline.newPage();
     await fallback.goto(base);

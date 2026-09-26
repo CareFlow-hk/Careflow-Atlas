@@ -1,28 +1,29 @@
-# CareFlow Atlas —— VPS 部署入口。
-#
-#   docker compose up -d --build      启动（首次会构建镜像）
-#   docker compose logs -f web        看日志
-#   docker compose down               停止并移除容器
-#
-# 默认仅宿主机可访问 http://127.0.0.1:8080；公开合成演示时显式设置 WEB_BIND=0.0.0.0
-# 完整说明、验证清单与排错见 docs/DOCKER.md。
-#
-# 这个服务只提供静态构建产物：没有后端、没有数据库、没有登录。
-# 业务数据存在访问者浏览器的 localStorage 里，不在容器内，因此不需要数据卷。
-
+# Account service + static demo workspace. Use docs/ACCOUNTS.md for initialization.
 services:
   web:
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        # 构建期烘进浏览器 bundle 的底图样式地址。
-        # 留空则用代码内默认值 https://tiles.openfreemap.org/styles/positron
         VITE_MAP_STYLE_URL: ${VITE_MAP_STYLE_URL:-}
-    # 与 package.json 的 version 保持一致，方便「镜像版本 ↔ 代码版本」对账
-    image: careflow-atlas:0.1.0
+    image: ${ATLAS_WEB_IMAGE:-careflow-atlas:accounts}
     ports:
-      # 宿主机端口可用 WEB_PORT 覆盖，例如：WEB_PORT=80 docker compose up -d
-      # 默认 8080 是为了不占用宿主机 80（VPS 上 80/443 通常已给反代或其他站点）
-      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8080}:80"
+      - "127.0.0.1:${WEB_PORT:-8080}:80"
+    depends_on:
+      auth:
+        condition: service_healthy
     restart: unless-stopped
+  auth:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    image: ${ATLAS_AUTH_IMAGE:-careflow-atlas-auth:accounts}
+    environment:
+      APP_ORIGIN: ${APP_ORIGIN:?Set APP_ORIGIN to your HTTPS origin or explicit localhost test origin}
+      ALLOW_INSECURE_LOCALHOST: ${ALLOW_INSECURE_LOCALHOST:-false}
+      TRUST_PROXY: "true"
+    volumes:
+      - accounts:/app/data
+    restart: unless-stopped
+volumes:
+  accounts:

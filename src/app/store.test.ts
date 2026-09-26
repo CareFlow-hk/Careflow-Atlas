@@ -43,3 +43,21 @@ describe('Excel merge persistence', () => {
     } finally { vi.unstubAllGlobals(); }
   });
 });
+
+describe('account demo cache isolation', () => {
+  it('clears in-memory data on logout and does not adopt another account or legacy cache', async () => {
+    const { setWorkspaceAccount } = await import('./store');
+    const values = new Map<string, string>([['careflow-field-outreach.snapshot', JSON.stringify(demoSnapshot)]]);
+    vi.stubGlobal('localStorage', { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value) });
+    try {
+      setWorkspaceAccount('account-a'); useWorkspace.getState().initialize();
+      expect(useWorkspace.getState().snapshot).toBeUndefined();
+      useWorkspace.getState().importSnapshot(demoSnapshot);
+      setWorkspaceAccount(); expect(useWorkspace.getState().snapshot).toBeUndefined();
+      setWorkspaceAccount('account-b'); useWorkspace.getState().initialize();
+      expect(useWorkspace.getState().snapshot).toBeUndefined();
+      setWorkspaceAccount('account-a'); useWorkspace.getState().initialize();
+      expect(useWorkspace.getState().snapshot?.buildings.length).toBe(demoSnapshot.buildings.length);
+    } finally { setWorkspaceAccount(); vi.unstubAllGlobals(); }
+  });
+});

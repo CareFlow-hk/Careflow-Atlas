@@ -1,6 +1,29 @@
+# Account system validation — 2026-09-26
+
+Implemented on top of local repair commit `f40d7c6` on `codex/downstream-audit`. The attempted push to `lhjlol/Careflow-Atlas` was rejected with HTTP 403 for OscarXuHz; no further remote push was attempted.
+
+| Check | Current result |
+| --- | --- |
+| TypeScript / ESLint / Git whitespace / shell syntax | Passed |
+| Existing domain/import/store regressions plus account cache isolation | 18 files, 114 passed |
+| Account HTTP/database integration tests | 16 passed |
+| Nginx production browser account flows | 14 passed |
+| Existing workbench production browser regression | 15 passed, 0 failed, 0 unverified |
+| Docker account stack | Build, health, proxy, unauthenticated rejection, repeated-bootstrap rejection, service restart, consistent backup and integrity check passed |
+
+The account browser suite verifies activation from an already-open login page, login, reload persistence, invitations, member authorization, per-account demo cache isolation, cross-tab logout, disable/recheck without reload, password recovery/change, idle polling stopping without activity and mobile settings. Backend tests additionally exercise CSRF/Origin, session expiry, persisted throttling, last-admin protection, hashing races, concurrent one-time-link redemption, schema downgrade refusal and backup restore.
+
+Runtime: host Node 25.6.1; Docker Node 24.15.0 + Nginx on local Apple Silicon; isolated Playwright Chromium contexts. No live accounts or production databases were used. Test resources were cleaned by the isolated verification script.
+
+Evidence is delivered beside the repository under `../evidence/accounts-*.log` and `../evidence/account-settings-mobile.png`. Reproduction and setup: [ACCOUNTS.md](ACCOUNTS.md).
+
+Limits: no VPS, DNS/TLS or amd64 verification; no MFA, SSO, SMTP/email-ownership verification, or shared business database. Account recovery uses administrator-issued one-time links or a VPS operator CLI. Business data remains synthetic browser-local state, not a production data service. Account backup/restore was verified locally; offsite disaster recovery needs a deployment-specific drill.
+
+---
+
 # Validation and handover
 
-## Current audit — 2026-09-26
+## Previous import/deployment audit — 2026-09-26
 
 Base: `lhjlol/Careflow-Atlas` at `f0a56ebbb36e896d755aa6317018d82f1c54b385`. Changes and evidence: [AUDIT_2026-09-26.md](AUDIT_2026-09-26.md).
 

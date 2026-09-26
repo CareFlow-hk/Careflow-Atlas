@@ -3,7 +3,15 @@ import type { OutreachSnapshot, SaveObservationInput } from '../domain/types';
 import { LocalStoragePersistenceAdapter, OutreachRepository } from '../data/repository';
 import { mergeWorkflow } from '../data/workflowMerge';
 
-const repository = new OutreachRepository(new LocalStoragePersistenceAdapter());
+let repository = new OutreachRepository(new LocalStoragePersistenceAdapter());
+let accountId: string | undefined;
+/** Demo caches only. Never adopt the pre-authentication shared cache. */
+export function setWorkspaceAccount(id?: string) {
+  if (id === accountId) return;
+  accountId = id;
+  repository = new OutreachRepository(new LocalStoragePersistenceAdapter(), id ? `careflow-atlas.account.${id}.demo` : 'careflow-atlas.signed-out');
+  useWorkspace.setState({ snapshot: undefined, storageError: undefined, selectedBuildingId: undefined, selectedFloorId: undefined, selectedUnitId: undefined, expanded: false });
+}
 interface WorkspaceState {
   snapshot?: OutreachSnapshot;
   storageError?: string;

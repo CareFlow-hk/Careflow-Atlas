@@ -33,3 +33,5 @@ outputs
 
 # 注意：src/、scripts/、public/、deploy/、package*.json、index.html、
 # vite.config.ts、tsconfig.json 必须保持可读，否则构建会失败。
+
+server/*.test.mjs

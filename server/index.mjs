@@ -1,0 +1,10 @@
+import { openAuth } from './auth.mjs';
+import { createAuthServer } from './http.mjs';
+import { config } from './config.mjs';
+process.umask(0o077);
+const settings = config();
+const auth = openAuth(settings.path);
+const server = createAuthServer(auth, settings);
+const cleanup = setInterval(() => auth.clean(), 60_000); cleanup.unref();
+server.listen(settings.port, settings.host, () => process.stdout.write(`Account service listening on ${settings.host}:${settings.port}\n`));
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => server.close(() => { clearInterval(cleanup); auth.close(); process.exit(0); }));

@@ -1,3 +1,5 @@
+> 2026-09-26: Authentication is implemented in `server/` and `src/auth/`: standalone accounts, SQLite, cookie sessions, administrator authorization and audit. The business repository remains a synthetic local demo scoped by account. Historical claims of absent authentication below no longer apply. Shared business persistence remains unimplemented. See [ACCOUNTS.md](ACCOUNTS.md).
+
 # Architecture
 
 ## System shape
