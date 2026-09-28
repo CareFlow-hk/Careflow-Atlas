@@ -5,9 +5,7 @@
  * reason rather than guessed at. This module has no browser or DOM dependency
  * so it can be moved into a server directory unchanged.
  */
-import { supportCategoryLabels } from '../domain/types';
-import { coverageLabels } from '../domain/presentation';
-import { assessmentLabels, contactLabels, sourceLabels } from '../data/workflowFormat';
+import { recognitionAssessmentValues, recognitionCategoryValues, recognitionContactValues, recognitionCoverageValues, recognitionSourceValues } from '../domain/presentation';
 
 export const DETECTOR_VERSION = 'careflow-detector-v2';
 
@@ -91,11 +89,12 @@ export function normalizeHeader(value: unknown): string {
     .replace(/[一-鿿]/gu, (character) => folded[character] ?? character);
 }
 
-const coverageChoices = [...Object.keys(coverageLabels), ...Object.values(coverageLabels)];
-const contactChoices = [...Object.keys(contactLabels), ...Object.values(contactLabels)];
-const assessmentChoices = [...Object.keys(assessmentLabels), ...Object.values(assessmentLabels)];
-const sourceChoices = [...Object.keys(sourceLabels), ...Object.values(sourceLabels)];
-const categoryChoices = [...Object.keys(supportCategoryLabels), ...Object.values(supportCategoryLabels)];
+// Recognition only: every wording ever written, so a simplified form never makes an old sheet unreadable.
+const coverageChoices = recognitionCoverageValues;
+const contactChoices = recognitionContactValues;
+const assessmentChoices = recognitionAssessmentValues;
+const sourceChoices = recognitionSourceValues;
+const categoryChoices = recognitionCategoryValues;
 
 const paperExcelFields: FieldSpec[] = [
   { key: 'buildingId', label: '大廈編號', aliases: ['大廈編號', '大厦编号', '建築編號', '建筑编号', '大廈', '大廈ID', 'building id', 'buildingid'], required: true, kind: 'id' },

@@ -65,6 +65,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .building-status { flex-wrap: wrap; gap: 6px; }
 .status-pill { color: #526f5e; font-size: 13px; }
 .revisit-count { color: #8a5a12; font-size: 12px; gap: 4px; }
+/* A building with open tasks carries the same yellow mark the floor strip uses. */
+.building-card.has-followup:not(.selected) { box-shadow: inset 3px 0 #d1b27b; }
+.building-card.has-followup .revisit-count { gap: 4px; padding: 2px 8px; border: 1px solid #e0c187; border-radius: 999px; background: #fdf1d8; font-weight: 600; }
 .building-progress { height: 4px; background: #e0e9e2; margin-top: 12px; }
 .building-progress > span { background: #4f8970; transition: width 600ms var(--ease-out); }
 .building-card-meta { flex-wrap: wrap; gap: 5px; font-variant-numeric: tabular-nums; }
@@ -175,6 +178,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 /* Native dialogs retain focus handling; discrete transitions cover open/close. */
 .cf-dialog {
   border: 1px solid #d6e1db; border-radius: 16px; opacity: 0; transform: translateY(10px) scale(.985);
+  /* The entry form is long; it scrolls inside the dialog rather than running off screen. */
+  overflow: auto; overscroll-behavior: contain;
   transition: opacity 220ms ease-out, transform 300ms var(--ease-out), overlay 300ms allow-discrete, display 300ms allow-discrete;
 }
 .cf-dialog[open] { opacity: 1; transform: translateY(0) scale(1); }

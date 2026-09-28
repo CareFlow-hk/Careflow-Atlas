@@ -1,10 +1,30 @@
-import { effectiveObservations, getCoverageSummary, getOpenFollowUps, supportCategoryLabels, type OutreachSnapshot, type Observation } from '../domain/types';
-import { coverageLabels } from '../domain/presentation';
+import { effectiveObservations, getCoverageSummary, getOpenFollowUps, type OutreachSnapshot, type Observation } from '../domain/types';
+import { exportAssessmentLabels, exportContactLabels, exportCoverageLabels, exportSourceLabels, supportCategoryLabels } from '../domain/presentation';
 
 export const WORKFLOW_VERSION = 'careflow-paper-excel-v1';
-export const contactLabels = { NOT_ATTEMPTED: '未嘗試接觸', NO_ANSWER: '無人應門', DECLINED: '住戶婉拒', CONTACTED: '已接觸', UNKNOWN: '未能確定' };
-export const assessmentLabels = { NOT_UPDATED: '今次未更新', UNKNOWN: '未能確定', SUSPECTED: '疑似，待核實', NO_INDICATION: '未見相關跡象', STAFF_VERIFIED: '工作人員已確認' };
-export const sourceLabels = { STAFF_OBSERVATION: '工作人員觀察', RESIDENT_REPORT: '居民口述', UNKNOWN: '來源未明' };
+/*
+ * The workbook is a round-trip format: a changed spelling would be read back as a
+ * different value. So the sheets keep the paper wording from presentation.ts rather
+ * than the on-screen wording, and this file never redefines a label of its own.
+ *
+ * One column stays outside that rule on purpose. A follow-up with no category shows
+ * as an unclassified badge in the product, but the 待跟進 sheet still prints 一般跟進
+ * in its 跟進類別 cell: that sheet is compared byte for byte against hand-maintained
+ * layout templates (`public/demo/careflow-paper-excel-mock.xlsx` and its archived
+ * copy), which have no generator and must not be rewritten by a script. Do not
+ * "fix" this to match the badge without also rebuilding both templates by hand.
+ *
+ * The dropdowns are a second deliberate difference. The entry form offers three
+ * choices per field (COLOR_PIPELINE_DESIGN §10), but the 紙本回錄 sheet keeps all seven
+ * coverage wordings: it mirrors the printed form, it is the transcription surface for
+ * paper that was already filled in by hand, and the pipeline still tells a partial
+ * visit from a failed one. Shrinking the list would put our own exported cells outside
+ * their own dropdown. The form is what was simplified, not the record.
+ */
+export const coverageLabels = exportCoverageLabels;
+export const contactLabels = exportContactLabels;
+export const assessmentLabels = exportAssessmentLabels;
+export const sourceLabels = exportSourceLabels;
 export const membershipLabels = { UNKNOWN: '未核實', PENDING: '待處理', ACTIVE: '有效', INACTIVE: '非有效' };
 export type Cell = string | number | boolean | null;
 export interface WorkflowSheet { name: string; note: string; headers: string[]; rows: Cell[][]; widths: number[]; editable?: string[]; choices?: Record<string, string[]>; dates?: string[]; }

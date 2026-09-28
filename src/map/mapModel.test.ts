@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { buildingFeatures, districtBounds, visibleDistrictLabels, floorFeatures, footprintOf, FLOOR_HEIGHT, type MapBuilding } from './mapModel';
+import { stateLabels } from '../domain/presentation';
+import { buildingFeatures, districtBounds, visibleDistrictLabels, floorFeatures, footprintOf, markerLabel, FLOOR_HEIGHT, type MapBuilding } from './mapModel';
 
 const building: MapBuilding = {
-  id: 'test', name: 'Synthetic', longitude: 114.1418, latitude: 22.2863, color: '#aaa', status: 'unknown',
-  floors: Array.from({ length: 8 }, (_, index) => ({ id: `f${index + 1}`, label: `${index + 1}F`, level: index + 1, hasFollowUp: index === 4, recorded: 0, total: 4 })),
+  id: 'test', name: 'Synthetic', longitude: 114.1418, latitude: 22.2863, state: 'YELLOW', followUps: 1,
+  floors: Array.from({ length: 8 }, (_, index) => ({ id: `f${index + 1}`, label: `${index + 1}F`, level: index + 1, state: index === 4 ? 'YELLOW' as const : 'GRAY' as const, hasFollowUp: index === 4, recorded: 0, total: 4 })),
 };
 describe('spatial adapter', () => {
   it('keeps an exploded building anchored to the same geographical footprint', () => {
@@ -37,6 +38,24 @@ describe('spatial adapter', () => {
     expect(padded[2][0]).toBeGreaterThan(114.142);
     expect(padded[2][1]).toBeGreaterThan(22.282);
   });
+  /*
+   * The reported defect (COLOR_PIPELINE_DESIGN §9) was a colour change moving building
+   * height. It does not reproduce at this revision: height comes from the floor count
+   * and the separation curve, colour from the pipeline, and nothing bridges them. The
+   * test locks that apart so a future "tint the taller ones" change cannot reintroduce it.
+   */
+  it('never lets a colour change move any geometry', () => {
+    const geometryOf = (scene: MapBuilding) => JSON.stringify({
+      floors: floorFeatures(scene, .6).features.map(f => [f.properties!.base, f.properties!.height]),
+      shells: buildingFeatures([scene]).features.map(f => f.properties!.height),
+    });
+    const palette = ['GREEN', 'YELLOW', 'RED', 'GRAY'] as const;
+    const heights = palette.map(state => geometryOf({ ...building, state, floors: building.floors.map(floor => ({ ...floor, state })) }));
+    expect(new Set(heights).size).toBe(1);
+    // And the colour really does follow the state, so the check above is not vacuous.
+    const colours = palette.map(state => floorFeatures({ ...building, floors: building.floors.map(floor => ({ ...floor, state })) }, .6).features[0].properties!.color);
+    expect(new Set(colours).size).toBe(palette.length);
+  });
   it('never intersects slabs across the full supported floor count, including interrupted transitions', () => {
     const tall = { ...building, floors: Array.from({ length: 100 }, (_, index) => ({ ...building.floors[0], id: `tall-${index}`, level: index + 1 })) };
     for (const progress of [0, .02, .1, .16, .3, .75, .4, .05, 0, 1]) {
@@ -67,5 +86,37 @@ describe('district overview', () => {
       { id: 'header', x: 160, y: 100, width: 100 },
     ];
     expect([...visibleDistrictLabels(labels, 600, 540)]).toEqual(['first', 'next']);
+  });
+});
+
+/*
+ * The overview map is where a district is read at a glance, so a building with open
+ * tasks has to name them beside its own name — the way a floor strip names its revisit.
+ */
+describe('a building marker names its own task', () => {
+  const withTasks = (followUps: number): MapBuilding => ({ ...building, followUps });
+
+  it('shows the tag only when a task is open, and names the state either way', () => {
+    expect(markerLabel(withTasks(0), false).task).toBeUndefined();
+    expect(markerLabel(withTasks(2), false).task).toBe('待跟進');
+    // The state is on the marker whether or not there is a task. Quoted from
+    // presentation.ts, not retyped: the marker must not invent its own wording.
+    for (const count of [0, 2]) expect(markerLabel(withTasks(count), false).title).toContain(stateLabels[building.state]);
+  });
+
+  it('counts the tasks in what a screen reader and a tooltip read out', () => {
+    expect(markerLabel(withTasks(2), false).title).toBe(`Synthetic · ${stateLabels[building.state]} · 2 項待跟進`);
+    expect(markerLabel(withTasks(2), true).ariaLabel).toBe(`正在查看Synthetic · ${stateLabels[building.state]} · 2 項待跟進`);
+  });
+
+  it('marks the element so the stylesheet can draw the tag', () => {
+    expect(markerLabel(withTasks(1), false).className).toBe('building-map-marker has-followup');
+    expect(markerLabel(withTasks(0), false).className).toBe('building-map-marker');
+    expect(markerLabel(withTasks(0), true).className).toBe('building-map-marker is-selected');
+  });
+
+  it('declares the extra width, so the tag is not laid out under a neighbouring name', () => {
+    const without = markerLabel(withTasks(0), false).labelWidth;
+    expect(markerLabel(withTasks(1), false).labelWidth).toBe(without + 60);
   });
 });

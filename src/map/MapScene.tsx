@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Map as LibreMap, Marker, MercatorCoordinate, NavigationControl, ScaleControl, setWorkerUrl, type ExpressionSpecification, type GeoJSONSource, type MapMouseEvent } from 'maplibre-gl';
 import mapWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { Compass, Layers3, Minus, Plus, RotateCcw, RotateCw, Scan, WifiOff } from 'lucide-react';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { FeatureCollection, Polygon } from 'geojson';
-import { buildingFeatures, districtBounds, visibleDistrictLabels, DISTRICT_CAMERA, floorFeatures, floorBase, footprintOf, FLOOR_HEIGHT, type MapBuilding } from './mapModel';
+import { buildingFeatures, districtBounds, visibleDistrictLabels, DISTRICT_CAMERA, floorFeatures, floorBase, footprintOf, markerLabel, FLOOR_HEIGHT, type MapBuilding } from './mapModel';
 import { easeInOutCubic, motionDuration, spatialMotion } from '../app/motion';
 import { contextPosition, focusHeight } from './focusContext';
+import { mapSceneColors, stateColors, stateLabels, stateLegendNotes } from '../domain/presentation';
+import { OUTREACH_STATES } from '../domain/types';
 import './map.css';
 
 // MapLibre 6 ships a separate worker. Let Vite bundle and resolve it in both modes.
@@ -99,7 +101,7 @@ export default function MapScene(props: MapSceneProps) {
         map.addSource('outreach-buildings', { type: 'geojson', data: buildingFeatures(current.current.buildings) });
         map.addSource('focused-city', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
         map.addLayer({ id: 'focused-city', source: 'focused-city', type: 'fill-extrusion', paint: {
-          'fill-extrusion-color': '#d5d8cf', 'fill-extrusion-height': overviewContextHeight,
+          'fill-extrusion-color': mapSceneColors.contextBuilding, 'fill-extrusion-height': overviewContextHeight,
           'fill-extrusion-base': overviewContextBase, 'fill-extrusion-opacity': .72,
         } }, firstLabel);
         map.addLayer({ id: 'outreach-footprints', source: 'outreach-buildings', type: 'fill', paint: {
@@ -116,7 +118,7 @@ export default function MapScene(props: MapSceneProps) {
           'fill-extrusion-color': ['get', 'color'], 'fill-extrusion-height': ['get', 'height'], 'fill-extrusion-opacity': 1,
         } });
         map.addLayer({ id: 'outreach-selection-outline', source: 'outreach-selected', type: 'line', paint: {
-          'line-color': '#195f4e', 'line-width': 2, 'line-opacity': .8,
+          'line-color': mapSceneColors.selectionOutline, 'line-width': 2, 'line-opacity': .8,
         } });
         map.addSource('outreach-floors', { type: 'geojson', data: floorFeatures(undefined, 0) });
         map.addLayer({ id: 'outreach-floors', source: 'outreach-floors', type: 'fill-extrusion', paint: {
@@ -149,7 +151,7 @@ export default function MapScene(props: MapSceneProps) {
             });
           },
         });
-        map.setLight({ anchor: 'viewport', color: '#ffffff', intensity: 0.48, position: [1.5, 195, 35] });
+        map.setLight({ anchor: 'viewport', color: mapSceneColors.light, intensity: 0.48, position: [1.5, 195, 35] });
         setReady(true);
       });
       const onClick = (e: MapMouseEvent) => {
@@ -174,7 +176,7 @@ export default function MapScene(props: MapSceneProps) {
         const selected = p.buildings.find(b => b.id === p.selectedBuildingId);
         const floor = selected?.floors.find(f => f.id === hit.properties.id);
         const building = p.buildings.find(b => b.id === hit.properties.id);
-        setHover({ x: e.point.x, y: e.point.y, title: floor ? `${selected?.name} · ${floor.label}` : building?.name ?? '', subtitle: floor ? `${floor.recorded}/${floor.total} 個單位有記錄${floor.hasFollowUp ? ' · 有待跟進' : ''}` : building?.status ?? '' });
+        setHover({ x: e.point.x, y: e.point.y, title: floor ? `${selected?.name} · ${floor.label}` : building?.name ?? '', subtitle: floor ? `${stateLabels[floor.state]} · ${floor.recorded}/${floor.total} 個單位有記錄${floor.hasFollowUp ? ' · 有待跟進' : ''}` : building ? stateLabels[building.state] : '' });
       });
       map.on('mouseout', () => setHover(undefined));
       map.on('pitchend', () => setIs3D(map.getPitch() > 10));
@@ -206,16 +208,29 @@ export default function MapScene(props: MapSceneProps) {
     (map.getSource('outreach-selected') as GeoJSONSource).setData(buildingFeatures(active ? [active] : []));
     map.setLayoutProperty('outreach-selected', 'visibility', active?.floors.length ? 'none' : 'visible');
     markers.current.forEach(m => m.remove());
-    markers.current = props.buildings.filter(b => b.id !== props.selectedBuildingId).map(building => {
+    /*
+     * In focus mode the stylesheet hides every marker, this one included: the building's
+     * name and task tag would otherwise sit over the floor stack that focusing is meant
+     * to show. The building's own state and count stay readable in the detail panel.
+     */
+    markers.current = props.buildings.map(building => {
+      // The wording and the class names come from `markerLabel`, so what a marker says
+      // can be asserted without a browser; only the assembly happens here.
+      const label = markerLabel(building, building.id === props.selectedBuildingId);
       const button = document.createElement('button');
-      button.className = 'building-map-marker';
-      button.setAttribute('aria-label', `在地圖選擇${building.name} · ${building.status}`);
-      button.title = `${building.name} · ${building.status}`;
+      button.className = label.className;
+      button.setAttribute('aria-label', label.ariaLabel);
+      button.title = label.title;
       button.dataset.buildingId = building.id;
-      button.dataset.labelWidth = String(Math.max(100, building.name.length * 14 + 38));
-      const dot = document.createElement('span'); dot.style.background = building.color;
+      button.dataset.labelWidth = String(label.labelWidth);
+      const dot = document.createElement('span'); dot.style.background = stateColors[building.state];
       const name = document.createElement('strong'); name.textContent = building.name;
       button.append(dot, name);
+      if (label.task) {
+        const task = document.createElement('em'); task.className = 'building-map-marker__task';
+        task.textContent = label.task;
+        button.append(task);
+      }
       button.addEventListener('click', e => { e.stopPropagation(); current.current.onSelectBuilding(building.id); });
       return new Marker({ element: button, anchor: 'bottom', offset: [0, -6] }).setLngLat([building.longitude, building.latitude]).addTo(map);
     });
@@ -333,7 +348,8 @@ export default function MapScene(props: MapSceneProps) {
     <div ref={container} className="map-canvas" data-testid="map-canvas" />
     <div className="floor-map-labels" aria-hidden={!props.expanded || !is3D}>{active?.floors.map(floor => <button key={floor.id} ref={element => { if (element) floorLabelElements.current.set(floor.id, element); else floorLabelElements.current.delete(floor.id); }}
       className={`floor-map-label ${floor.hasFollowUp ? 'needs-followup' : ''} ${props.selectedFloorId === floor.id ? 'selected' : ''}`}
-      aria-label={`在立體地圖選擇 ${floor.label}${floor.hasFollowUp ? ' 待跟進' : ''}`} tabIndex={props.expanded && is3D ? 0 : -1}
+      style={{ '--cf-state': stateColors[floor.state] } as CSSProperties}
+      aria-label={`在立體地圖選擇 ${floor.label} · ${stateLabels[floor.state]}${floor.hasFollowUp ? ' 待跟進' : ''}`} tabIndex={props.expanded && is3D ? 0 : -1}
       onClick={() => props.onSelectFloor(floor.id)}><strong>{floor.label}</strong>{floor.hasFollowUp && <span>待跟進</span>}</button>)}</div>
     {!ready && !failed && <div className="map-loading"><span className="loading-orbit" />正在載入西營盤地圖</div>}
     {failed && <div className="map-failure" role="status"><WifiOff size={22} /><strong>底圖暫時無法顯示</strong><span>你仍可從大廈清單查看樓層、記錄結果。</span></div>}
@@ -357,7 +373,8 @@ export default function MapScene(props: MapSceneProps) {
     </div>}
     {hover && <div className="map-hover" style={{ left: hover.x, top: hover.y }}><strong>{hover.title}</strong><span>{hover.subtitle}</span></div>}
     {notice && <button className="map-notice" onClick={() => setNotice('')} role="status">{notice}<span>×</span></button>}
-    <div className="map-legend"><span><i className="legend-swatch teal" />有外展記錄</span><span><i className="legend-swatch amber" />待跟進</span><span><i className="legend-swatch gray" />尚待了解</span></div>
+    {/* Yellow is not "待跟進": a task shows as a badge, and a yellow without one means the levels disagree. */}
+    <div className="map-legend">{OUTREACH_STATES.map(state => <span key={state} title={stateLegendNotes[state]}><i className="legend-swatch" style={{ background: stateColors[state] }} />{stateLabels[state]}<small>{stateLegendNotes[state]}</small></span>)}</div>
     <div className="geometry-note">{active ? '聚焦視圖 · 前景遮擋已壓低' : '背景高度已壓縮 · 業務地點及樓層為合成示意'}</div>
   </div>;
 }

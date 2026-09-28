@@ -1,5 +1,5 @@
 import { useWorkspace } from './store';
-import { getCoverageSummary } from '../domain/types';
+import { buildingState, getCoverageSummary } from '../domain/types';
 
 interface ModelTool {
   name: string; description: string; inputSchema: object;
@@ -24,7 +24,9 @@ export function registerWorkspaceTools() {
     execute: () => {
       const state = useWorkspace.getState();
       return { synthetic: true, selectedBuildingId: state.selectedBuildingId, selectedFloorId: state.selectedFloorId, selectedUnitId: state.selectedUnitId,
-        buildings: state.snapshot?.buildings.map(b => ({ id: b.id, name: b.name, ...getCoverageSummary(state.snapshot!, b.id) })) ?? [] };
+        // `state` is what the product shows; the summary counts and its older seven-value
+        // status stay for the workbook and the W0 vocabulary that depend on them.
+        buildings: state.snapshot?.buildings.map(b => ({ id: b.id, name: b.name, state: buildingState(state.snapshot!, b.id), ...getCoverageSummary(state.snapshot!, b.id) })) ?? [] };
     },
   });
   register({

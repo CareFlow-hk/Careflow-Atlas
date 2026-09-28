@@ -3,6 +3,8 @@ dist/
 .env
 .env.*
 !.env.example
+# 邮件导出的 .eml 里常带明文密钥/口令，绝不能进公开仓库
+*.eml
 *.tsbuildinfo
 test-results/
 playwright-report/

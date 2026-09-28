@@ -5,8 +5,9 @@ import { workflowDemo } from './workflowDemo';
 import { demoSnapshot } from './demoFixture';
 import { exportWorkflowWorkbook, parseWorkflowWorkbook } from './workflowWorkbook';
 import { mergeWorkflow } from './workflowMerge';
-import { excelDate, paperHeaders } from './workflowFormat';
+import { excelDate, paperHeaders, workflowSheets as workflowSheetsOf } from './workflowFormat';
 import { getCoverageStatus, getOpenFollowUps, type OutreachSnapshot } from '../domain/types';
+import { acceptedAssessment, acceptedCoverage, assessmentOptions, coverageOptionGroups } from '../domain/presentation';
 
 const now = '2026-09-11T04:00:00Z';
 const workbook = (snapshot = workflowDemo) => XLSX.read(exportWorkflowWorkbook(snapshot), { type: 'array' });
@@ -163,5 +164,41 @@ describe('paper and Excel workflow', () => {
     expect(mergeWorkflow(workflowDemo, demoSnapshot).snapshot).toEqual(workflowDemo);
     const altered: OutreachSnapshot = structuredClone(demoSnapshot); altered.observations[0].note = 'conflict';
     expect(mergeWorkflow(workflowDemo, altered).snapshot).toBeUndefined();
+  });
+});
+
+describe('the sheet stays consistent with the simplified form', () => {
+  it('offers every wording its own rows can contain', () => {
+    const sheet = workflowSheetsOf(workflowDemo).find(entry => entry.name === '紙本回錄')!;
+    const choices = sheet.choices!;
+    // A dropdown that omitted a value our own export writes would mark those cells invalid.
+    const columns: [string, string[]][] = [
+      ['覆蓋結果', [...new Set(sheet.rows.map(row => String(row[paperHeaders.indexOf('覆蓋結果')])).filter(Boolean))]],
+      ['接觸結果', [...new Set(sheet.rows.map(row => String(row[paperHeaders.indexOf('接觸結果')])).filter(Boolean))]],
+      ['住房判斷', [...new Set(sheet.rows.map(row => String(row[paperHeaders.indexOf('住房判斷')])).filter(Boolean))]],
+      ['資料來源', [...new Set(sheet.rows.map(row => String(row[paperHeaders.indexOf('資料來源')])).filter(Boolean))]],
+    ];
+    for (const [header, written] of columns) for (const value of written) expect(choices[header]).toContain(value);
+  });
+
+  it('keeps every word the simplified entry form no longer offers importable', () => {
+    // Read out of the tables the importer itself reads, so this check cannot drift
+    // from them, and never retype a label the simplified form has retired.
+    const retired = (accepted: Record<string, string>, offered: Set<string>) =>
+      Object.keys(accepted).filter(word => !offered.has(accepted[word]));
+    const coverage = retired(acceptedCoverage, new Set(coverageOptionGroups.map(option => option.canonical)));
+    const assessment = retired(acceptedAssessment, new Set(assessmentOptions.map(option => option.value)));
+    expect(coverage.length).toBeGreaterThan(0);
+    expect(assessment.length).toBeGreaterThan(0);
+
+    for (const [header, words] of [['覆蓋結果', coverage], ['住房判斷', assessment]] as const) {
+      for (const wording of words) {
+        const wb = workbook();
+        newRow(wb, { [header]: wording });
+        const result = parse(wb);
+        expect({ header, wording, issues: result.issues.filter(issue => issue.severity === 'error') }).toEqual({ header, wording, issues: [] });
+        expect(result.snapshot!.observations.at(-1)).toBeDefined();
+      }
+    }
   });
 });

@@ -18,7 +18,7 @@
 .building-focus-bar>div{display:flex;flex-direction:column;gap:6px}.building-focus-bar strong{font-size:17px}.building-focus-bar strong small{font-size:12px;font-weight:400;color:var(--muted);margin-left:10px}.building-focus-bar .eyebrow{font-size:11px}.building-focus-bar .primary-button{padding:11px 14px;font-size:13px}
 .map-hover{position:absolute;z-index:3;transform:translate(-50%,calc(-100% - 18px));background:#183a30eb;backdrop-filter:blur(12px);padding:11px 15px;border-radius:9px;color:white;pointer-events:none;display:flex;flex-direction:column;gap:6px;white-space:nowrap;box-shadow:0 4px 14px #12332626}.map-hover strong{font-size:13px}.map-hover span{font-size:12px;color:#d3e3dc}
 .map-legend{position:absolute;bottom:38px;left:24px;display:flex;gap:15px;align-items:center;padding:10px 14px;border-radius:9px;background:#ffffffed;font-size:11px;color:#5b6d65;box-shadow:0 2px 16px #2340310a}
-.map-legend>span{display:flex;gap:6px;align-items:center}.legend-swatch{display:inline-block;width:8px;height:8px;border-radius:2px}.teal{background:#78a899}.amber{background:#d4a35e}.gray{background:#c8d5d0}
+.map-legend>span{display:flex;gap:6px;align-items:center}.legend-swatch{display:inline-block;width:8px;height:8px;border-radius:2px}.teal{background:#78a899}.amber{background:var(--cf-state,#b9c2bd)}.gray{background:#c8d5d0}
 .geometry-note{position:absolute;right:15px;bottom:42px;background:#ffffffdb;padding:5px 7px;border-radius:4px;color:#718078;font-size:10px;pointer-events:none}
 .map-notice{position:absolute;left:50%;bottom:170px;transform:translateX(-50%);background:white;border:1px solid var(--line);box-shadow:0 6px 20px #29433214;padding:14px;border-radius:10px;font:inherit;font-size:13px;display:flex;gap:14px;max-width:90%;width:max-content;cursor:pointer;color:var(--ink)}
 .maplibregl-ctrl-attrib{font-size:10px!important;background:#ffffffcf!important}.maplibregl-ctrl-scale{font:10px var(--font)!important;border-color:#6d7c74!important;background:#ffffffab!important}.maplibregl-ctrl-bottom-left .maplibregl-ctrl{margin:0 0 8px 24px!important}
@@ -62,6 +62,11 @@
 
 .map-scene .map-location { transition: opacity 240ms ease-out; }
 .map-scene.is-focused .map-location { opacity: 0; }
+/*
+ * Opening a building clears the map for its floors: every marker goes, the selected one
+ * included, so its name and task tag stop competing with the stack and the floor labels
+ * that are the point of focusing. The building's own state is still named in the panel.
+ */
 .map-scene.is-focused .building-map-marker { visibility: hidden; }
 
 .map-scene .rotation-tool { border-top: 1px solid #cbdad0; }
@@ -83,3 +88,14 @@
 .map-scene .district-map-summary>span { font-size:12px; color:#365b49; letter-spacing:.03em; }
 .map-scene .district-map-summary small { font-size:11px; letter-spacing:0; margin-top:5px; color:#627a6b; }
 @media(max-width:760px) { .map-scene .district-map-summary { display:none; } }
+.map-legend span{flex-direction:column;align-items:flex-start;gap:1px}.map-legend small{font-size:10px;opacity:.72;font-weight:400}
+/*
+ * A building with open tasks names them beside its own name, the way a floor strip names
+ * its revisit. Same amber as the floor label's, so the two read as one signal.
+ */
+.map-scene .building-map-marker__task { font-style:normal; font-size:10px; font-weight:600; letter-spacing:.04em; white-space:nowrap; padding:2px 6px; border-radius:999px; color:#956a24; background:#fff8e9; border:1px solid #e5c485; }
+.map-scene .building-map-marker.is-selected .building-map-marker__task { color:#fff6e8; background:#9c6a20; border-color:#9c6a20; }
+/* A collapsed marker is a dot with no room for text; the tag comes back with the name. */
+.map-scene .building-map-marker.is-compact .building-map-marker__task { display:none; }
+.map-scene .building-map-marker.is-compact:hover .building-map-marker__task,
+.map-scene .building-map-marker.is-compact:focus-visible .building-map-marker__task { display:inline-block; }

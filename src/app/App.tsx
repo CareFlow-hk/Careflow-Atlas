@@ -3,9 +3,9 @@ import { ArrowDownToLine, ArrowUpRight, Building2, Check, ChevronRight, CircleHe
 import { useWorkspace } from './store';
 import { registerWorkspaceTools } from './webmcp';
 import { createRecordId } from './recordId';
-import { getCoverageSummary, getOpenFollowUps, type OutreachSnapshot } from '../domain/types';
-import { coverageColors, coverageLabels } from '../domain/presentation';
+import { buildingState, floorState, getCoverageSummary, getOpenFollowUps, type OutreachSnapshot } from '../domain/types';
 import type { MapBuilding } from '../map/mapModel';
+import { BuildingCard } from '../components/BuildingCard';
 import { BuildingDetail } from '../components/BuildingDetail';
 import { ObservationEditor, type ObservationDraft } from '../components/ObservationEditor';
 import { ImportDialog, type ImportReview } from '../components/ImportDialog';
@@ -61,13 +61,15 @@ export default function App() {
   useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(''), 5500); return () => clearTimeout(timer); }, [toast]);
 
   const mapBuildings = useMemo<MapBuilding[]>(() => snapshot?.buildings.map(building => {
-    const summary = getCoverageSummary(snapshot, building.id);
     return {
       id: building.id, name: building.name, longitude: building.coordinates.lng, latitude: building.coordinates.lat,
-      footprint: building.footprint, status: coverageLabels[summary.status], color: summary.followUps ? '#d4a35e' : coverageColors[summary.status],
+      footprint: building.footprint, state: buildingState(snapshot, building.id), followUps: getCoverageSummary(snapshot, building.id).followUps,
       floors: snapshot.floors.filter(f => f.buildingId === building.id).sort((a, b) => a.level - b.level).map(floor => {
         const scoped = getCoverageSummary(snapshot, building.id, floor.id);
-        return { id: floor.id, label: floor.label, level: floor.level, hasFollowUp: scoped.followUps > 0, recorded: scoped.recorded, total: scoped.total ?? 0 };
+        return {
+          id: floor.id, label: floor.label, level: floor.level, state: floorState(snapshot, building.id, floor.id),
+          hasFollowUp: scoped.followUps > 0, recorded: scoped.recorded, total: scoped.total ?? 0,
+        };
       }),
     };
   }) ?? [], [snapshot]);
@@ -150,7 +152,7 @@ export default function App() {
       buildingId: editTarget.buildingId, floorId: editTarget.floorId, unitId: editTarget.unitId,
       occurredAt: draft.occurredAt, recordedAt: new Date().toISOString(), workerName: '示範工作員',
       coverage: draft.coverage, assessment: draft.assessment, contactOutcome: draft.contactOutcome,
-      sourceType: draft.sourceType, note: draft.note, evidence: draft.evidence, followUp: draft.followUp, resolvesObservationId: draft.resolvesObservationId,
+      sourceType: draft.sourceType, optionNotes: draft.optionNotes, note: draft.note, evidence: draft.evidence, followUp: draft.followUp, resolvesObservationId: draft.resolvesObservationId,
     });
     setEditTarget(undefined);
     setToast('已追加本次記錄，之前的觀察仍保留在時間線。');
@@ -190,14 +192,9 @@ export default function App() {
           <div className="list-heading"><span>{filter === 'FOLLOWUP' ? '需要繼續跟進' : '街區大廈'}</span><span>{buildings.length} 幢</span></div>
           <div className="building-list">{buildings.map((building, index) => {
             const summary = getCoverageSummary(snapshot, building.id);
+            const state = buildingState(snapshot, building.id);
             const selected = selectedBuildingId === building.id;
-            return <button key={building.id} className={`building-card ${selected ? 'selected' : ''}`} onClick={() => workspace.selectBuilding(building.id)} aria-pressed={selected}>
-              <div className="building-card-top"><span className="building-index">{String(index + 1).padStart(2, '0')}</span><strong>{building.name}</strong><ArrowUpRight size={16} /></div>
-              <div className="building-address">{building.address}</div>
-              <div className="building-status"><span className={`status-pill status-${summary.status.toLowerCase()}`}><i style={{ background: coverageColors[summary.status] }} />{coverageLabels[summary.status]}</span>{summary.followUps > 0 && <span className="revisit-count"><RotateCcw size={12} />{summary.followUps} 待跟進</span>}</div>
-              <div className="building-progress"><span style={{ width: `${summary.total ? Math.min(100, summary.completed / summary.total * 100) : 0}%` }} /></div>
-              <div className="building-card-meta"><span>{summary.total ? `${summary.completed} / ${summary.total} 個單位已查看` : '單位範圍待確認'}</span><span>{building.floorCount ? `${building.floorCount} 層 · 示意` : '樓層未知'}</span></div>
-            </button>;
+            return <BuildingCard key={building.id} name={building.name} address={building.address} floorCount={building.floorCount} index={index} state={state} summary={summary} selected={selected} onSelect={() => workspace.selectBuilding(building.id)} />;
           })}{!buildings.length && <div className="list-empty"><Search size={24} /><p>{query ? '找不到相符的大廈' : '暫無待跟進大廈'}</p><button onClick={() => { setQuery(''); setFilter('ALL'); }}>查看所有大廈</button></div>}</div>
           <div className="sidebar-context"><ShieldCheck size={17} /><p>「沒有記錄」不等於「沒有發現」。<br /><span>查看上次結果，再決定下一步。</span></p></div>
         </> : <div className="start-import"><span className="import-file-icon"><FileSpreadsheet size={30} strokeWidth={1.4} /></span><h2>從現有記錄開始</h2><p>把大廈和個人資料帶到同一張地圖，接續每一次外展。</p><button className="primary-button" onClick={openImport}><Upload size={16} />匯入示範 Excel<ChevronRight size={16} /></button><span className="import-hint">內附合成資料 · 欄位待機構確認</span><div className="import-steps"><span><b>01</b>檢視資料</span><span><b>02</b>探索樓層</span><span><b>03</b>記錄到訪</span></div></div>}
@@ -209,7 +206,7 @@ export default function App() {
         <div className="spatial-content"><Suspense fallback={<div className="map-loading">正在準備地圖…</div>}><MapScene buildings={mapBuildings} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} expanded={expanded} onSelectBuilding={workspace.selectBuilding} onSelectFloor={workspace.selectFloor} onToggleExpanded={workspace.toggleExpanded} onOverview={() => workspace.selectBuilding()} /></Suspense></div>
         {!selectedBuildingId && snapshot && !listMode && <div className="map-prompt"><span><Building2 size={19} /></span><div><strong>從一幢大廈開始</strong><p>選擇地圖標記，讓每一層的記錄展開。</p></div><ChevronRight size={18} /></div>}
       </section>
-      {snapshot && selectedBuildingId && <BuildingDetail snapshot={snapshot} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} selectedUnitId={selectedUnitId} onBack={() => workspace.selectBuilding()} onSelectFloor={workspace.selectFloor} onSelectUnit={workspace.selectUnit} onStartObservation={startObservation} />}
+      {snapshot && selectedBuildingId && <BuildingDetail snapshot={snapshot} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} selectedUnitId={selectedUnitId} onBack={() => workspace.selectBuilding()} onSelectFloor={workspace.selectFloor} onSelectUnit={workspace.selectUnit} onToggleTag={workspace.setTag} onStartObservation={startObservation} />}
       {listMode && !selectedBuildingId && <div className="list-instruction"><ClipboardList size={30} /><h2>大廈與樓層清單</h2><p>從大廈清單選擇地點，即可查看及新增到訪記錄。</p><button className="primary-button" onClick={() => snapshot?.buildings[0] && workspace.selectBuilding(snapshot.buildings[0].id)}>查看第一幢大廈<ChevronRight size={17} /></button></div>}
     </main>
     <footer className="app-statusbar"><span><i />{snapshot ? '示範資料儲存於本機瀏覽器' : '準備匯入合成資料'}</span><span>欄位、住戶及樓層均為示範 · 非真實機構記錄</span><span>FIELD NOTES, CONNECTED.</span></footer>
@@ -218,6 +215,6 @@ export default function App() {
     {helpOpen && <div ref={helpRef} id="demo-help" className="help-popover" role="region" aria-label="示範說明"><strong>這是一個外展流程示範</strong><p>所有業務記錄、住戶及樓層結構均為合成。地圖底圖由 OpenFreeMap / OpenStreetMap 提供。</p><ol><li>匯入附帶的 Excel 並檢視欄位提示。</li><li>選擇大廈，展開樓層並找出待跟進單位。</li><li>追加結果，查看歷史和覆蓋狀態的變化。</li></ol><p>只在這個瀏覽器儲存，尚未提供跨裝置同步。</p><button onClick={() => setHelpOpen(false)}>知道了</button></div>}
     <ImportDialog notice={toast.startsWith('Excel 已準備') ? toast : undefined} open={importOpen} review={importReview} loading={importLoading} error={importError} onClose={() => setImportOpen(false)} onFile={loadFile} onLoadSample={loadSample} onLoadDistrict={loadDistrict} onDownloadDistrict={() => download('/demo/careflow-district-demo.xlsx', 'CareFlow_街區擴展_mock.xlsx')} onDownloadSample={() => download('/demo/careflow-paper-excel-mock.xlsx', 'CareFlow_紙本回錄_mock範本.xlsx')} onExport={snapshot ? () => void exportExcel() : undefined} onBackup={snapshot ? exportData : undefined} onPrint={snapshot?.buildings.length ? () => { setImportOpen(false); setPaperOpen(true); } : undefined} onRetry={openImport} onRemap={remapImport} onConfirmReplace={confirmImport} />
     {paperOpen && snapshot && <PaperForm snapshot={snapshot} buildingId={selectedBuildingId} onClose={() => setPaperOpen(false)} />}
-    {editTarget && <ObservationEditor open openFollowUps={snapshot ? getOpenFollowUps(snapshot).filter(task => task.buildingId === editTarget.buildingId && task.floorId === editTarget.floorId && task.unitId === editTarget.unitId) : []} targetLabel={editTarget.label} subjectId={editTarget.unitId ?? editTarget.buildingId} subjectType={editTarget.unitId ? 'UNIT' : 'BUILDING'} onClose={() => setEditTarget(undefined)} onSubmit={saveObservation} />}
+    {editTarget && <ObservationEditor open openFollowUps={snapshot ? getOpenFollowUps(snapshot).filter(task => task.buildingId === editTarget.buildingId && task.floorId === editTarget.floorId && task.unitId === editTarget.unitId) : []} targetLabel={editTarget.label} subjectId={editTarget.unitId ?? editTarget.buildingId} subjectType={editTarget.unitId ? 'UNIT' : 'BUILDING'} optionPrefs={workspace.optionPrefs} onOptionPrefsChange={workspace.setOptionPrefs} onClose={() => setEditTarget(undefined)} onSubmit={saveObservation} />}
   </div>;
 }

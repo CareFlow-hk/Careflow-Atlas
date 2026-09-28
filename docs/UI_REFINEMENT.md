@@ -12,6 +12,8 @@ Preserve the spatial field-work interface; strengthen its hierarchy and interact
 
 The selected floor is teal unless it has follow-up work; amber continues to mean follow-up/uncertainty. Completed follow-up events no longer retain an active amber treatment. Date-only follow-up deadlines show dates without fabricated times; observation time comes from the observation itself. Search has a functional clear button; Escape clears search and dismisses help; active controls expose pressed state.
 
+> **Superseded 2026-09-28 by [COLOR_PIPELINE_DESIGN.md](../COLOR_PIPELINE_DESIGN.md).** Two sentences above no longer describe the code. Colour is now the four-state model (GREEN / YELLOW / RED / GRAY) and nothing else: a follow-up never repaints a node, so "amber means follow-up" is wrong — amber means a task is outstanding **or** the levels below disagree, and the task itself carries a category badge. Selection deepens a state's own hue instead of switching to teal. This section is kept as the record of the earlier refinement, not as current guidance.
+
 The timeline scrolls between a fixed building header and a contextual record action. On phones, the action stays at the bottom while the document scrolls. Camera framing adjusts when crossing the mobile breakpoint. Adjacent map markers are hidden during building focus so they do not obscure the selected stack.
 
 Floor gaps accumulate from the base upward. Each slab therefore carries the gaps below it; geometry and labels share the same elevation function. A regression test checks non-intersection through the supported 100-floor count and interrupted/reversing progress values.

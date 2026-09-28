@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CONTACT_OUTCOMES, COVERAGE_STATUSES, FOLLOW_UP_STATUSES, HOUSING_ASSESSMENTS, SUPPORT_CATEGORIES, supersededObservationIds, getCorrectionConflicts, observationRootIds, type OutreachSnapshot } from './types';
+import { CONTACT_OUTCOMES, COVERAGE_STATUSES, FOLLOW_UP_STATUSES, HOUSING_ASSESSMENTS, NODE_TAGS, SUPPORT_CATEGORIES, supersededObservationIds, getCorrectionConflicts, observationRootIds, type OutreachSnapshot } from './types';
 
 const id = z.string().trim().min(1).max(200);
 const text = z.string().max(6000);
@@ -16,6 +16,8 @@ export const observationSchema = z.object({
   occurredAt: occurrenceSchema, recordedAt: instantSchema, workerName: id, coverage: z.enum(COVERAGE_STATUSES),
   assessment: z.enum(HOUSING_ASSESSMENTS).optional(), contactOutcome: z.enum(CONTACT_OUTCOMES).optional(),
   sourceType: z.enum(['STAFF_OBSERVATION', 'RESIDENT_REPORT', 'UNKNOWN']).optional(), evidence: z.array(text).max(100), note: text.optional(),
+  // A self-defined wording kept beside the stored enum; the pipeline never reads it.
+  optionNotes: z.object({ coverage: text.optional(), contactOutcome: text.optional(), assessment: text.optional(), sourceType: text.optional(), followUpCategory: text.optional() }).optional(),
   followUp: z.object({ action: id, dueDate: date.optional(), status: z.enum(FOLLOW_UP_STATUSES), category: z.enum(SUPPORT_CATEGORIES).optional(), assignee: id.optional(), timingNote: text.optional() }).optional(), resolvesObservationId: id.optional(),
   paperRef: id.optional(), paperLine: id.optional(), importSource: z.object({ file: id, sheet: id, row: z.number().int().positive() }).optional(),
   correctsObservationId: id.optional(), correctionReason: text.optional(),
@@ -24,8 +26,8 @@ export const observationSchema = z.object({
 /** Validate every entity at the replaceable storage/data boundary. */
 export const snapshotSchema = z.object({
   schemaVersion: z.literal('0.1-demo'), isSynthetic: z.literal(true), notice: text,
-  buildings: z.array(z.object({ ...base, name: id, address: id, coordinates: z.object({ lng: z.number().min(-180).max(180), lat: z.number().min(-85).max(85) }), floorCount: z.number().int().min(1).max(100).optional(), footprint: z.array(z.array(z.number()).length(2)).min(4).max(512).optional(), layoutDeclared: z.boolean(), initialCoverage: z.enum(COVERAGE_STATUSES).optional() })),
-  floors: z.array(z.object({ ...base, buildingId: id, level: z.number().int().min(-10).max(100), label: id })),
+  buildings: z.array(z.object({ ...base, name: id, address: id, coordinates: z.object({ lng: z.number().min(-180).max(180), lat: z.number().min(-85).max(85) }), floorCount: z.number().int().min(1).max(100).optional(), footprint: z.array(z.array(z.number()).length(2)).min(4).max(512).optional(), layoutDeclared: z.boolean(), initialCoverage: z.enum(COVERAGE_STATUSES).optional(), tag: z.enum(NODE_TAGS).optional() })),
+  floors: z.array(z.object({ ...base, buildingId: id, level: z.number().int().min(-10).max(100), label: id, tag: z.enum(NODE_TAGS).optional() })),
   units: z.array(z.object({ ...base, buildingId: id, floorId: id, label: id, initialCoverage: z.enum(COVERAGE_STATUSES).optional() })),
   households: z.array(z.object({ ...base, label: text.optional() })), people: z.array(z.object({ ...base, displayName: id, phone: z.string().max(80).optional(), addressNote: text.optional(), contactNote: text.optional() })),
   householdMemberships: z.array(z.object({ ...base, householdId: id, personId: id, relationship: text.optional() })),

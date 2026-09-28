@@ -1,6 +1,7 @@
 import { Printer, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { getOpenFollowUps, type OutreachSnapshot } from '../domain/types';
+import { exportContactLabels, exportCoverageLabels } from '../domain/presentation';
 import './paper.css';
 
 export function PaperForm({ snapshot, buildingId, onClose }: { snapshot: OutreachSnapshot; buildingId?: string; onClose: () => void }) {
@@ -16,7 +17,9 @@ export function PaperForm({ snapshot, buildingId, onClose }: { snapshot: Outreac
       <div className="paper-fields"><span>到訪日期：________________</span><span>工作員：________________</span><span>外出編號：________________</span><span>紙本編號：________________</span></div>
       <p className="paper-scope">本次範圍：________________ 入口情況：________________ 時間（未知可留空）：________</p>
       <table><thead><tr>{['行號', '樓層／單位', '接觸／覆蓋', '觀察／居民原話', '跟進行動／負責人／時間原話'].map(h => <th key={h}>{h}</th>)}</tr></thead><tbody>{Array.from({ length: 10 }, (_, i) => <tr key={i}><td>{i + 1}</td><td /><td /><td /><td /></tr>)}</tbody></table>
-      <p className="paper-key">接觸：未嘗試／無人應門／婉拒／已接觸／未明。覆蓋：未知／未訪／嘗試／部分／已查看無發現／已查看有線索／未能進入。</p>
+      {/* The printed key uses the paper/Excel wording, the same the workbook writes, so the
+          sheet and the form are read with one vocabulary. */}
+      <p className="paper-key">接觸：{Object.values(exportContactLabels).join('／')}。覆蓋：{Object.values(exportCoverageLabels).join('／')}。</p>
       <section><h2>出發前參考</h2>{tasks.length ? <ul>{tasks.slice(0, 3).map(t => <li key={t.observationId}>{snapshot.units.find(u => u.id === t.unitId)?.label ?? '大廈層面'}：{t.action}</li>)}</ul> : <p>暫無已記錄的待跟進事項。</p>}{tasks.length > 3 && <p>另有 {tasks.length - 3} 項，請參閱工作台或 Excel 待跟進頁。</p>}</section>
       <footer>未知不等於無發現。居民原話與工作員判斷分開記；「明年二月」「翌日」先保留原話。<br />回中心後將本表各行新增至 Excel「紙本回錄」，保留紙本編號與行號。此為暫擬表，非機構原表。</footer>
     </article>

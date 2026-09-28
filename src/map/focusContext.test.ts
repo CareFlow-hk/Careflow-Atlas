@@ -24,7 +24,7 @@ describe('camera-relative foreground cutaway', () => {
     expect(evaluate(0, 0, -180, 12, 1)).toBe(1);
   });
   it('expresses footprint bounds in metres relative to the selected location', () => {
-    const focus: MapBuilding = { id: 'focus', name: 'Demo', longitude: 114.14, latitude: 22.28, color: '#ccc', status: 'unknown', floors: [] };
+    const focus: MapBuilding = { id: 'focus', name: 'Demo', longitude: 114.14, latitude: 22.28, state: 'GRAY', floors: [], followUps: 0 };
     const position = contextPosition(footprintOf(focus), focus);
     expect(position.east).toBeCloseTo(0);
     expect(position.north).toBeCloseTo(0);

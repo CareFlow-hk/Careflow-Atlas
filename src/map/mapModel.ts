@@ -1,17 +1,53 @@
 import type { FeatureCollection, Polygon } from 'geojson';
+import { stateColors, stateLabels, stateSelectedColors } from '../domain/presentation';
+import type { State } from '../domain/types';
 
-/** Only spatial geometry and display summaries cross into the map. No people or notes. */
+/**
+ * Only spatial geometry and display summaries cross into the map. No people or notes.
+ * `state` is the whole colour decision: the map never derives a colour of its own, and
+ * `recorded`/`total`/`hasFollowUp` are facts for the tooltip and the badge, not inputs
+ * to the fill. A floor with an open task is YELLOW because the pipeline says so.
+ */
 export interface MapFloor {
-  id: string; label: string; level: number; hasFollowUp: boolean; recorded: number; total: number;
+  id: string; label: string; level: number; state: State; hasFollowUp: boolean; recorded: number; total: number;
 }
 export interface MapBuilding {
   id: string; name: string; longitude: number; latitude: number;
-  footprint?: number[][]; floors: MapFloor[]; status: string; color: string;
+  footprint?: number[][]; floors: MapFloor[]; state: State;
+  /** Open tasks anywhere in the building. Names the task on the marker; never picks the colour. */
+  followUps: number;
 }
 
 export const DISTRICT_CAMERA = { center: [114.14175, 22.2865] as [number, number], zoom: 16.5, pitch: 48, bearing: -24 };
 export const FLOOR_HEIGHT = 3.2;
 export const FLOOR_GAP = 3.5;
+
+/** Everything a marker says about one building, as data rather than as DOM. */
+export interface MarkerLabel {
+  className: string; ariaLabel: string; title: string; labelWidth: number;
+  /** Present only when the building has open tasks; the text shown beside its name. */
+  task?: string;
+}
+
+/**
+ * A building marker names its state and, when there is one, its outstanding task — the
+ * same way a floor strip names its revisit. The colour and the task are separate facts:
+ * the dot says how the visit went, the tag says whether anything is left to do, and a
+ * green building with a task on it therefore shows both.
+ */
+export function markerLabel(building: MapBuilding, selected: boolean): MarkerLabel {
+  const task = building.followUps > 0 ? '待跟進' : undefined;
+  const state = stateLabels[building.state];
+  const lead = selected ? `正在查看${building.name}` : `在地圖選擇${building.name}`;
+  return {
+    className: `building-map-marker${selected ? ' is-selected' : ''}${task ? ' has-followup' : ''}`,
+    ariaLabel: `${lead} · ${state}${task ? ` · ${building.followUps} 項待跟進` : ''}`,
+    title: `${building.name} · ${state}${task ? ` · ${building.followUps} 項待跟進` : ''}`,
+    // The declared width feeds label collision, so the tag has to be counted in it.
+    labelWidth: Math.max(100, building.name.length * 14 + 38 + (task ? 60 : 0)),
+    task,
+  };
+}
 
 /** Bound the stagger for any declared floor count, and share it with label projection. */
 export function floorSeparation(progress: number, index: number, count: number): number {
@@ -53,7 +89,7 @@ export function floorFeatures(building: MapBuilding | undefined, separation: num
         geometry: { type: 'Polygon', coordinates: [footprintOf(building)] },
         properties: {
           id: floor.id, label: floor.label, base, height: base + FLOOR_HEIGHT - 0.35,
-          color: selectedFloorId === floor.id ? floor.hasFollowUp ? '#e0a33e' : '#41836d' : floor.hasFollowUp ? '#d4a35e' : floor.recorded > 0 ? '#78a899' : '#c8d5d0',
+          color: (selectedFloorId === floor.id ? stateSelectedColors : stateColors)[floor.state],
           selected: selectedFloorId === floor.id,
         },
       };
@@ -63,7 +99,7 @@ export function floorFeatures(building: MapBuilding | undefined, separation: num
 
 export function buildingFeatures(buildings: MapBuilding[], selectedId?: string): FeatureCollection<Polygon> {
   return { type: 'FeatureCollection', features: buildings.filter(b => b.id !== selectedId).map(b => ({
-    type: 'Feature', id: b.id, properties: { id: b.id, color: b.color, height: Math.max(8, b.floors.length * FLOOR_HEIGHT) },
+    type: 'Feature', id: b.id, properties: { id: b.id, color: stateColors[b.state], height: Math.max(8, b.floors.length * FLOOR_HEIGHT) },
     geometry: { type: 'Polygon', coordinates: [footprintOf(b)] },
   })) };
 }

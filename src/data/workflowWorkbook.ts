@@ -5,7 +5,8 @@ import { type Observation, type OutreachSnapshot } from '../domain/types';
 import { coverageLabels } from '../domain/presentation';
 import { alignDemoSnapshot } from './demoGeometry';
 import { WORKFLOW_VERSION, hkParts, assessmentLabels, buildingHeaders, contactLabels, observationRow, optionalPaperHeaders, paperHeaders, personHeaders, sourceLabels, workflowSheets } from './workflowFormat';
-import { getCorrectionConflicts, supportCategoryLabels } from '../domain/types';
+import { getCorrectionConflicts } from '../domain/types';
+import { acceptedAssessment, acceptedContact, acceptedCoverage, acceptedSource, supportCategoryLabels } from '../domain/presentation';
 import type { WorkbookImportIssue } from './workbookImport';
 
 export interface WorkflowImport { snapshot?: OutreachSnapshot; baseline?: OutreachSnapshot; issues: WorkbookImportIssue[]; counts: Record<string, number>; }
@@ -67,9 +68,12 @@ export function parseWorkflowWorkbook(buffer: ArrayBuffer, file: string, now = n
   const referenceSheets = workflowSheets(baseline);
   const str = (value: unknown) => value == null ? '' : String(value);
   const optional = (value: unknown) => str(value).trim() || undefined;
-  const enumValue = <T extends string>(value: unknown, labels: Record<T, string>, sheet: string, row: number, field: string): T | undefined => {
-    if (!optional(value)) return undefined;
-    const key = (Object.keys(labels) as T[]).find(k => labels[k] === value || k === value);
+  // `accepted` carries every wording this product has ever written for the field, so a
+  // sheet filled in before the options were simplified still imports as the same value.
+  const enumValue = <T extends string>(value: unknown, labels: Record<T, string>, sheet: string, row: number, field: string, accepted: Record<string, T> = {}): T | undefined => {
+    const raw = optional(value);
+    if (!raw) return undefined;
+    const key = (Object.keys(labels) as T[]).find(k => labels[k] === raw || k === raw) ?? accepted[raw as string];
     if (!key) add(sheet, row, field, `請選擇：${Object.values(labels).join('、')}`);
     return key;
   };
@@ -128,7 +132,7 @@ export function parseWorkflowWorkbook(buffer: ArrayBuffer, file: string, now = n
     const floors = incoming.floors.filter(f => f.buildingId === buildingId && (f.id === floorLabel || f.label === floorLabel));
     const units = incoming.units.filter(u => u.buildingId === buildingId && (u.id === unitLabel || u.label === unitLabel) && (!floorLabel || u.floorId === floors[0]?.id));
     if ((floorLabel && floors.length !== 1) || (unitLabel && units.length !== 1)) { add(sheet, row, '樓層／單位', '位置未能唯一對應。請用已有樓層及完整單位標籤；未知位置可留空並保留在原話欄。'); continue; }
-    const coverage = enumValue(v['覆蓋結果'], coverageLabels, sheet, row, '覆蓋結果');
+    const coverage = enumValue(v['覆蓋結果'], coverageLabels, sheet, row, '覆蓋結果', acceptedCoverage);
     if (!coverage) add(sheet, row, '覆蓋結果', '請明確選擇；資料不足可選「暫無可靠記錄」，不能以空白代表無發現。');
     const action = optional(v['跟進行動']);
     if (!action && ['跟進類別', '負責人', '確定跟進日期', '時間原話／待確認'].some(k => optional(v[k]))) add(sheet, row, '跟進行動', '已填跟進資料，請寫明要做的行動。');
@@ -136,7 +140,7 @@ export function parseWorkflowWorkbook(buffer: ArrayBuffer, file: string, now = n
     // Resolve links after every row is read: spreadsheet sorting cannot change validity.
     const visitId = optional(v['外出編號']) ?? `paper-visit:${encodeURIComponent(paperRef ?? id)}`;
     const observation: Observation = { ...flags, id, visitId, buildingId, floorId: units[0]?.floorId ?? floors[0]?.id, unitId: units[0]?.id, occurredAt, recordedAt: now, workerName: str(v['工作員']).trim(), coverage: coverage ?? 'UNKNOWN',
-      contactOutcome: enumValue(v['接觸結果'], contactLabels, sheet, row, '接觸結果'), assessment: enumValue(v['住房判斷'], assessmentLabels, sheet, row, '住房判斷'), sourceType: enumValue(v['資料來源'], sourceLabels, sheet, row, '資料來源'), note: optional(v['紙本原話／備註']), evidence: str(v['依據']).split('\n').map(s => s.trim()).filter(Boolean),
+      contactOutcome: enumValue(v['接觸結果'], contactLabels, sheet, row, '接觸結果', acceptedContact), assessment: enumValue(v['住房判斷'], assessmentLabels, sheet, row, '住房判斷', acceptedAssessment), sourceType: enumValue(v['資料來源'], sourceLabels, sheet, row, '資料來源', acceptedSource), note: optional(v['紙本原話／備註']), evidence: str(v['依據']).split('\n').map(s => s.trim()).filter(Boolean),
       paperRef, paperLine, importSource: { file, sheet, row }, resolvesObservationId: optional(v['結束跟進編號']),
       correctsObservationId: correctsId, correctionReason: optional(v['更正原因']),
       followUp: action ? { action, status: 'OPEN', category: enumValue(v['跟進類別'], supportCategoryLabels, sheet, row, '跟進類別'), assignee: optional(v['負責人']), dueDate, timingNote: optional(v['時間原話／待確認']) } : undefined };
