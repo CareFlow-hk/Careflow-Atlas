@@ -6,7 +6,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import type { FeatureCollection, Polygon } from 'geojson';
 import { buildingFeatures, districtBounds, visibleDistrictLabels, DISTRICT_CAMERA, floorFeatures, floorBase, footprintOf, markerLabel, FLOOR_HEIGHT, type MapBuilding } from './mapModel';
 import { easeInOutCubic, motionDuration, spatialMotion } from '../app/motion';
-import { contextPosition, focusHeight } from './focusContext';
+import { contextPosition, cutawayEnabled, CutawayTransition, CUTAWAY_DURATION, focusCameraState, focusHeight, shouldLowerBuilding } from './focusContext';
 import { mapSceneColors, stateColors, stateLabels, stateLegendNotes } from '../domain/presentation';
 import { OUTREACH_STATES } from '../domain/types';
 import './map.css';
@@ -35,6 +35,8 @@ export default function MapScene(props: MapSceneProps) {
   const mapRef = useRef<LibreMap | null>(null);
   const current = useRef(props);
   const separation = useRef(0);
+  const cutawayFeatures = useRef<Record<string, FeatureCollection<Polygon>>>({});
+  const refreshCutaway = useRef<(() => void) | undefined>(undefined);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
   const [notice, setNotice] = useState('');
@@ -96,10 +98,10 @@ export default function MapScene(props: MapSceneProps) {
         window.clearTimeout(timeout);
         setFailed(false);
         setNotice('');
-        map.setGlobalStateProperty('focusBearing', map.getBearing());
         const firstLabel = map.getStyle().layers.find(layer => layer.type === 'symbol')?.id;
-        map.addSource('outreach-buildings', { type: 'geojson', data: buildingFeatures(current.current.buildings) });
-        map.addSource('focused-city', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+        // Preserve string IDs through vector tiling for per-building animation state.
+        map.addSource('outreach-buildings', { type: 'geojson', promoteId: 'id', data: buildingFeatures(current.current.buildings) });
+        map.addSource('focused-city', { type: 'geojson', promoteId: 'id', data: { type: 'FeatureCollection', features: [] } });
         map.addLayer({ id: 'focused-city', source: 'focused-city', type: 'fill-extrusion', paint: {
           'fill-extrusion-color': mapSceneColors.contextBuilding, 'fill-extrusion-height': overviewContextHeight,
           'fill-extrusion-base': overviewContextBase, 'fill-extrusion-opacity': .72,
@@ -182,7 +184,6 @@ export default function MapScene(props: MapSceneProps) {
       map.on('pitchend', () => setIs3D(map.getPitch() > 10));
       map.on('rotate', () => {
         if (!loaded) return;
-        map.setGlobalStateProperty('focusBearing', map.getBearing());
         setBearing(Math.round(map.getBearing()));
       });
       map.on('pitch', () => { if (map.getLayer('focused-city')) map.setPaintProperty('focused-city', 'fill-extrusion-opacity', (current.current.selectedBuildingId ? .4 : .72) * Math.min(1, map.getPitch() / 45)); });
@@ -203,7 +204,9 @@ export default function MapScene(props: MapSceneProps) {
     if (!map || !ready) return;
     const others = buildingFeatures(props.buildings, props.selectedBuildingId);
     if (active) others.features.forEach(feature => Object.assign(feature.properties!, contextPosition(feature.geometry.coordinates[0], active)));
+    cutawayFeatures.current['outreach-buildings'] = others;
     (map.getSource('outreach-buildings') as GeoJSONSource).setData(others);
+    refreshCutaway.current?.();
     map.setPaintProperty('outreach-buildings', 'fill-extrusion-height', active ? focusHeight : ['get', 'height']);
     (map.getSource('outreach-selected') as GeoJSONSource).setData(buildingFeatures(active ? [active] : []));
     map.setLayoutProperty('outreach-selected', 'visibility', active?.floors.length ? 'none' : 'visible');
@@ -238,6 +241,68 @@ export default function MapScene(props: MapSceneProps) {
     map.setPaintProperty('focused-city', 'fill-extrusion-opacity', (active ? .4 : .72) * Math.min(1, map.getPitch() / 45));
     map.setPaintProperty('focused-city', 'fill-extrusion-base', active ? ['min', ['get', 'base'], focusHeight] : overviewContextBase);
   }, [props.buildings, props.selectedBuildingId, active, ready]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready || !active) return;
+    const transitions = new Map<string, { source: string; id: string | number; animation: CutawayTransition; painted?: number }>();
+    let enabled = false;
+    let frame = 0;
+    const paint = (now: number) => {
+      frame = 0;
+      let running = false;
+      for (const entry of transitions.values()) {
+        const value = entry.animation.value(now);
+        if (entry.painted !== value) {
+          map.setFeatureState({ source: entry.source, id: entry.id }, { cutaway: value });
+          entry.painted = value;
+        }
+        running ||= entry.animation.running(now);
+      }
+      if (running) frame = requestAnimationFrame(paint);
+    };
+    const syncCamera = () => {
+      const now = performance.now();
+      const duration = motionDuration(CUTAWAY_DURATION);
+      const camera = focusCameraState(active, map.getCenter(), map.getBearing());
+      enabled = cutawayEnabled(map.getZoom(), map.getPitch(), enabled);
+      const present = new Set<string>();
+      for (const [source, collection] of Object.entries(cutawayFeatures.current)) {
+        for (const feature of collection.features) {
+          if (feature.id === undefined) continue;
+          const key = `${source}:${feature.id}`;
+          present.add(key);
+          let entry = transitions.get(key);
+          if (!entry) {
+            entry = { source, id: feature.id, animation: new CutawayTransition() };
+            transitions.set(key, entry);
+          }
+          const p = feature.properties!;
+          const lowered = shouldLowerBuilding({ east: p.east, north: p.north, radius: p.radius }, camera, enabled, entry.animation.target === 1);
+          entry.animation.set(lowered, now, duration);
+        }
+      }
+      for (const [key, entry] of transitions) if (!present.has(key)) {
+        map.removeFeatureState({ source: entry.source, id: entry.id }, 'cutaway');
+        transitions.delete(key);
+      }
+      if (!frame) frame = requestAnimationFrame(paint);
+    };
+    refreshCutaway.current = syncCamera;
+    syncCamera();
+    // `move` includes dragging, wheel zoom, pitch, rotation and fly/ease animations.
+    // Only a change in binary target starts an animation; moving never restarts it.
+    map.on('move', syncCamera);
+    map.on('resize', syncCamera);
+    return () => {
+      refreshCutaway.current = undefined;
+      cancelAnimationFrame(frame);
+      map.off('move', syncCamera); map.off('resize', syncCamera);
+      if (mapRef.current === map) for (const entry of transitions.values()) {
+        map.removeFeatureState({ source: entry.source, id: entry.id }, 'cutaway');
+      }
+    };
+  }, [active, ready]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -280,11 +345,16 @@ export default function MapScene(props: MapSceneProps) {
           const key = `${feature.id}:${JSON.stringify(ring)}`;
           if (seen.has(key)) continue;
           seen.add(key);
-          collection.features.push({ type: 'Feature', geometry: { type: 'Polygon', coordinates: polygon }, properties: { ...(active ? contextPosition(ring, active) : { east: 0, north: 0, radius: 0 }), height: Number(feature.properties.render_height) || 6, base: Number(feature.properties.render_min_height) || 0 } });
+          collection.features.push({ type: 'Feature', id: key, geometry: { type: 'Polygon', coordinates: polygon }, properties: { id: key, ...(active ? contextPosition(ring, active) : { east: 0, north: 0, radius: 0 }), height: Number(feature.properties.render_height) || 6, base: Number(feature.properties.render_min_height) || 0 } });
         }
       }
       const signature = JSON.stringify(collection);
-      if (signature !== previous) { previous = signature; (map.getSource('focused-city') as GeoJSONSource).setData(collection); }
+      if (signature !== previous) {
+        previous = signature;
+        cutawayFeatures.current['focused-city'] = collection;
+        (map.getSource('focused-city') as GeoJSONSource).setData(collection);
+        refreshCutaway.current?.();
+      }
     };
     map.on('idle', refresh);
     refresh();
@@ -375,6 +445,6 @@ export default function MapScene(props: MapSceneProps) {
     {notice && <button className="map-notice" onClick={() => setNotice('')} role="status">{notice}<span>×</span></button>}
     {/* Yellow is not "待跟進": a task shows as a badge, and a yellow without one means the levels disagree. */}
     <div className="map-legend">{OUTREACH_STATES.map(state => <span key={state} title={stateLegendNotes[state]}><i className="legend-swatch" style={{ background: stateColors[state] }} />{stateLabels[state]}<small>{stateLegendNotes[state]}</small></span>)}</div>
-    <div className="geometry-note">{active ? '聚焦視圖 · 前景遮擋已壓低' : '背景高度已壓縮 · 業務地點及樓層為合成示意'}</div>
+    <div className="geometry-note">{active ? '鏡頭防遮擋 · 拉遠自動恢復樓高' : '背景高度已壓縮 · 業務地點及樓層為合成示意'}</div>
   </div>;
 }
