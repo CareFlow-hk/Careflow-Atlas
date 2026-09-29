@@ -99,3 +99,12 @@
 .map-scene .building-map-marker.is-compact .building-map-marker__task { display:none; }
 .map-scene .building-map-marker.is-compact:hover .building-map-marker__task,
 .map-scene .building-map-marker.is-compact:focus-visible .building-map-marker__task { display:inline-block; }
+
+/* Composition to the right of a 3D floor label: a dot and a count per state present. */
+.floor-map-label__breakdown{display:inline-flex;gap:6px;margin-left:2px;padding-left:7px;border-left:1px solid #cfdcd3}
+.floor-map-label__breakdown:empty{display:none}
+.floor-map-label__breakdown i{display:inline-flex;align-items:center;gap:3px;font-style:normal;font-size:11px}
+.floor-map-label__breakdown b{width:7px;height:7px;border-radius:50%;display:inline-block}
+.floor-map-label.selected .floor-map-label__breakdown{border-left-color:#ffffff66}
+.floor-map-label__tag{flex:none}
+.building-map-marker__tag{font-style:normal;font-size:13px;color:#6b4f1d}

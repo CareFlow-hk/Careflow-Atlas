@@ -9,7 +9,7 @@ describe('basemap-aligned demo geometry', () => {
   it('shares the exact source ring between map shells and every floor', () => {
     for (const binding of geometry.buildings) {
       const building = demoSnapshot.buildings.find(b => b.id === binding.id)!;
-      const mapBuilding: MapBuilding = { ...building, longitude: building.coordinates.lng, latitude: building.coordinates.lat, state: 'GRAY', followUps: 0, floors: [{ id: 'floor', label: '1F', level: 1, state: 'GRAY', total: 0, recorded: 0, hasFollowUp: false }] };
+      const mapBuilding: MapBuilding = { ...building, longitude: building.coordinates.lng, latitude: building.coordinates.lat, state: 'GRAY', followUps: 0, tagged: false, floors: [{ id: 'floor', label: '1F', level: 1, state: 'GRAY', total: 0, recorded: 0, hasFollowUp: false, breakdown: { GREEN: 0, YELLOW: 0, RED: 0, GRAY: 0 }, tagged: false }] };
       expect(buildingFeatures([mapBuilding]).features[0].geometry.coordinates[0]).toEqual(binding.footprint);
       for (const progress of [0, .5, 1]) expect(floorFeatures(mapBuilding, progress).features[0].geometry.coordinates[0]).toEqual(binding.footprint);
     }

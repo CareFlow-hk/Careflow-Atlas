@@ -1,6 +1,6 @@
 import type { FeatureCollection, Polygon } from 'geojson';
-import { stateColors, stateLabels, stateSelectedColors } from '../domain/presentation';
-import type { State } from '../domain/types';
+import { nodeTagLabel, stateColors, stateLabels, stateSelectedColors } from '../domain/presentation';
+import type { State, StateBreakdown } from '../domain/types';
 
 /**
  * Only spatial geometry and display summaries cross into the map. No people or notes.
@@ -10,12 +10,18 @@ import type { State } from '../domain/types';
  */
 export interface MapFloor {
   id: string; label: string; level: number; state: State; hasFollowUp: boolean; recorded: number; total: number;
+  /** How many units sit in each state; shown beside the 3D floor label. */
+  breakdown: StateBreakdown;
+  /** A manual FOLLOW_UP mark on this floor. A separate marker, never a colour. */
+  tagged: boolean;
 }
 export interface MapBuilding {
   id: string; name: string; longitude: number; latitude: number;
   footprint?: number[][]; floors: MapFloor[]; state: State;
   /** Open tasks anywhere in the building. Names the task on the marker; never picks the colour. */
   followUps: number;
+  /** A manual FOLLOW_UP mark on this building. A separate marker, never a colour. */
+  tagged: boolean;
 }
 
 export const DISTRICT_CAMERA = { center: [114.14175, 22.2865] as [number, number], zoom: 16.5, pitch: 48, bearing: -24 };
@@ -27,6 +33,8 @@ export interface MarkerLabel {
   className: string; ariaLabel: string; title: string; labelWidth: number;
   /** Present only when the building has open tasks; the text shown beside its name. */
   task?: string;
+  /** The manual mark, drawn as a flag beside the name. */
+  tagged: boolean;
 }
 
 /**
@@ -39,13 +47,15 @@ export function markerLabel(building: MapBuilding, selected: boolean): MarkerLab
   const task = building.followUps > 0 ? '待跟進' : undefined;
   const state = stateLabels[building.state];
   const lead = selected ? `正在查看${building.name}` : `在地圖選擇${building.name}`;
+  const tag = building.tagged ? ` · ${nodeTagLabel}` : '';
   return {
-    className: `building-map-marker${selected ? ' is-selected' : ''}${task ? ' has-followup' : ''}`,
-    ariaLabel: `${lead} · ${state}${task ? ` · ${building.followUps} 項待跟進` : ''}`,
-    title: `${building.name} · ${state}${task ? ` · ${building.followUps} 項待跟進` : ''}`,
-    // The declared width feeds label collision, so the tag has to be counted in it.
-    labelWidth: Math.max(100, building.name.length * 14 + 38 + (task ? 60 : 0)),
+    className: `building-map-marker${selected ? ' is-selected' : ''}${task ? ' has-followup' : ''}${building.tagged ? ' is-tagged' : ''}`,
+    ariaLabel: `${lead} · ${state}${task ? ` · ${building.followUps} 項待跟進` : ''}${tag}`,
+    title: `${building.name} · ${state}${task ? ` · ${building.followUps} 項待跟進` : ''}${tag}`,
+    // The declared width feeds label collision, so the tag and the mark are counted in it.
+    labelWidth: Math.max(100, building.name.length * 14 + 38 + (task ? 60 : 0) + (building.tagged ? 18 : 0)),
     task,
+    tagged: building.tagged,
   };
 }
 

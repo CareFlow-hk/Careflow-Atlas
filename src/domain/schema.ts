@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CONTACT_OUTCOMES, COVERAGE_STATUSES, FOLLOW_UP_STATUSES, HOUSING_ASSESSMENTS, NODE_TAGS, SUPPORT_CATEGORIES, supersededObservationIds, getCorrectionConflicts, observationRootIds, type OutreachSnapshot } from './types';
+import { CONTACT_OUTCOMES, COVERAGE_STATUSES, FOLLOW_UP_EVENT_ACTIONS, FOLLOW_UP_STATUSES, HOUSING_ASSESSMENTS, NODE_TAGS, SUPPORT_CATEGORIES, supersededObservationIds, getCorrectionConflicts, observationRootIds, type OutreachSnapshot } from './types';
 
 const id = z.string().trim().min(1).max(200);
 const text = z.string().max(6000);
@@ -34,6 +34,7 @@ export const snapshotSchema = z.object({
   householdResidences: z.array(z.object({ ...base, householdId: id, buildingId: id, unitId: id.optional(), ...dates, locationNote: text.optional() })),
   memberships: z.array(z.object({ ...base, personId: id, status: z.enum(['PENDING', 'ACTIVE', 'INACTIVE', 'UNKNOWN']), ...dates })),
   visits: z.array(z.object({ ...base, occurredAt: occurrenceSchema, recordedAt: instantSchema, workerName: id, note: text.optional() })), observations: z.array(observationSchema),
+  followUpEvents: z.array(z.object({ ...base, observationId: id, action: z.enum(FOLLOW_UP_EVENT_ACTIONS), reason: text.optional(), at: instantSchema, operator: z.object({ accountId: id, name: id }) })).optional(),
 }).superRefine((data, ctx) => {
   const bad = (path: (string | number)[], message: string) => ctx.addIssue({ code: 'custom', path, message });
   const map = <T extends { id: string }>(items: T[]) => new Map(items.map(item => [item.id, item]));
@@ -84,6 +85,17 @@ export const snapshotSchema = z.object({
       seen.add(cursor);
       cursor = observations.get(cursor)?.correctsObservationId;
     }
+  });
+  // A task closed in the app: it must name a task, cancelling needs a reason, and the
+  // sequence per task alternates closed/reopened, so an undo always undoes something.
+  const closedRoots = new Set<string>();
+  (data.followUpEvents ?? []).forEach((e, i) => {
+    const task = observations.get(e.observationId);
+    if (!task?.followUp) { bad(['followUpEvents', i, 'observationId'], 'Follow-up event must name an observation that carries a task'); return; }
+    if (e.action === 'CANCELLED' && !e.reason?.trim()) bad(['followUpEvents', i, 'reason'], '取消跟進須寫明原因。');
+    const root = roots.get(e.observationId) ?? e.observationId;
+    if ((e.action === 'REOPENED') !== closedRoots.has(root)) bad(['followUpEvents', i, 'action'], e.action === 'REOPENED' ? 'Only a closed task can be reopened' : 'Task is already closed');
+    if (e.action === 'REOPENED') closedRoots.delete(root); else closedRoots.add(root);
   });
   // Two live corrections for one original cannot be ordered by time; a human must pick one.
   for (const conflict of getCorrectionConflicts(data)) bad(['observations'], `Two correction branches for ${conflict.observationId}; keep one and resubmit the other`);

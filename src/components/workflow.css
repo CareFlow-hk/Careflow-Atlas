@@ -117,3 +117,21 @@
 /* 跟進類別 carries a wide text box beside it, so it gets the whole width. */
 .cf-choice-grid--followup{grid-template-columns:1fr}
 @media(max-width:760px){.cf-choice-grid{grid-template-columns:1fr}.cf-choice-row__items{gap:8px}.cf-editor .cf-choice{font-size:14px}.cf-choice__other{font-size:14px}}
+
+/* Closing a task without a visit: done, cancel with a reason, undo. */
+.cf-button--small{min-height:34px;padding:0 11px;font-size:12px}
+.cf-followup-actions{display:grid;gap:7px;margin-top:8px}
+.cf-followup-actions__row{display:flex;flex-wrap:wrap;gap:6px}
+.cf-followup-actions__cancel{display:grid;gap:7px}
+.cf-followup-actions__cancel label{display:grid;gap:4px;font-size:12px;font-weight:600}
+.cf-followup-actions__cancel input{min-height:38px;border:1px solid #cad8d4;border-radius:8px;padding:6px 9px;font:inherit}
+.cf-followup-trail{margin:0;padding-left:16px;font-size:11px;color:#5f716d;line-height:1.6}
+.cf-building-tasks{border-top:1px solid #e3ebe8;padding-top:14px;margin-top:14px}
+.cf-building-tasks ul{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:8px}
+.cf-building-tasks small{display:block}
+/* The manual mark is its own small flag; it never recolours anything. */
+.cf-node-tag{vertical-align:-1px;margin-left:3px;color:#6b4f1d}
+.cf-chip--floor{background:#e4ecf6;color:#2f4a6b}
+.cf-settings-advanced{margin-top:14px;border-top:1px solid #e1e9e6;padding-top:12px}
+.cf-settings-advanced summary{cursor:pointer;font-weight:700}
+.cf-settings-advanced h3{font-size:15px;margin:14px 0 4px}

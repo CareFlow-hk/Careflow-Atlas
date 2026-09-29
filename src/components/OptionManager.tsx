@@ -19,9 +19,9 @@ export interface OptionManagerProps {
 /**
  * Add, hide and delete self-defined choices (§10.4).
  *
- * Deliberately inline rather than a second dialog: the editor is already a modal, and
- * a nested one would put the menu behind the form that needs it. Nothing here carries
- * a `name`, so the surrounding form's FormData never picks up the manager's fields.
+ * Lives under 工作台設定 › 高級設定, out of the entry form, so a first-time user never
+ * meets it. Options added here appear in the entry form's menus. Nothing here carries
+ * a `name`, so no surrounding form ever picks up the manager's fields.
  */
 export function OptionManager({ prefs, onChange }: OptionManagerProps) {
   const [drafts, setDrafts] = useState<Partial<Record<OptionField, { label: string; mapsTo: string }>>>({});
@@ -31,7 +31,8 @@ export function OptionManager({ prefs, onChange }: OptionManagerProps) {
       <p className="cf-option-manager__note">
         自訂選項要聲明「歸入哪一類」，顏色管線只看這個歸類。內置選項不可刪除。
       </p>
-      {OPTION_FIELDS.map(field => {
+      {/* 接觸結果 is no longer asked in the entry form, so its menu has nothing to extend. */}
+      {OPTION_FIELDS.filter(field => field !== "contactOutcome").map(field => {
         const choices = builtInChoices(field);
         const custom = customOptions(prefs, field);
         const draft = drafts[field] ?? { label: "", mapsTo: choices[0].value };

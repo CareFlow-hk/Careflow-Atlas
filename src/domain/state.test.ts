@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  OUTREACH_STATES, aggregate, buildingState, clueOf, currentAssessment, effectiveObservations, effectiveState, floorState,
-  followUpBadges, getOpenFollowUps, inheritedState, latestInScope, nodeState, openFollowUpsInScope, stateBreakdown, stateOf, tagNode, unitState, withOpenTasks,
+  OUTREACH_STATES, aggregate, buildingState, clueOf, currentAssessment, effectiveObservations, floorState,
+  followUpBadges, getOpenFollowUps, isTagged, latestInScope, nodeState, openFollowUpsInScope, stateBreakdown, stateOf, tagNode, unitState, withOpenTasks,
   type Building, type ContactOutcome, type CoverageStatus, type Floor, type HousingAssessment, type NodeTag,
   type Observation, type OutreachSnapshot, type State, type Unit,
 } from './types';
@@ -120,10 +120,17 @@ describe('nodeState: the node competes with its children in time', () => {
     expect(buildingState(scene, 'b1')).toBe('GRAY');
   });
 
-  it('a floor record decides its floor and feeds the building aggregate', () => {
-    const scene = snapshot([observation('o1', { floorId: 'f1', coverage: 'VISITED_NO_FINDING' })], { units });
-    expect(floorState(scene, 'b1', 'f1')).toBe('GREEN');
-    expect(buildingState(scene, 'b1')).toBe('YELLOW'); // f1 green against f2 entirely unrecorded
+  it('a floor-level record no longer decides its floor: floors are the sum of their units', () => {
+    // Decision 2026-09-29: floors keep no record of their own. A legacy one is history only.
+    const scene = snapshot([observation('o1', { floorId: 'f1', coverage: 'VISITED_NO_FINDING', occurredAt: at(9), recordedAt: at(9) })], { units });
+    expect(floorState(scene, 'b1', 'f1')).toBe('GRAY');
+    expect(buildingState(scene, 'b1')).toBe('GRAY');
+  });
+
+  it('a floor is exactly the aggregate of its units', () => {
+    const scene = snapshot([unitRecord('o1', 'u1', 'VISITED_NO_FINDING'), unitRecord('o2', 'u2', 'INACCESSIBLE'),
+      observation('o3', { floorId: 'f1', coverage: 'UNVISITED', occurredAt: at(9), recordedAt: at(9) })], { units });
+    expect(floorState(scene, 'b1', 'f1')).toBe(aggregate([unitState(scene, 'b1', 'u1'), unitState(scene, 'b1', 'u2')]));
   });
 });
 
@@ -154,55 +161,38 @@ describe('three levels read the same switch', () => {
   });
 });
 
-describe('the manual tag', () => {
-  const tagged = (scope: { floorId?: string }) => tagNode(snapshot([]), { buildingId: 'b1', ...scope }, 'FOLLOW_UP');
+describe('the manual tag is a separate marker', () => {
+  // Decision 2026-09-29: the tag never recolours, never cascades and never aggregates.
+  const records = () => [unitRecord('o1', 'u1', 'VISITED_NO_FINDING'), unitRecord('o2', 'u2', 'INACCESSIBLE')];
 
-  it('paints a node yellow without rewriting the computed state', () => {
-    expect(effectiveState('GRAY', 'FOLLOW_UP')).toBe('YELLOW');
-    expect(effectiveState('GREEN', 'FOLLOW_UP')).toBe('YELLOW');
-    expect(effectiveState('YELLOW', 'FOLLOW_UP')).toBe('YELLOW');
-    expect(effectiveState('GRAY', undefined)).toBe('GRAY');
+  it('changes no colour at any level when a floor is tagged', () => {
+    const plain = snapshot(records());
+    const tagged = tagNode(plain, { buildingId: 'b1', floorId: 'f1' }, 'FOLLOW_UP');
+    for (const id of ['u1', 'u2', 'u3']) expect(unitState(tagged, 'b1', id)).toBe(unitState(plain, 'b1', id));
+    for (const id of ['f1', 'f2']) expect(floorState(tagged, 'b1', id)).toBe(floorState(plain, 'b1', id));
+    expect(buildingState(tagged, 'b1')).toBe(buildingState(plain, 'b1'));
   });
 
-  it('never covers a red node', () => {
-    expect(effectiveState('RED', 'FOLLOW_UP')).toBe('RED');
-    expect(inheritedState('RED', true)).toBe('RED');
-    expect(inheritedState('GREEN', true)).toBe('YELLOW');
-    expect(inheritedState('GRAY', true)).toBe('YELLOW');
-    expect(inheritedState('YELLOW', true)).toBe('YELLOW');
+  it('changes no colour at any level when a building is tagged', () => {
+    const plain = snapshot([]);
+    const tagged = tagNode(plain, { buildingId: 'b1' }, 'FOLLOW_UP');
+    expect(buildingState(tagged, 'b1')).toBe('GRAY');
+    expect(floorState(tagged, 'b1', 'f1')).toBe('GRAY');
+    expect(unitState(tagged, 'b1', 'u1')).toBe('GRAY');
+  });
+
+  it('is visible only on the node it was set on', () => {
+    const tagged = tagNode(snapshot([]), { buildingId: 'b1', floorId: 'f1' }, 'FOLLOW_UP');
+    expect(isTagged(tagged, { buildingId: 'b1', floorId: 'f1' })).toBe(true);
+    expect(isTagged(tagged, { buildingId: 'b1', floorId: 'f2' })).toBe(false);
+    expect(isTagged(tagged, { buildingId: 'b1' })).toBe(false);
   });
 
   it('sets and clears without storing a "no mark" value', () => {
-    const marked = tagged({ floorId: 'f1' });
+    const marked = tagNode(snapshot([]), { buildingId: 'b1', floorId: 'f1' }, 'FOLLOW_UP');
     expect(marked.floors.find(f => f.id === 'f1')?.tag).toBe('FOLLOW_UP');
-    expect('tag' in marked.floors.find(f => f.id === 'f1')!).toBe(true);
     const cleared = tagNode(marked, { buildingId: 'b1', floorId: 'f1' }, undefined);
     expect('tag' in cleared.floors.find(f => f.id === 'f1')!).toBe(false);
-  });
-
-  it('cascades down from a tagged floor and spares the red unit', () => {
-    const scene = tagNode(snapshot([
-      unitRecord('o1', 'u1', 'VISITED_NO_FINDING', { id: 'o1' }),
-      unitRecord('o2', 'u2', 'INACCESSIBLE'),
-    ], { floors: [floor('f1', 1, 'FOLLOW_UP')], units: [unit('u1', 'f1'), unit('u2', 'f1')] }), { buildingId: 'b1', floorId: 'f1' }, 'FOLLOW_UP');
-    expect(unitState(scene, 'b1', 'u1')).toBe('YELLOW'); // green unit under a tagged floor
-    expect(unitState(scene, 'b1', 'u2')).toBe('RED');    // the failure is exempt
-    expect(floorState(scene, 'b1', 'f1')).toBe('YELLOW');
-    expect(floorState(scene, 'b1', 'f1')).not.toBe('RED'); // the tag is still visible on the floor
-    expect(scene.floors.find(f => f.id === 'f1')?.tag).toBe('FOLLOW_UP');
-  });
-
-  it('cascades down from a tagged building', () => {
-    const scene = tagNode(snapshot([], {}), { buildingId: 'b1' }, 'FOLLOW_UP');
-    expect(buildingState(scene, 'b1')).toBe('YELLOW');
-    expect(floorState(scene, 'b1', 'f1')).toBe('YELLOW');
-    expect(unitState(scene, 'b1', 'u1')).toBe('YELLOW');
-  });
-
-  it('propagates upward: a tagged floor makes its building yellow', () => {
-    const scene = tagNode(snapshot([], { floors: [floor('f1', 1), floor('f2', 2)] }), { buildingId: 'b1', floorId: 'f1' }, 'FOLLOW_UP');
-    expect(floorState(scene, 'b1', 'f2')).toBe('GRAY');
-    expect(buildingState(scene, 'b1')).toBe('YELLOW');
   });
 
   it('never rewrites the record the pipeline reads', () => {
@@ -210,7 +200,6 @@ describe('the manual tag', () => {
     const after = tagNode(before, { buildingId: 'b1' }, 'FOLLOW_UP');
     expect(after.observations).toEqual(before.observations);
     expect(effectiveObservations(after)).toEqual(effectiveObservations(before));
-    expect(stateOf(after, { buildingId: 'b1', unitId: 'u1' }, false)).toBe('RED');
   });
 });
 

@@ -78,7 +78,7 @@ describe('binary camera-relative foreground cutaway', () => {
     }
   });
   it('expresses footprint and camera positions in the same metre frame', () => {
-    const focus: MapBuilding = { id: 'focus', name: 'Demo', longitude: 114.14, latitude: 22.28, state: 'GRAY', floors: [], followUps: 0 };
+    const focus: MapBuilding = { id: 'focus', name: 'Demo', longitude: 114.14, latitude: 22.28, state: 'GRAY', floors: [], followUps: 0, tagged: false };
     const position = contextPosition(footprintOf(focus), focus);
     expect(position.east).toBeCloseTo(0);
     expect(position.north).toBeCloseTo(0);

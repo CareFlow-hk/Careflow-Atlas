@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { tagNode, type NodeTag, type OutreachSnapshot, type SaveObservationInput } from '../domain/types';
+import { recordFollowUpEvent, tagNode, type FollowUpEventAction, type NodeTag, type Operator, type OutreachSnapshot, type SaveObservationInput } from '../domain/types';
+import { createRecordId } from './recordId';
 import type { CustomOptions } from '../domain/optionPrefs';
 import { LocalStoragePersistenceAdapter, OutreachRepository } from '../data/repository';
 import { OptionPrefsRepository } from '../data/optionPrefsRepository';
@@ -10,7 +11,9 @@ let repository = new OutreachRepository(adapter);
 let prefsRepository = new OptionPrefsRepository(adapter);
 let accountId: string | undefined;
 /** Demo caches only. Never adopt the pre-authentication shared cache. */
-export function setWorkspaceAccount(id?: string) {
+export function setWorkspaceAccount(id?: string, name?: string) {
+  // The operator travels with the account so a closed task names who closed it.
+  useWorkspace.setState({ operator: id ? { accountId: id, name: name ?? id } : undefined });
   if (id === accountId) return;
   accountId = id;
   const suffix = id ? `careflow-atlas.account.${id}` : 'careflow-atlas.signed-out';
@@ -23,6 +26,8 @@ interface WorkspaceState {
   storageError?: string;
   /** Self-defined entry choices for this account. A shortcut list, not a record. */
   optionPrefs: CustomOptions;
+  /** The signed-in account. Recorded as the operator of task actions, never as a field worker. */
+  operator?: Operator;
   selectedBuildingId?: string;
   selectedFloorId?: string;
   selectedUnitId?: string;
@@ -35,6 +40,8 @@ interface WorkspaceState {
   setTag: (subject: { buildingId: string; floorId?: string }, tag?: NodeTag) => void;
   /** Writes the shortcut list for this account. Never touches the snapshot. */
   setOptionPrefs: (prefs: CustomOptions) => void;
+  /** Mark a task done, cancel it with a reason, or undo either. Appends; never edits. */
+  actOnFollowUp: (observationId: string, action: FollowUpEventAction, reason?: string) => void;
   selectBuilding: (id?: string) => void;
   selectFloor: (id: string) => void;
   selectUnit: (id: string) => void;
@@ -69,6 +76,15 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     set({ snapshot: saved, storageError: undefined });
   },
   setOptionPrefs: prefs => set({ optionPrefs: prefsRepository.save(prefs) }),
+  actOnFollowUp: (observationId, action, reason) => {
+    const current = get().snapshot;
+    const operator = get().operator;
+    if (!current) return;
+    if (!operator) throw new Error('請先登入，才能記錄誰處理了這項跟進。');
+    const next = recordFollowUpEvent(current, { id: `follow-up-event-${createRecordId()}`, observationId, action, reason, at: new Date().toISOString(), operator });
+    if (next === current) return;
+    set({ snapshot: repository.replaceSnapshot(next), storageError: undefined });
+  },
   selectBuilding: id => set({ selectedBuildingId: id, selectedFloorId: undefined, selectedUnitId: undefined, expanded: !!id && !!get().snapshot?.floors.some(floor => floor.buildingId === id) }),
   selectFloor: id => set({ selectedFloorId: id, selectedUnitId: undefined, expanded: true }),
   selectUnit: id => {

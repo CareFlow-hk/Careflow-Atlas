@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Map as LibreMap, Marker, MercatorCoordinate, NavigationControl, ScaleControl, setWorkerUrl, type ExpressionSpecification, type GeoJSONSource, type MapMouseEvent } from 'maplibre-gl';
 import mapWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
-import { Compass, Layers3, Minus, Plus, RotateCcw, RotateCw, Scan, WifiOff } from 'lucide-react';
+import { Compass, Flag, Layers3, Minus, Plus, RotateCcw, RotateCw, Scan, WifiOff } from 'lucide-react';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { FeatureCollection, Polygon } from 'geojson';
 import { buildingFeatures, districtBounds, visibleDistrictLabels, DISTRICT_CAMERA, floorFeatures, floorBase, footprintOf, markerLabel, FLOOR_HEIGHT, type MapBuilding } from './mapModel';
 import { easeInOutCubic, motionDuration, spatialMotion } from '../app/motion';
 import { contextPosition, cutawayEnabled, CutawayTransition, CUTAWAY_DURATION, focusCameraState, focusHeight, shouldLowerBuilding } from './focusContext';
-import { mapSceneColors, stateColors, stateLabels, stateLegendNotes } from '../domain/presentation';
+import { breakdownLabel, mapSceneColors, nodeTagLabel, stateColors, stateLabels, stateLegendNotes } from '../domain/presentation';
 import { OUTREACH_STATES } from '../domain/types';
 import './map.css';
 
@@ -229,6 +229,11 @@ export default function MapScene(props: MapSceneProps) {
       const dot = document.createElement('span'); dot.style.background = stateColors[building.state];
       const name = document.createElement('strong'); name.textContent = building.name;
       button.append(dot, name);
+      if (label.tagged) {
+        const flag = document.createElement('em'); flag.className = 'building-map-marker__tag';
+        flag.textContent = '⚑'; flag.setAttribute('aria-hidden', 'true');
+        button.append(flag);
+      }
       if (label.task) {
         const task = document.createElement('em'); task.className = 'building-map-marker__task';
         task.textContent = label.task;
@@ -419,8 +424,10 @@ export default function MapScene(props: MapSceneProps) {
     <div className="floor-map-labels" aria-hidden={!props.expanded || !is3D}>{active?.floors.map(floor => <button key={floor.id} ref={element => { if (element) floorLabelElements.current.set(floor.id, element); else floorLabelElements.current.delete(floor.id); }}
       className={`floor-map-label ${floor.hasFollowUp ? 'needs-followup' : ''} ${props.selectedFloorId === floor.id ? 'selected' : ''}`}
       style={{ '--cf-state': stateColors[floor.state] } as CSSProperties}
-      aria-label={`在立體地圖選擇 ${floor.label} · ${stateLabels[floor.state]}${floor.hasFollowUp ? ' 待跟進' : ''}`} tabIndex={props.expanded && is3D ? 0 : -1}
-      onClick={() => props.onSelectFloor(floor.id)}><strong>{floor.label}</strong>{floor.hasFollowUp && <span>待跟進</span>}</button>)}</div>
+      aria-label={`在立體地圖選擇 ${floor.label} · ${stateLabels[floor.state]}${breakdownLabel(floor.breakdown) ? ` · ${breakdownLabel(floor.breakdown)}` : ''}${floor.hasFollowUp ? ' 待跟進' : ''}${floor.tagged ? ` · ${nodeTagLabel}` : ''}`} tabIndex={props.expanded && is3D ? 0 : -1}
+      onClick={() => props.onSelectFloor(floor.id)}><strong>{floor.label}</strong>{floor.tagged && <Flag className="floor-map-label__tag" size={12} aria-hidden="true" />}{floor.hasFollowUp && <span>待跟進</span>}
+      {/* Composition sits to the right of the label: one dot and a count per state present. */}
+      <span className="floor-map-label__breakdown" aria-hidden="true">{OUTREACH_STATES.filter(state => floor.breakdown[state] > 0).map(state => <i key={state} title={stateLabels[state]}><b style={{ background: stateColors[state] }} />{floor.breakdown[state]}</i>)}</span></button>)}</div>
     {!ready && !failed && <div className="map-loading"><span className="loading-orbit" />正在載入西營盤地圖</div>}
     {failed && <div className="map-failure" role="status"><WifiOff size={22} /><strong>底圖暫時無法顯示</strong><span>你仍可從大廈清單查看樓層、記錄結果。</span></div>}
     <div className="map-location"><span>香港 · 中西區 / 外展街區</span><strong>西營盤 <small>Sai Ying Pun</small></strong>

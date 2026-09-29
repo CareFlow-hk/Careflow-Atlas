@@ -4,7 +4,7 @@
  * one deliberate exception is the paper/Excel vocabulary below, which is a
  * separate view of the same data and is commented as such.
  */
-import { CONTACT_OUTCOMES, COVERAGE_STATUSES, HOUSING_ASSESSMENTS, SOURCE_TYPES, SUPPORT_CATEGORIES, type ClueLevel, type ContactOutcome, type CoverageStatus, type HousingAssessment, type SourceType, type State, type StateBreakdown, type SupportCategory } from './types';
+import { CONTACT_OUTCOMES, COVERAGE_STATUSES, HOUSING_ASSESSMENTS, SOURCE_TYPES, SUPPORT_CATEGORIES, type ClueLevel, type FollowUpEventAction, type ContactOutcome, type CoverageStatus, type HousingAssessment, type SourceType, type State, type StateBreakdown, type SupportCategory } from './types';
 
 /* ---------------------------------------------------------------- states --- */
 
@@ -74,9 +74,16 @@ export function breakdownLabel(counts: StateBreakdown): string {
  *              chip is never ambiguous once both axes are shown side by side.
  */
 
+/*
+ * The two values the entry form now stores read back as the form's own wording, so
+ * a person sees what they picked: 未能完成探訪 stores ATTEMPTED and 已完成探訪 stores
+ * VISITED_NO_FINDING. Older records with the finer values (PARTIAL, INACCESSIBLE,
+ * VISITED_WITH_FINDING) keep their more specific wording. Paper/Excel wording below
+ * is a separate vocabulary and is not changed by this.
+ */
 export const coverageLabels: Record<CoverageStatus, string> = {
-  UNKNOWN: '暫無可靠記錄', UNVISITED: '未到訪', ATTEMPTED: '曾嘗試',
-  PARTIAL: '部分完成', VISITED_NO_FINDING: '已訪，無記錄發現',
+  UNKNOWN: '暫無可靠記錄', UNVISITED: '未到訪', ATTEMPTED: '未能完成探訪',
+  PARTIAL: '部分完成', VISITED_NO_FINDING: '已完成探訪',
   VISITED_WITH_FINDING: '已訪，有記錄', INACCESSIBLE: '未能進入',
 };
 
@@ -100,6 +107,17 @@ export const supportCategoryLabels: Record<SupportCategory, string> = {
 };
 /** A task with no category is shown as unclassified, never silently as 一般跟進. */
 export const uncategorisedFollowUpLabel = '待跟進';
+
+/** What a person did to a task in the app, as the trail reads it. */
+export const followUpEventLabels: Record<FollowUpEventAction, string> = {
+  DONE: '標記完成', CANCELLED: '取消跟進', REOPENED: '撤銷',
+};
+/** The task's status line once an app event has closed it. */
+export const followUpClosedLabels: Record<Exclude<FollowUpEventAction, 'REOPENED'>, string> = {
+  DONE: '已標記完成', CANCELLED: '已取消',
+};
+/** The separate marker a building or floor carries when someone tagged it. */
+export const nodeTagLabel = '已標記跟進';
 
 /** The two clue levels stay apart: they differ in how strong the evidence is. */
 export const clueLabels: Record<ClueLevel, string> = {
@@ -202,7 +220,7 @@ export function contactGroupOf(outcome: ContactOutcome): ContactGroup {
 
 /** Wordings an earlier version of this product wrote, and no longer writes. */
 export const retiredLabels = {
-  coverage: { '覆蓋未明': 'UNKNOWN' },
+  coverage: { '覆蓋未明': 'UNKNOWN', '曾嘗試': 'ATTEMPTED', '已訪，無記錄發現': 'VISITED_NO_FINDING' },
   contact: {},
   assessment: { '由工作人員確認': 'STAFF_VERIFIED' },
   source: {},

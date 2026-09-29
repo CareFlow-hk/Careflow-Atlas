@@ -1,14 +1,17 @@
-import { AlertCircle, CalendarDays, FileText, Save, Settings2, X } from "lucide-react";
+import { AlertCircle, CalendarDays, FileText, Save, X } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { previewState, type ContactOutcome, type CoverageStatus, type HousingAssessment, type OpenFollowUp, type OptionField, type OptionNotes, type Observation } from "../domain/types";
 import { stateColors, supportCategoryLabels } from "../domain/presentation";
-import { applyCoverageChange, dependentDefaults, descriptiveAnswer, impliedByCoverage, markTouched, menuChoices, customOptionFor, OTHER_CHOICE, type CustomOptions, type DependentFields } from "../domain/optionPrefs";
-import { OptionManager } from "./OptionManager";
+import { applyCoverageChange, dependentDefaults, descriptiveAnswer, markTouched, menuChoices, customOptionFor, OTHER_CHOICE, type CustomOptions, type DependentFields } from "../domain/optionPrefs";
 
 const DEFAULT_COVERAGE: CoverageStatus = "ATTEMPTED";
 
-/** The three rows that offer a free-text 「其他」. None of them decides a colour. */
-const blankOtherText = () => ({ assessment: "", sourceType: "", followUpCategory: "" });
+/**
+ * The rows that offer a free-text 「其他」. None of them decides a colour. 住房判斷 has no
+ * 「其他」: it is a fixed scale that has to stay searchable, and free wording belongs in
+ * 觀察／發現 or 證據說明.
+ */
+const blankOtherText = () => ({ sourceType: "", followUpCategory: "" });
 type OtherKey = keyof ReturnType<typeof blankOtherText>;
 
 /**
@@ -74,9 +77,8 @@ export interface ObservationEditorProps {
   subjectId: string;
   subjectType?: "UNIT" | "BUILDING";
   openFollowUps?: OpenFollowUp[];
-  /** This account's self-defined choices, and a way to change them. */
+  /** This account's self-defined choices. They are managed under 工作台設定 › 高級設定. */
   optionPrefs?: CustomOptions;
-  onOptionPrefsChange?: (prefs: CustomOptions) => void;
   onClose: () => void;
   onSubmit: (draft: ObservationDraft) => Promise<void> | void;
 }
@@ -86,12 +88,11 @@ const nowLocal = () => {
   return date.toISOString().slice(0, 16);
 };
 
-export function ObservationEditor({ open, targetLabel, subjectId, openFollowUps = [], optionPrefs = {}, onOptionPrefsChange, onClose, onSubmit }: ObservationEditorProps) {
+export function ObservationEditor({ open, targetLabel, subjectId, openFollowUps = [], optionPrefs = {}, onClose, onSubmit }: ObservationEditorProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [managing, setManaging] = useState(false);
   /*
    * The dependent fields are controlled so a coverage change can fill them in. Reset
    * whenever the dialog opens, so a finished entry never seeds the next one.
@@ -110,7 +111,7 @@ export function ObservationEditor({ open, targetLabel, subjectId, openFollowUps 
     } else if (!open && dialog.open) dialog.close();
   }, [open]);
 
-  useEffect(() => { if (open) { setFields(dependentDefaults(DEFAULT_COVERAGE)); setOtherText(blankOtherText); setCategory(""); setManaging(false); setError(""); } }, [open]);
+  useEffect(() => { if (open) { setFields(dependentDefaults(DEFAULT_COVERAGE)); setOtherText(blankOtherText); setCategory(""); setError(""); } }, [open]);
 
   const close = () => {
     if (saving) return;
@@ -138,19 +139,19 @@ export function ObservationEditor({ open, targetLabel, subjectId, openFollowUps 
     try {
       if (!String(data.get('followUpReason') ?? '').trim() && ['assignee', 'timingNote', 'followUpDueAt'].some(key => String(data.get(key) ?? '').trim())) throw new Error('已填跟進資料，請寫明跟進行動。');
       const coverage = resolve("coverage", value("coverageStatus"));
-      /* The three descriptive rows answer through `descriptiveAnswer`: 「其他」 keeps the
-         wording and stores no value, so none of them can invent a marker or a category. */
-      const assessment = descriptiveAnswer(fields.assessment?.value, otherText.assessment, next => resolve("assessment", next));
+      /* The descriptive rows with a 「其他」 answer through `descriptiveAnswer`: it keeps the
+         wording and stores no value, so neither can invent a marker or a category. */
+      const assessment = resolve("assessment", fields.assessment?.value ?? "");
       const sourceType = descriptiveAnswer(fields.sourceType?.value, otherText.sourceType, next => resolve("sourceType", next));
       // 跟進類別 offers the built-in categories only, so its own value is what gets stored.
       const categoryAnswer = descriptiveAnswer(category, otherText.followUpCategory, next => ({ value: next || undefined }));
       const chosenCategory = categoryAnswer.value ?? "";
       /*
-       * 接觸結果 is no longer asked: it followed the coverage so closely that the two rows
-       * read as one question. It is still stored, derived from the coverage, so a new
-       * record and an old one are read by the pipeline exactly the same way.
+       * 接觸結果 is not asked, so it is not stored: a value nobody confirmed is not a fact.
+       * The pipeline reads an absent contact exactly as it read the value this form used to
+       * derive, so the colour a choice produces is unchanged (see previewState below).
        */
-      const contactOutcomeValue = impliedByCoverage("contactOutcome", coverage.value ?? "UNVISITED") as ContactOutcome | undefined;
+      const contactOutcomeValue: ContactOutcome | undefined = undefined;
       /*
        * Each note is whatever the row kept: the sentence typed under 「其他」, or the
        * wording of the custom option that was picked instead of a built-in.
@@ -197,13 +198,12 @@ export function ObservationEditor({ open, targetLabel, subjectId, openFollowUps 
             choices={menuChoices("coverage", optionPrefs)}
             value={fields.coverage?.value ?? DEFAULT_COVERAGE}
             onChange={next => setFields({ ...applyCoverageChange(fields, resolved("coverage", next)), coverage: { value: next, touched: true } })}
-            dotFor={choice => stateColors[previewState(resolved("coverage", choice) as CoverageStatus, impliedByCoverage("contactOutcome", resolved("coverage", choice)) as ContactOutcome | undefined, false)]} />
+            dotFor={choice => stateColors[previewState(resolved("coverage", choice) as CoverageStatus, undefined, false)]} />
           {/* Neither of the next two decides a colour, so neither gets a dot. */}
-          <ChoiceRow legend="住房判斷" hint="不影響底色；自填文字不會自動變成線索標記" name="housingAssessment"
+          <ChoiceRow legend="住房判斷" hint="不影響底色；補充說明請寫在「觀察／發現」" name="housingAssessment"
             choices={[{ value: "", label: "（今次未更新）" }, ...menuChoices("assessment", optionPrefs)]}
             value={fields.assessment?.value ?? ""}
-            onChange={next => setFields(markTouched(fields, "assessment", next))}
-            other={{ text: otherText.assessment, placeholder: "例如：走廊見到分間門牌", onText: text => setOtherText({ ...otherText, assessment: text }) }} />
+            onChange={next => setFields(markTouched(fields, "assessment", next))} />
           <ChoiceRow legend="資料來源" hint="只作記錄，不影響底色" name="sourceType"
             choices={menuChoices("sourceType", optionPrefs)}
             value={fields.sourceType?.value ?? ""}
@@ -221,12 +221,9 @@ export function ObservationEditor({ open, targetLabel, subjectId, openFollowUps 
           * its box here: it is the one field the pipeline reads, so a sentence beside it
           * has to stay clearly separate from the value that decides the colour.
           */}
-        <details className="cf-custom-options"><summary>覆蓋狀態原話與常用選項（可選）</summary><p className="cf-custom-options__note">覆蓋狀態的選項都不貼切時，在此寫下原話。記錄會同時保留所選項目和這段文字。</p>
+        <details className="cf-custom-options"><summary>覆蓋狀態原話（可選）</summary><p className="cf-custom-options__note">覆蓋狀態的選項都不貼切時，在此寫下原話。記錄會同時保留所選項目和這段文字。</p>
           <div className="cf-form-grid"><label><span>覆蓋狀態原話</span><input name="noteCoverage" placeholder="例如：只走到樓梯口" /></label></div>
-          <p className="cf-custom-options__note">經常用到的原話，可以存成選項，下次直接揀。</p>
-          <button type="button" className="cf-button cf-button--ghost" aria-expanded={managing} onClick={() => setManaging(!managing)}><Settings2 size={16} />管理常用選項</button>
         </details>
-        {managing && onOptionPrefsChange && <OptionManager prefs={optionPrefs} onChange={onOptionPrefsChange} />}
         <fieldset className="cf-followup-fields"><legend><CalendarDays size={17} />可選跟進</legend><label><span>跟進行動</span><input name="followUpReason" placeholder="例如：與同事討論後再訪" /></label><label><span>限期</span><input type="date" name="followUpDueAt" /></label></fieldset>
         {/* A blank category is allowed: "not classified" is not the same as "general". */}
         <div className="cf-choice-grid cf-choice-grid--followup">

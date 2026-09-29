@@ -8,7 +8,7 @@ import {
   coverageOptionGroups, sourceLabels, sourceOptions, stateColors, stateLabels, supportCategoryLabels,
   uncategorisedFollowUpLabel,
 } from '../domain/presentation';
-import { clueOf, unitState, type Observation, type OutreachSnapshot } from '../domain/types';
+import { clueOf, recordFollowUpEvent, tagNode, unitState, type Observation, type OutreachSnapshot } from '../domain/types';
 import { addCustomOption, choiceValue, customOptions, impliedByCoverage, menuChoices, OTHER_CHOICE } from '../domain/optionPrefs';
 
 const flags = { isSynthetic: true as const, provisional: true as const };
@@ -159,7 +159,7 @@ describe('the editor offers the shared option tables', () => {
 describe('self-defined choices reach the menu (§10.4)', () => {
   const prefs = addCustomOption({}, 'coverage', { label: '只走到樓梯口', mapsTo: 'ATTEMPTED' });
   const markup = renderToStaticMarkup(<ObservationEditor open targetLabel="合成大廈 · A室" subjectId="u1"
-    optionPrefs={prefs} onOptionPrefsChange={noop} onClose={noop} onSubmit={noop} />);
+    optionPrefs={prefs} onClose={noop} onSubmit={noop} />);
 
   it('adds the wording to the menu without removing a built-in', () => {
     expect(markup).toContain('只走到樓梯口');
@@ -254,11 +254,17 @@ describe('the entry form shows what each choice would colour (§10.4)', () => {
 describe('the free-text 「其他」 closes the descriptive rows (§10.4)', () => {
   const markup = renderToStaticMarkup(<ObservationEditor open targetLabel="合成大廈 · A室" subjectId="u1" onClose={noop} onSubmit={noop} />);
 
-  it('offers it on 住房判斷, 資料來源 and 跟進類別, and nowhere else', () => {
+  it('offers it on 資料來源 and 跟進類別, and nowhere else', () => {
     const offered = markup.split('cf-choice--other').length - 1;
-    // Three rows carry it; coverage does not, because it is the one row that decides a colour.
-    expect(offered).toBe(3);
-    expect(markup.split(`value="${OTHER_CHOICE}"`).length - 1).toBe(3);
+    // Coverage decides a colour and 住房判斷 is a fixed, searchable scale: neither has one.
+    expect(offered).toBe(2);
+    expect(markup.split(`value="${OTHER_CHOICE}"`).length - 1).toBe(2);
+  });
+
+  it('gives 住房判斷 no free-text way out, so every judgement stays searchable', () => {
+    const housingRow = markup.slice(markup.indexOf('住房判斷'), markup.indexOf('資料來源'));
+    expect(housingRow).not.toContain('cf-choice--other');
+    expect(housingRow).toContain(assessmentLabels.SUSPECTED.slice(0, 2));
   });
 
   it('keeps the box shut until 「其他」 is the chosen answer', () => {
@@ -268,7 +274,7 @@ describe('the free-text 「其他」 closes the descriptive rows (§10.4)', () =
 
   it('does not let the built-in 資料來源 option read as a second 「其他」', () => {
     // The list must hold one way out of it, not two entries that look the same.
-    expect(markup.split('>其他<').length - 1).toBe(3);
+    expect(markup.split('>其他<').length - 1).toBe(2);
   });
 });
 
@@ -315,5 +321,91 @@ describe('a category written out by hand is shown as written (§10.4)', () => {
   it('keeps a stored category when that is what was chosen', () => {
     const snapshot = scene([observation({ id: 'o1', followUp: { ...followUp, category: 'HEALTH_SUPPORT' } })]);
     expect(classLine(renderHistory(snapshot))).toBe(supportCategoryLabels.HEALTH_SUPPORT);
+  });
+});
+
+/* ---------------------------------------------------------------------------------
+ * Decisions of 2026-09-29 (user review of 4b343de).
+ * ------------------------------------------------------------------------------- */
+
+describe('the form reads back in the words it offered', () => {
+  it('shows 未能完成探訪 for what that choice stores, not 曾嘗試', () => {
+    const history = renderHistory(scene([observation({ id: 'o1', coverage: 'ATTEMPTED' })]));
+    expect(history).toContain('未能完成探訪');
+    expect(history).not.toContain('曾嘗試');
+  });
+
+  it('shows 已完成探訪 for what that choice stores', () => {
+    expect(renderHistory(scene([observation({ id: 'o1', coverage: 'VISITED_NO_FINDING' })]))).toContain('已完成探訪');
+  });
+
+  it('keeps the finer wording of older records', () => {
+    expect(renderHistory(scene([observation({ id: 'o1', coverage: 'INACCESSIBLE' })]))).toContain(coverageLabels.INACCESSIBLE);
+    expect(renderHistory(scene([observation({ id: 'o1', coverage: 'PARTIAL' })]))).toContain(coverageLabels.PARTIAL);
+  });
+});
+
+describe('self-defined options live in settings, not in the entry form', () => {
+  const markup = renderToStaticMarkup(<ObservationEditor open targetLabel="合成大廈 · A室" subjectId="u1" onClose={noop} onSubmit={noop} />);
+  it('has no option manager in the entry form', () => {
+    expect(markup).not.toContain('管理常用選項');
+    expect(markup).not.toContain('cf-option-manager');
+  });
+  it('still lets a person write the coverage in their own words', () => {
+    expect(markup).toContain('name="noteCoverage"');
+  });
+});
+
+describe('a task can be closed without a visit', () => {
+  const task = { action: '再訪', status: 'OPEN' as const };
+  const operator = { accountId: 'acct-1', name: '合成操作員' };
+  const withTask = scene([observation({ id: 'o1', followUp: task })]);
+  const history = (snapshot: OutreachSnapshot) => renderToStaticMarkup(<ObservationHistory snapshot={snapshot} subjectId="u1" onFollowUpAction={noop} />);
+
+  it('offers 標記完成 and 取消跟進 on an open task', () => {
+    const html = history(withTask);
+    expect(html).toContain('標記完成');
+    expect(html).toContain('取消跟進');
+  });
+
+  it('shows no buttons when the history is read-only', () => {
+    expect(renderHistory(withTask)).not.toContain('標記完成');
+  });
+
+  it('names who closed it, when, and offers to undo', () => {
+    const done = recordFollowUpEvent(withTask, { id: 'e1', observationId: 'o1', action: 'DONE', at: '2026-01-06T02:00:00.000Z', operator });
+    const html = history(done);
+    expect(html).toContain('已標記完成');
+    expect(html).toContain('合成操作員');
+    expect(html).toContain('撤銷標記完成');
+    expect(html).not.toContain('>取消跟進<');
+  });
+
+  it('shows the reason a task was cancelled', () => {
+    const cancelled = recordFollowUpEvent(withTask, { id: 'e1', observationId: 'o1', action: 'CANCELLED', reason: '已電話聯絡', at: '2026-01-06T02:00:00.000Z', operator });
+    const html = history(cancelled);
+    expect(html).toContain('已取消');
+    expect(html).toContain('已電話聯絡');
+  });
+});
+
+describe('the building panel', () => {
+  const buildingTask = observation({ id: 'ob', floorId: undefined, unitId: undefined, coverage: 'PARTIAL', followUp: { action: '聯絡中心護士', status: 'OPEN', category: 'HEALTH_SUPPORT' } });
+
+  it('keeps building-level tasks in view while a unit is selected', () => {
+    const html = renderDetail(scene([buildingTask]));
+    expect(html).toContain('本幢待跟進');
+    expect(html).toContain('聯絡中心護士');
+  });
+
+  it('shows the manual mark beside the floor without changing any status', () => {
+    const plain = scene([observation({ id: 'o1', coverage: 'VISITED_NO_FINDING' })]);
+    const tagged = tagNode(plain, { buildingId: 'b1', floorId: 'f1' }, 'FOLLOW_UP');
+    expect(renderDetail(tagged)).toContain('已標記跟進');
+    expect(unitState(tagged, 'b1', 'u1')).toBe(unitState(plain, 'b1', 'u1'));
+    // The unit still reads 已完成, not 需留意.
+    const unitCard = (html: string) => html.slice(html.indexOf('cf-units'));
+    expect(unitCard(renderDetail(tagged))).toContain(stateLabels.GREEN);
+    expect(unitCard(renderDetail(tagged))).not.toContain(stateLabels.YELLOW);
   });
 });

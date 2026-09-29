@@ -33,7 +33,7 @@ export function SessionGate({ children }: { children: ReactNode }) {
     setCsrf(); setSession(undefined); setSettings(false); setWorkspaceAccount();
   }, []);
   const accept = useCallback((next: Session) => {
-    setCsrf(next.csrf); setWorkspaceAccount(next.user.id); setSession(next);
+    setCsrf(next.csrf); setWorkspaceAccount(next.user.id, next.user.name); setSession(next);
   }, []);
   const refresh = useCallback(async () => {
     const version = generation.current;

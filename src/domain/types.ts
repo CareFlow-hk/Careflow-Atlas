@@ -101,11 +101,36 @@ export interface Observation extends SyntheticRecord {
   /** Why the correction was made. For traceability only; never part of coverage comparison. */
   correctionReason?: string;
 }
+/**
+ * What a person did to a task in the app, without a visit: marked it done, cancelled
+ * it, or undid either. Append-only, like observations — an undo is a new REOPENED
+ * event, never an edit — so the trail of who closed what, and why, is kept.
+ */
+export const FOLLOW_UP_EVENT_ACTIONS = ["DONE", "CANCELLED", "REOPENED"] as const;
+export type FollowUpEventAction = (typeof FOLLOW_UP_EVENT_ACTIONS)[number];
+/**
+ * The signed-in account that pressed the button. This is the operator, not the field
+ * worker on the paper: the two are different roles and are never substituted.
+ */
+export interface Operator { accountId: string; name: string; }
+export interface FollowUpEvent extends SyntheticRecord {
+  id: string;
+  /** The observation that carries the task. Any version of a correction chain names the same task. */
+  observationId: string;
+  action: FollowUpEventAction;
+  /** Required for CANCELLED; optional otherwise. */
+  reason?: string;
+  /** When the button was pressed. Operation time, not visit time. */
+  at: string;
+  operator: Operator;
+}
 export interface OutreachSnapshot {
   schemaVersion: "0.1-demo"; isSynthetic: true; notice: string;
   buildings: Building[]; floors: Floor[]; units: Unit[]; households: Household[];
   people: Person[]; householdMemberships: HouseholdMembership[]; householdResidences: HouseholdResidence[]; memberships: Membership[];
   visits: Visit[]; observations: Observation[];
+  /** Absent in snapshots saved before tasks could be closed without a visit. */
+  followUpEvents?: FollowUpEvent[];
 }
 
 export interface SaveObservationInput {
@@ -186,9 +211,49 @@ export function followUpResolutions(snapshot: OutreachSnapshot): Map<string, Obs
   return result;
 }
 
+/** A task closed in the app, with the event that closed it. Keyed by every version's id. */
+export function followUpClosures(snapshot: OutreachSnapshot): Map<string, FollowUpEvent> {
+  const roots = observationRootIds(snapshot.observations);
+  const latest = new Map<string, FollowUpEvent>();
+  // Array order is append order, so a later event at the same instant still wins.
+  for (const event of snapshot.followUpEvents ?? []) {
+    const root = roots.get(event.observationId) ?? event.observationId;
+    const prior = latest.get(root);
+    if (!prior || Date.parse(event.at) >= Date.parse(prior.at)) latest.set(root, event);
+  }
+  const result = new Map<string, FollowUpEvent>();
+  for (const [id, root] of roots) {
+    const event = latest.get(root);
+    if (event && event.action !== "REOPENED") result.set(id, event);
+  }
+  return result;
+}
+
+/** Every button press on one task, oldest first, for the history trail. */
+export function followUpEventsFor(snapshot: OutreachSnapshot, observationId: string): FollowUpEvent[] {
+  const roots = observationRootIds(snapshot.observations);
+  const root = roots.get(observationId) ?? observationId;
+  return (snapshot.followUpEvents ?? []).filter(event => (roots.get(event.observationId) ?? event.observationId) === root);
+}
+
+/**
+ * Close or reopen a task without inventing a visit. Only an open task can be closed
+ * and only an app closure can be undone; anything else returns the snapshot unchanged.
+ */
+export function recordFollowUpEvent(snapshot: OutreachSnapshot, input: { id: string; observationId: string; action: FollowUpEventAction; reason?: string; at: string; operator: Operator }): OutreachSnapshot {
+  const reason = input.reason?.trim() || undefined;
+  if (input.action === "CANCELLED" && !reason) throw new Error("取消跟進須寫明原因。");
+  const isOpen = getOpenFollowUps(snapshot).some(task => task.observationId === input.observationId);
+  const closedInApp = followUpClosures(snapshot).has(input.observationId);
+  if (input.action === "REOPENED" ? !closedInApp : !isOpen) return snapshot;
+  const event: FollowUpEvent = { isSynthetic: true, provisional: true, id: input.id, observationId: input.observationId, action: input.action, at: input.at, operator: input.operator, ...(reason ? { reason } : {}) };
+  return { ...snapshot, followUpEvents: [...snapshot.followUpEvents ?? [], event] };
+}
+
 export function getOpenFollowUps(snapshot: OutreachSnapshot): OpenFollowUp[] {
   const resolved = followUpResolutions(snapshot);
-  return effectiveObservations(snapshot).filter(item => item.followUp?.status === "OPEN" && !resolved.has(item.id))
+  const closed = followUpClosures(snapshot);
+  return effectiveObservations(snapshot).filter(item => item.followUp?.status === "OPEN" && !resolved.has(item.id) && !closed.has(item.id))
     .map(item => ({ observationId: item.id, buildingId: item.buildingId, floorId: item.floorId, unitId: item.unitId, action: item.followUp!.action, dueDate: item.followUp!.dueDate, category: item.followUp!.category, assignee: item.followUp!.assignee, timingNote: item.followUp!.timingNote }));
 }
 
@@ -324,12 +389,14 @@ export function aggregate(states: State[]): State | undefined {
   return states.every(state => state === states[0]) ? states[0] : "YELLOW";
 }
 
-/** The latest event anywhere below this node, used to time the competition in `nodeState`. */
+/**
+ * The latest unit event below this node, used to time the competition in `nodeState`.
+ * Floors keep no record of their own, so only unit events count as "below".
+ */
 export function latestChildInScope(snapshot: OutreachSnapshot, scope: Scope): Observation | undefined {
   if (scope.unitId !== undefined) return undefined;
   return latestObservation(effectiveObservations(snapshot).filter(item => item.buildingId === scope.buildingId
-    && (scope.floorId !== undefined ? item.unitId !== undefined && item.floorId === scope.floorId
-      : item.floorId !== undefined || item.unitId !== undefined)));
+    && item.unitId !== undefined && (scope.floorId === undefined || item.floorId === scope.floorId)));
 }
 
 /**
@@ -361,48 +428,38 @@ export function nodeState(snapshot: OutreachSnapshot, scope: Scope, childStates:
   return withOpenTasks(computed ?? "GRAY", hasOpen);
 }
 
-/** The real state of one unit. */
+/** The state of one unit, from its own latest record. */
 export function unitState(snapshot: OutreachSnapshot, buildingId: string, unitId: string): State {
   const scope: Scope = { buildingId, unitId };
-  const computed = stateOf(snapshot, scope, openFollowUpsInScope(snapshot, scope).length > 0);
-  return inheritedState(computed, inheritedTagAt(snapshot, buildingId, snapshot.units.find(unit => unit.id === unitId)?.floorId));
+  return stateOf(snapshot, scope, openFollowUpsInScope(snapshot, scope).length > 0);
 }
 
-/** The real state of one floor: its own record against its units. */
+/**
+ * The state of one floor: purely the aggregate of its units. A floor keeps no record
+ * of its own — entry and import only write unit or building records — so a legacy
+ * floor-level event, if one exists, is history only and never decides the colour.
+ */
 export function floorState(snapshot: OutreachSnapshot, buildingId: string, floorId: string): State {
-  const scope: Scope = { buildingId, floorId };
   const childStates = snapshot.units.filter(unit => unit.floorId === floorId).map(unit => unitState(snapshot, buildingId, unit.id));
-  const computed = effectiveState(nodeState(snapshot, scope, childStates, latestChildInScope(snapshot, scope)), snapshot.floors.find(floor => floor.id === floorId)?.tag);
-  return inheritedState(computed, inheritedTagAt(snapshot, buildingId));
+  return withOpenTasks(aggregate(childStates) ?? "GRAY", openFollowUpsInScope(snapshot, { buildingId, floorId }).length > 0);
 }
 
-/** The real state of one building: its own record against its floors. */
+/** The state of one building: its own record against its floors, whichever is newer. */
 export function buildingState(snapshot: OutreachSnapshot, buildingId: string): State {
   const scope: Scope = { buildingId };
   const childStates = snapshot.floors.filter(floor => floor.buildingId === buildingId).map(floor => floorState(snapshot, buildingId, floor.id));
-  return effectiveState(nodeState(snapshot, scope, childStates, latestChildInScope(snapshot, scope)), snapshot.buildings.find(building => building.id === buildingId)?.tag);
+  return nodeState(snapshot, scope, childStates, latestChildInScope(snapshot, scope));
 }
 
 /**
- * The manual tag paints a node yellow, but never over a failure: "could not get in"
- * carries more than a hand-added mark, so the red stays and the tag shows as a mark.
+ * The manual FOLLOW_UP mark is a separate marker on the building or floor it was set
+ * on. It never changes a colour, never cascades to units and never takes part in the
+ * aggregate — the colour always says what the records say.
  */
-export function effectiveState(computed: State, tag?: NodeTag): State {
-  return tag === "FOLLOW_UP" && computed !== "RED" ? "YELLOW" : computed;
-}
-
-/**
- * The same rule applied down the tree: a tagged floor paints its units, a tagged
- * building paints its floors and units — while every red unit keeps its own colour.
- */
-export function inheritedState(computed: State, inheritedTag: boolean): State {
-  return inheritedTag && computed !== "RED" ? "YELLOW" : computed;
-}
-
-/** A mark set at this node or above it. Units have no mark of their own. */
-export function inheritedTagAt(snapshot: OutreachSnapshot, buildingId: string, floorId?: string): boolean {
-  return snapshot.buildings.find(building => building.id === buildingId)?.tag === "FOLLOW_UP"
-    || (floorId !== undefined && snapshot.floors.find(floor => floor.id === floorId)?.tag === "FOLLOW_UP");
+export function isTagged(snapshot: OutreachSnapshot, subject: { buildingId: string; floorId?: string }): boolean {
+  return subject.floorId !== undefined
+    ? snapshot.floors.find(floor => floor.id === subject.floorId)?.tag === "FOLLOW_UP"
+    : snapshot.buildings.find(building => building.id === subject.buildingId)?.tag === "FOLLOW_UP";
 }
 
 /**
