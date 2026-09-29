@@ -51,7 +51,7 @@ scenarios.forEach((scenario, buildingIndex) => {
   const shape = geometry.buildings.find(item => item.id === id);
   if (!shape) throw new Error(`Missing district demo geometry: ${id}`);
   const initialCoverage = buildingIndex === 15 ? 'UNKNOWN' : 'UNVISITED';
-  const building: Building = { ...synthetic, id, name: `${scenario.name}（合成）`, address: `演示街區 ${String(buildingIndex + 1).padStart(2, '0')} 號 · 虛構地址`, coordinates: { ...shape.coordinates }, footprint: shape.footprint.map(point => [...point]), layoutDeclared: scenario.floors > 0, initialCoverage, ...(scenario.floors > 0 ? { floorCount: scenario.floors } : {}) };
+  const building: Building = { ...synthetic, id, name: scenario.name, address: `演示街區 ${String(buildingIndex + 1).padStart(2, '0')} 號 · 虛構地址`, coordinates: { ...shape.coordinates }, footprint: shape.footprint.map(point => [...point]), layoutDeclared: scenario.floors > 0, initialCoverage, ...(scenario.floors > 0 ? { floorCount: scenario.floors } : {}) };
   additions.buildings.push(building);
   for (let level = 1; level <= scenario.floors; level++) {
     const floorId = `${id}-f${level}`;

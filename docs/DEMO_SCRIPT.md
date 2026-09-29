@@ -13,17 +13,17 @@ Open the Vite URL on a laptop with network access. Use a separate fresh browser 
 
 ## Main path
 
-1. Point out `DEMO DATA · Synthetic records only`. Ground footprints come from the basemap; building identities, residents, heights, floors and outreach events are fictional.
-2. Select **探索完整街區** (or **街區擴展情境** if already loaded). Review the real Excel import: 20 buildings, 56 people, 362 units and 256 observations in the source workbook. Select **確認合併資料**. Existing workspace history is preserved, so local totals can differ from the source workbook. A repeat import adds zero records.
+1. Point out the **示範資料** badge in the header (the **?** help panel explains the four colours). Ground footprints come from the basemap; building identities, residents, heights, floors and outreach events are fictional.
+2. In an empty workspace select **載入示範資料**: the bundled district (20 buildings, 56 people, 362 units, 256 observations) loads directly. To show the Excel review instead, open **紙本與 Excel** → **重新載入示範資料**, then **確認合併資料**; existing history is preserved and a repeat import adds zero records.
 3. Explore the tilted district overview. Background heights are compressed for legibility; every marked location remains selectable even when its name is collapsed to a dot. Use **框選全部大廈** to restore the view.
-4. Select **晴川樓（合成）**. Its 14 declared floors expand automatically at the same ground footprint. Rotate 45 degrees, select the top floor and inspect the unvisited units. Contrast this with the lower floors that have dated records and a follow-up.
+4. Select **晴川樓**. Its 14 declared floors expand automatically at the same ground footprint; each 3D floor label shows its unit composition. Drag to rotate, select the top floor and inspect the unvisited units. Contrast this with the lower floors that have dated records and a follow-up.
 5. Open **1樓 A室** to inspect the original resident report, follow-up action, responsible worker and unconfirmed relative timing. Keep housing judgement separate from contact and support needs.
-6. Return to the overview and select **青禾樓（合成）**, then **1樓 A室**. Show the original invitation and later information-reply completion. Finishing that task does not imply that all resident needs are resolved.
+6. Return to the overview and select **青禾樓**, then **1樓 A室**. Show the original invitation and later information-reply completion. Finishing that task does not imply that all resident needs are resolved.
 7. Open **紙本與 Excel**. Preview an A4 building paper form, then export the current Excel workbook. Explain the working sequence: paper outside, new Excel rows at the centre, review and merge, then a derived follow-up list.
 
 ## Optional append-and-close example
 
-Choose a unit with an open task, open **記錄今次結果**, add a clearly synthetic result, explicitly choose the task under **同時結束既有復訪**, and save. The new event appears above the old one, and the task leaves the open list. Counts are derived from the actual workspace; do not promise fixed before/after numbers after previous demonstrations.
+Choose a unit with an open task and press **標記完成** on the task in its history (or **取消跟進** with a reason). No visit is invented; the task leaves the open list and the history names who closed it and when. **撤銷** reopens it. Counts are derived from the actual workspace; do not promise fixed before/after numbers after previous demonstrations.
 
 ## Useful contrasts
 

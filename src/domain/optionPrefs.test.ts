@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { OPTION_FIELDS, type OptionField } from './types';
 import {
   addCustomOption, applyCoverageChange, builtInChoices, choiceValue, customOptionFor, customOptions,
-  dependentDefaults, descriptiveAnswer, impliedByCoverage, isMappedValue, markTouched, menuChoices,
-  nextOptionId, OTHER_CHOICE, parseCustomOptions, removeCustomOption, setCustomOptionHidden, type CustomOptions,
+  dependentDefaults, impliedByCoverage, isMappedValue, markTouched, menuChoices,
+  nextOptionId, parseCustomOptions, removeCustomOption, setCustomOptionHidden, type CustomOptions,
 } from './optionPrefs';
 
 const allFields: OptionField[] = [...OPTION_FIELDS];
@@ -179,57 +179,5 @@ describe('a coverage choice fills in what it already implies', () => {
   it('keeps a touched field even when the new coverage implies nothing at all', () => {
     const answered = markTouched(dependentDefaults('ATTEMPTED'), 'assessment', 'SUSPECTED');
     expect(applyCoverageChange(answered, 'UNKNOWN').assessment).toEqual({ value: 'SUSPECTED', touched: true });
-  });
-});
-
-/*
- * §10.4: the three descriptive rows — 住房判斷, 資料來源, 跟進類別 — close with 「其他」.
- * A typed sentence declares no value, and that is the whole point: it must never invent a
- * clue marker, a follow-up category or a colour. The wording is kept, the value is not.
- */
-describe('「其他」 keeps the wording and stores no value (§10.4)', () => {
-  /** What the editor passes in: a custom option stores its declared value and its wording. */
-  const resolve =
-    (prefs: CustomOptions, field: OptionField) =>
-    (value: string): { value?: string; note?: string } => {
-      const custom = customOptionFor(field, prefs, value);
-      return custom ? { value: custom.mapsTo, note: custom.label } : { value: value || undefined };
-    };
-
-  it('stores the typed sentence and no enum at all', () => {
-    const answer = descriptiveAnswer(OTHER_CHOICE, '  走廊見到分間門牌  ', resolve({}, 'assessment'));
-    expect(answer.value).toBeUndefined();
-    expect(answer.note).toBe('走廊見到分間門牌');
-  });
-
-  it('treats an empty 「其他」 as no answer, not as an empty one', () => {
-    // A box opened and left blank says nothing; it must not become a blank-named note.
-    expect(descriptiveAnswer(OTHER_CHOICE, '   ', resolve({}, 'sourceType'))).toEqual({ note: undefined });
-  });
-
-  it('never lets a typed answer pass as a value the pipeline reads', () => {
-    const answer = descriptiveAnswer(OTHER_CHOICE, 'SUSPECTED', resolve({}, 'assessment'));
-    // Typing the name of an enum is still just text: the marker is not created by wording.
-    expect(answer.value).toBeUndefined();
-  });
-
-  it('stores a built-in answer as its own value', () => {
-    expect(descriptiveAnswer('SUSPECTED', '', resolve({}, 'assessment'))).toEqual({ value: 'SUSPECTED' });
-    expect(descriptiveAnswer('HEALTH_SUPPORT', '', resolve({}, 'coverage'))).toEqual({ value: 'HEALTH_SUPPORT' });
-  });
-
-  it('stores a custom answer as the value it declared, plus its wording', () => {
-    const prefs = addCustomOption({}, 'assessment', { label: '分間門牌', mapsTo: 'SUSPECTED' });
-    const answer = descriptiveAnswer(choiceValue(customOptions(prefs, 'assessment')[0]), '', resolve(prefs, 'assessment'));
-    expect(answer).toEqual({ value: 'SUSPECTED', note: '分間門牌' });
-  });
-
-  it('ignores typed wording when 「其他」 is not the chosen answer', () => {
-    // A sentence left over from an abandoned 「其他」 must not attach itself to a real choice.
-    expect(descriptiveAnswer('NO_INDICATION', '走廊見到分間門牌', resolve({}, 'assessment'))).toEqual({ value: 'NO_INDICATION' });
-  });
-
-  it('leaves a row that was never answered absent', () => {
-    expect(descriptiveAnswer(undefined, '', resolve({}, 'assessment'))).toEqual({ value: undefined });
   });
 });

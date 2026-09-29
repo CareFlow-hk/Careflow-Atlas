@@ -13,22 +13,22 @@ export const SESSION_ABSOLUTE_MS = 12 * 60 * 60_000;
 export class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }
 export const requireValue = (condition, status, message) => { if (!condition) throw new HttpError(status, message); };
 export function emailValue(value) {
-  requireValue(typeof value === 'string' && value.length <= 254, 400, '请输入有效邮箱。');
+  requireValue(typeof value === 'string' && value.length <= 254, 400, '請輸入有效電郵。');
   const email = value.trim().toLowerCase();
-  requireValue(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email), 400, '请输入有效邮箱。');
+  requireValue(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email), 400, '請輸入有效電郵。');
   return email;
 }
 export function nameValue(value) {
-  requireValue(typeof value === 'string' && value.trim().length >= 1 && value.trim().length <= 80, 400, '姓名须为 1–80 个字符。');
+  requireValue(typeof value === 'string' && value.trim().length >= 1 && value.trim().length <= 80, 400, '姓名須為 1–80 個字元。');
   return value.trim();
 }
 function passwordValue(value) {
-  requireValue(typeof value === 'string' && [...value].length >= 15 && value.length <= 128, 400, '密码须为 15–128 个字符，可使用长句。');
+  requireValue(typeof value === 'string' && [...value].length >= 15 && value.length <= 128, 400, '密碼須為 15–128 個字元，可使用長句。');
 }
 // Asynchronous memory-hard hashing; bounded concurrency limits memory use.
 let hashing = 0;
 async function derive(password, salt) {
-  requireValue(hashing < 4, 503, '服务繁忙，请稍后重试。');
+  requireValue(hashing < 4, 503, '服務繁忙，請稍後重試。');
   hashing++;
   try { return await scrypt(password, salt, 64, { N: 32768, r: 8, p: 3, maxmem: 64 * 1024 * 1024 }); }
   finally { hashing--; }
@@ -49,7 +49,7 @@ export function openAuth(path, { now = Date.now } = {}) {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(path, { timeout: 5000 });
   if (path !== ':memory:') chmodSync(path, 0o600);
-  if (db.prepare('PRAGMA user_version').get().user_version > 1) { db.close(); throw new Error('账号库版本高于当前程序，拒绝降级打开。'); }
+  if (db.prepare('PRAGMA user_version').get().user_version > 1) { db.close(); throw new Error('帳號庫版本高於目前程式，拒絕降級打開。'); }
   db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
@@ -84,7 +84,7 @@ export function openAuth(path, { now = Date.now } = {}) {
     run(`INSERT INTO rate_limits VALUES(?,1,?) ON CONFLICT(key) DO UPDATE SET
       count=CASE WHEN expires_at<=? THEN 1 ELSE count+1 END,
       expires_at=CASE WHEN expires_at<=? THEN excluded.expires_at ELSE expires_at END`, hashed, now() + window, now(), now());
-    requireValue(get('SELECT count FROM rate_limits WHERE key=?', hashed).count <= max, 429, '尝试过于频繁，请稍后重试。');
+    requireValue(get('SELECT count FROM rate_limits WHERE key=?', hashed).count <= max, 429, '嘗試過於頻繁，請稍後重試。');
   }
   const userById = id => get('SELECT * FROM users WHERE id=?', id);
   function grant(userId, actor) {
@@ -96,9 +96,9 @@ export function openAuth(path, { now = Date.now } = {}) {
   }
   function createUser(input, actor = null) {
     const email = emailValue(input.email), name = nameValue(input.name);
-    requireValue(['ADMIN', 'MEMBER'].includes(input.role), 400, '无效角色。');
+    requireValue(['ADMIN', 'MEMBER'].includes(input.role), 400, '無效角色。');
     return transaction(() => {
-      requireValue(!get('SELECT id FROM users WHERE email=?', email), 409, '该邮箱已存在。');
+      requireValue(!get('SELECT id FROM users WHERE email=?', email), 409, '該電郵已存在。');
       const id = randomUUID();
       run('INSERT INTO users(id,email,name,role,created_at) VALUES(?,?,?,?,?)', id, email, name, input.role, now());
       audit(actor, 'user_created', id);
@@ -115,9 +115,9 @@ export function openAuth(path, { now = Date.now } = {}) {
   function assertSession(row, admin = false) {
     const fresh = get(`SELECT s.hash FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.hash=?
       AND u.disabled=0 AND s.expires_at>? AND s.seen_at>?`, row.hash, now(), now() - SESSION_IDLE_MS);
-    requireValue(fresh, 401, '会话已过期，请重新登录。');
+    requireValue(fresh, 401, '登入已過期，請重新登入。');
     const user = userById(row.user_id);
-    requireValue(!admin || user.role === 'ADMIN', 403, '需要管理员权限。');
+    requireValue(!admin || user.role === 'ADMIN', 403, '需要管理員權限。');
     return user;
   }
   function newSession(userId) {
@@ -136,17 +136,17 @@ export function openAuth(path, { now = Date.now } = {}) {
     const current = user && userById(user.id);
     if (!valid || !current || current.disabled || !current.password_hash || current.version !== user.version) {
       audit(null, 'login_failed');
-      throw new HttpError(401, '邮箱或密码不正确，或账号不可用。');
+      throw new HttpError(401, '電郵或密碼不正確，或帳號不可用。');
     }
     return transaction(() => { audit(user.id, 'login'); return newSession(user.id); });
   }
   async function redeem(token, password, ip) {
     clean(); limit(`redeem:${ip}`, 20);
-    requireValue(typeof token === 'string' && /^[\w-]{43}$/.test(token), 400, '链接无效或已过期。');
+    requireValue(typeof token === 'string' && /^[\w-]{43}$/.test(token), 400, '連結無效或已過期。');
     const hashed = await hashPassword(password);
     return transaction(() => {
       const row = get('SELECT * FROM grants WHERE hash=? AND expires_at>?', digest(token), now());
-      requireValue(row && !userById(row.user_id).disabled, 400, '链接无效或已过期。');
+      requireValue(row && !userById(row.user_id).disabled, 400, '連結無效或已過期。');
       run('UPDATE users SET password_hash=?,version=version+1 WHERE id=?', hashed, row.user_id);
       run('DELETE FROM grants WHERE user_id=?', row.user_id);
       run('DELETE FROM sessions WHERE user_id=?', row.user_id);
@@ -156,11 +156,11 @@ export function openAuth(path, { now = Date.now } = {}) {
   async function changePassword(row, oldPassword, password) {
     const user = assertSession(row);
     limit(`password:${user.id}`, 10);
-    requireValue(await verifyPassword(oldPassword, user.password_hash), 400, '当前密码不正确。');
+    requireValue(await verifyPassword(oldPassword, user.password_hash), 400, '目前密碼不正確。');
     const hashed = await hashPassword(password);
     return transaction(() => {
       const current = assertSession(row);
-      requireValue(current.version === user.version, 409, '账号已发生变化，请重新登录。');
+      requireValue(current.version === user.version, 409, '帳號已發生變化，請重新登入。');
       run('UPDATE users SET password_hash=?,version=version+1 WHERE id=?', hashed, user.id);
       run('DELETE FROM sessions WHERE user_id=?', user.id);
       run('DELETE FROM grants WHERE user_id=?', user.id);
@@ -171,11 +171,11 @@ export function openAuth(path, { now = Date.now } = {}) {
     return transaction(() => {
       assertSession(actor, true);
       const user = userById(id);
-      requireValue(user, 404, '账号不存在。');
-      requireValue(['ADMIN', 'MEMBER'].includes(input.role) && typeof input.disabled === 'boolean', 400, '无效账号设置。');
+      requireValue(user, 404, '帳號不存在。');
+      requireValue(['ADMIN', 'MEMBER'].includes(input.role) && typeof input.disabled === 'boolean', 400, '無效帳號設定。');
       const name = nameValue(input.name);
       if (user.role === 'ADMIN' && !user.disabled && user.password_hash && (input.role !== 'ADMIN' || input.disabled)) {
-        requireValue(get("SELECT COUNT(*) AS n FROM users WHERE role='ADMIN' AND disabled=0 AND password_hash IS NOT NULL").n > 1, 409, '不能停用或降级最后一位已激活管理员。');
+        requireValue(get("SELECT COUNT(*) AS n FROM users WHERE role='ADMIN' AND disabled=0 AND password_hash IS NOT NULL").n > 1, 409, '不能停用或降級最後一位已啟用管理員。');
       }
       run('UPDATE users SET role=?,disabled=?,name=?,version=version+1 WHERE id=?', input.role, Number(input.disabled), name, id);
       run('DELETE FROM sessions WHERE user_id=?', id);

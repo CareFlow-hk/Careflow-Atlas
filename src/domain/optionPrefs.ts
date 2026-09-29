@@ -50,35 +50,6 @@ export function isMappedValue(field: OptionField, mapsTo: string): boolean {
   return builtInChoices(field).some(choice => choice.value === mapsTo);
 }
 
-/**
- * The free-text choice that closes a descriptive row. Unlike a custom option it declares
- * no `mapsTo`, and that is the point: a typed sentence stores no enum value, so it can
- * never invent a clue marker, a category or a colour. The wording is kept in
- * `optionNotes` beside an absent value, which is exactly what "not recorded, but here is
- * what was actually written" means. The value cannot collide with a built-in enum or
- * with `custom:<id>`.
- */
-export const OTHER_CHOICE = 'other';
-
-/**
- * What a descriptive row stores, for the three rows that draw no colour: 住房判斷,
- * 資料來源 and 跟進類別.
- *
- * 「其他」 is the one answer that keeps no enum. The typed sentence goes to `optionNotes`
- * and the value stays absent, so a free-text answer can never invent a clue marker, a
- * follow-up category or a colour — the row is descriptive, and an absent value is how
- * "nothing was recorded, but here is what was written" is said. Every other answer
- * stores what `resolve` makes of it, which is where a custom option declares its value.
- */
-export function descriptiveAnswer(
-  chosen: string | undefined,
-  typedText: string,
-  resolve: (value: string) => { value?: string; note?: string },
-): { value?: string; note?: string } {
-  if (chosen === OTHER_CHOICE) return { note: typedText.trim() || undefined };
-  return resolve(chosen ?? '');
-}
-
 /** What the menu offers: every built-in, then the custom options left visible. */
 export function menuChoices(field: OptionField, prefs: CustomOptions): { value: string; label: string; hint?: string }[] {
   return [

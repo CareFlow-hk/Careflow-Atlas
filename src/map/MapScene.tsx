@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Map as LibreMap, Marker, MercatorCoordinate, NavigationControl, ScaleControl, setWorkerUrl, type ExpressionSpecification, type GeoJSONSource, type MapMouseEvent } from 'maplibre-gl';
 import mapWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
-import { Compass, Flag, Layers3, Minus, Plus, RotateCcw, RotateCw, Scan, WifiOff } from 'lucide-react';
+import { Compass, Flag, Layers3, Minus, Plus, Scan, WifiOff } from 'lucide-react';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { FeatureCollection, Polygon } from 'geojson';
 import { buildingFeatures, districtBounds, visibleDistrictLabels, DISTRICT_CAMERA, floorFeatures, floorBase, footprintOf, markerLabel, FLOOR_HEIGHT, type MapBuilding } from './mapModel';
@@ -431,27 +431,21 @@ export default function MapScene(props: MapSceneProps) {
     {!ready && !failed && <div className="map-loading"><span className="loading-orbit" />正在載入西營盤地圖</div>}
     {failed && <div className="map-failure" role="status"><WifiOff size={22} /><strong>底圖暫時無法顯示</strong><span>你仍可從大廈清單查看樓層、記錄結果。</span></div>}
     <div className="map-location"><span>香港 · 中西區 / 外展街區</span><strong>西營盤 <small>Sai Ying Pun</small></strong>
-      <div className="district-map-summary"><b>{props.buildings.length.toString().padStart(2, '0')}</b><span>個業務地點<small>{knownUnits ? `${recordedUnits} / ${knownUnits} 個已知單位有記錄` : '樓層與單位待確認'}</small></span></div>
+      {props.buildings.length > 0 && <div className="district-map-summary"><b>{props.buildings.length.toString().padStart(2, '0')}</b><span>個業務地點<small>{knownUnits ? `${recordedUnits} / ${knownUnits} 個已知單位有記錄` : '樓層與單位待確認'}</small></span></div>}
     </div>
     <div className="map-tools" role="group" aria-label="相機控制" title="右鍵拖曳可自由旋轉及調整傾角">
-      <button className="map-tool" aria-label="框選全部大廈" title="框選全部大廈" disabled={!ready} onClick={() => { if (active) props.onOverview(); else if (mapRef.current) frameDistrict(mapRef.current); }}><Scan size={19} /></button>
+      {active && active.floors.length > 0 && <button className={`map-tool ${props.expanded ? 'is-active' : ''}`} aria-label={props.expanded ? '合攏樓層' : '展開樓層'} title={props.expanded ? '合攏樓層' : '展開樓層'} aria-pressed={props.expanded} onClick={props.onToggleExpanded} disabled={!ready}><Layers3 size={19} /></button>}
+      <button className="map-tool" aria-label={active ? '返回街區總覽' : '框選全部大廈'} title={active ? '返回街區總覽' : '框選全部大廈'} disabled={!ready} onClick={() => { if (active) props.onOverview(); else if (mapRef.current) frameDistrict(mapRef.current); }}><Scan size={19} /></button>
       <button className="map-tool" onClick={toggle3D} aria-label={is3D ? '切換平面地圖' : '切換立體地圖'} disabled={!ready}>{is3D ? '2D' : '3D'}</button>
       <button className="map-tool" aria-label="放大地圖" onClick={() => mapRef.current?.zoomIn({ duration: motionDuration(300), easing: easeInOutCubic })} disabled={!ready}><Plus size={19} /></button>
       <button className="map-tool" aria-label="縮小地圖" onClick={() => mapRef.current?.zoomOut({ duration: motionDuration(300), easing: easeInOutCubic })} disabled={!ready}><Minus size={19} /></button>
-      <button className="map-tool rotation-tool" aria-label="向左旋轉視角 45 度" title="向左旋轉 45°" onClick={() => rotateCamera((mapRef.current?.getBearing() ?? 0) - 45)} disabled={!ready}><RotateCcw size={19} /></button>
-      <button className="map-tool" aria-label="向右旋轉視角 45 度" title="向右旋轉 45°" onClick={() => rotateCamera((mapRef.current?.getBearing() ?? 0) + 45)} disabled={!ready}><RotateCw size={19} /></button>
+      {/* Rotation is a drag (right-drag with a mouse); the compass puts north back. */}
       <button className="map-tool compass" aria-label="地圖朝北" title="回正北方" onClick={() => rotateCamera(0)} disabled={!ready}><Compass size={20} style={{ transform: `rotate(${-bearing}deg)` }} /><span>N</span></button>
       <output className="camera-bearing" aria-label="相機方位角">{(bearing + 360) % 360}°</output>
     </div>
-    {active && <div className="building-focus-bar">
-      <div><span className="eyebrow">正在查看 · 示意結構</span><strong>{active.name}<small>{active.floors.length ? `${active.floors.length} 層` : '樓層待確認'}</small></strong></div>
-      <button className={`primary-button ${props.expanded ? 'is-active' : ''}`} onClick={props.onToggleExpanded} disabled={!active.floors.length}><Layers3 size={17} />{props.expanded ? '合攏樓層' : '展開樓層'}</button>
-      <button className="icon-button" aria-label="返回街區總覽" onClick={props.onOverview}><RotateCcw size={18} /></button>
-    </div>}
     {hover && <div className="map-hover" style={{ left: hover.x, top: hover.y }}><strong>{hover.title}</strong><span>{hover.subtitle}</span></div>}
     {notice && <button className="map-notice" onClick={() => setNotice('')} role="status">{notice}<span>×</span></button>}
-    {/* Yellow is not "待跟進": a task shows as a badge, and a yellow without one means the levels disagree. */}
-    <div className="map-legend">{OUTREACH_STATES.map(state => <span key={state} title={stateLegendNotes[state]}><i className="legend-swatch" style={{ background: stateColors[state] }} />{stateLabels[state]}<small>{stateLegendNotes[state]}</small></span>)}</div>
-    <div className="geometry-note">{active ? '鏡頭防遮擋 · 拉遠自動恢復樓高' : '背景高度已壓縮 · 業務地點及樓層為合成示意'}</div>
+    {/* One compact row; what each colour means is in the help panel (and the tooltip). */}
+    <div className="map-legend">{OUTREACH_STATES.map(state => <span key={state} title={stateLegendNotes[state]}><i className="legend-swatch" style={{ background: stateColors[state] }} />{stateLabels[state]}</span>)}</div>
   </div>;
 }

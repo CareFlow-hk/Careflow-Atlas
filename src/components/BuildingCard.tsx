@@ -31,7 +31,7 @@ export function BuildingCard({ name, address, floorCount, index, state, summary,
         {hasFollowUp && <span className="revisit-count" title={`${summary.followUps} 項待跟進`}><RotateCcw size={12} />{summary.followUps} 待跟進</span>}
       </div>
       <div className="building-progress"><span style={{ width: `${summary.total ? Math.min(100, summary.completed / summary.total * 100) : 0}%` }} /></div>
-      <div className="building-card-meta"><span>{summary.total ? `${summary.completed} / ${summary.total} 個單位已查看` : "單位範圍待確認"}</span><span>{floorCount ? `${floorCount} 層 · 示意` : "樓層未知"}</span></div>
+      <div className="building-card-meta"><span>{summary.total ? `${summary.completed} / ${summary.total} 個單位已查看` : "單位範圍待確認"}</span><span>{floorCount ? `${floorCount} 層` : "樓層未知"}</span></div>
     </button>
   );
 }

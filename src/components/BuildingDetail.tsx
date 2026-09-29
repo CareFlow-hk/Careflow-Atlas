@@ -1,8 +1,9 @@
-import { ArrowLeft, Building2, CalendarClock, Check, ClipboardPlus, DoorOpen, Flag, Grid2X2, List, MapPin, RotateCcw } from "lucide-react";
-import { useMemo, useState, type CSSProperties } from "react";
+import { ArrowLeft, Building2, CalendarClock, Check, ClipboardPlus, DoorOpen, Flag, MapPin, RotateCcw } from "lucide-react";
+import { useMemo, type CSSProperties } from "react";
 import { buildingState, clueOf, floorState, followUpBadges, followUpEventsFor, getCoverageStatus, getCoverageSummary, getOpenFollowUps, isTagged, unitState, type NodeTag, type OutreachSnapshot, type State } from "../domain/types";
 import { clueLabels, coverageLabels, nodeTagLabel, stateColors, stateLabels, stateLegendNotes, supportCategoryLabels, uncategorisedFollowUpLabel } from "../domain/presentation";
 import { ObservationHistory } from "./ObservationHistory";
+import { features } from "../app/features";
 import { FollowUpActions, type FollowUpActionHandler } from "./FollowUpActions";
 
 export interface BuildingDetailProps { snapshot: OutreachSnapshot; selectedBuildingId?: string; selectedFloorId?: string; selectedUnitId?: string; onBack?: () => void; onSelectFloor: (floorId: string) => void; onSelectUnit: (unitId: string) => void; onToggleTag: (subject: { buildingId: string; floorId?: string }, tag?: NodeTag) => void; onFollowUpAction?: FollowUpActionHandler; onStartObservation: (subject: { buildingId: string; floorId?: string; unitId?: string; label: string }) => void; }
@@ -14,7 +15,6 @@ function StateMark({ state, label }: { state: State; label: string }) {
 
 export function BuildingDetail(props: BuildingDetailProps) {
   const { snapshot, selectedBuildingId, selectedFloorId, selectedUnitId, onBack, onSelectFloor, onSelectUnit, onToggleTag, onFollowUpAction, onStartObservation } = props;
-  const [view, setView] = useState<"grid" | "list">("grid");
   const building = snapshot.buildings.find((item) => item.id === selectedBuildingId);
   const floors = useMemo(() => snapshot.floors.filter((item) => item.buildingId === selectedBuildingId).sort((a, b) => b.level - a.level), [snapshot.floors, selectedBuildingId]);
   const activeFloorId = selectedFloorId;
@@ -31,11 +31,11 @@ export function BuildingDetail(props: BuildingDetailProps) {
   const buildingTasks = openFollowUps.filter(task => task.buildingId === building.id && !task.floorId && !task.unitId);
   return (
     <aside className="cf-building-panel" aria-label={`${building.name} 詳情`}>
-      <header className="cf-building-header">{onBack && <button className="cf-icon-button" onClick={onBack} aria-label="返回地圖"><ArrowLeft /></button>}<div><span className="cf-eyebrow">大廈檔案 · 合成示例</span><h2>{building.name}</h2><p><MapPin size={14} />{building.address}</p></div>
-        <button className="cf-tag-button" aria-pressed={buildingTagged} onClick={() => onToggleTag({ buildingId: building.id }, buildingTagged ? undefined : "FOLLOW_UP")} title={buildingTagged ? "取消大廈的跟進標記" : "為全幢加上跟進標記"}><Flag size={15} />{buildingTagged ? "已標記" : "標記跟進"}</button>
+      <header className="cf-building-header">{onBack && <button className="cf-icon-button" onClick={onBack} aria-label="返回地圖"><ArrowLeft /></button>}<div><span className="cf-eyebrow">大廈檔案</span><h2>{building.name}</h2><p><MapPin size={14} />{building.address}</p></div>
+        {features.nodeTags && <button className="cf-tag-button" aria-pressed={buildingTagged} onClick={() => onToggleTag({ buildingId: building.id }, buildingTagged ? undefined : "FOLLOW_UP")} title={buildingTagged ? "取消大廈的跟進標記" : "為全幢加上跟進標記"}><Flag size={15} />{buildingTagged ? "已標記" : "標記跟進"}</button>}
       </header>
       <div className="cf-building-content" key={building.id}>
-        <section className="cf-stats" aria-label="覆蓋統計"><div><strong>{summary.completed}<small> / {summary.total ?? "?"}</small></strong><span>完成單位</span></div><div><strong>{summary.recorded}</strong><span>有記錄位置</span></div><div className={summary.followUps ? "cf-stat--alert" : ""}><strong>{summary.followUps}</strong><span>待跟進</span></div></section>
+        <section className="cf-stats cf-stats--two" aria-label="覆蓋統計"><div><strong>{summary.completed}<small> / {summary.total ?? "?"}</small></strong><span>完成單位</span></div><div className={summary.followUps ? "cf-stat--alert" : ""}><strong>{summary.followUps}</strong><span>待跟進</span></div></section>
         {buildingTasks.length > 0 && <section className="cf-building-tasks" aria-label="本幢層面待跟進">
           <div className="cf-section-heading"><div><span className="cf-eyebrow">大廈層面</span><h3>本幢待跟進<span className="cf-section-count">{buildingTasks.length} 項</span></h3></div></div>
           <ul>{buildingTasks.map(task => <li key={task.observationId} className="cf-followup">
@@ -49,15 +49,14 @@ export function BuildingDetail(props: BuildingDetailProps) {
             const revisit = openFollowUps.filter(item => item.floorId === floor.id).length > 0;
             const state = floorState(snapshot, building.id, floor.id);
             // The manual mark is its own marker: it sits beside the label and never repaints the floor.
-            const tagged = isTagged(snapshot, { buildingId: building.id, floorId: floor.id });
-            return <button key={floor.id} aria-pressed={activeFloorId === floor.id} className={`${activeFloorId === floor.id ? "is-active" : ""} ${revisit ? "has-followup" : ""} cf-status-${state.toLowerCase()}`} style={{ "--cf-state": stateColors[state] } as CSSProperties} title={`${stateLabels[state]}${tagged ? ` · ${nodeTagLabel}` : ""}`} onClick={() => onSelectFloor(floor.id)}>{floor.label}{tagged && <Flag className="cf-node-tag" size={12} aria-label={nodeTagLabel} />}<span className="cf-floor-state" style={{ background: stateColors[state] }} />{revisit && <span title="有待跟進"><RotateCcw size={12} />復訪</span>}</button>;
+            const tagged = features.nodeTags && isTagged(snapshot, { buildingId: building.id, floorId: floor.id });
+            return <button key={floor.id} aria-pressed={activeFloorId === floor.id} className={`${activeFloorId === floor.id ? "is-active" : ""} ${revisit ? "has-followup" : ""} cf-status-${state.toLowerCase()}`} style={{ "--cf-state": stateColors[state] } as CSSProperties} title={`${stateLabels[state]}${tagged ? ` · ${nodeTagLabel}` : ""}`} onClick={() => onSelectFloor(floor.id)}>{floor.label}{tagged && <Flag className="cf-node-tag" size={12} aria-label={nodeTagLabel} />}<span className="cf-floor-state" style={{ background: stateColors[state] }} />{revisit && <span title="有待跟進" aria-label="有待跟進"><RotateCcw size={12} /></span>}</button>;
           })}</div> : <p className="cf-layout-note">尚未有已聲明的樓層或單位佈局，仍可記錄大廈層面的到訪。</p>}
         </section>
         {activeFloorId ? <section className="cf-unit-section" key={activeFloorId}>
           <div className="cf-section-heading"><div><span className="cf-eyebrow">單位狀態</span><h3>{activeFloor?.label}<span className="cf-section-count">{units.length} 個單位</span></h3></div>
-            <div className="cf-section-tools"><button className="cf-tag-button" aria-pressed={floorTagged} onClick={() => onToggleTag({ buildingId: building.id, floorId: activeFloorId }, floorTagged ? undefined : "FOLLOW_UP")} title={floorTagged ? "取消本層的跟進標記" : "為本層加上跟進標記"}><Flag size={15} />{floorTagged ? "已標記" : "標記本層"}</button>
-              <div className="cf-view-toggle" data-view={view} aria-label="切換單位顯示"><button aria-pressed={view === "grid"} className={view === "grid" ? "is-active" : ""} onClick={() => setView("grid")} aria-label="方格顯示"><Grid2X2 /></button><button aria-pressed={view === "list"} className={view === "list" ? "is-active" : ""} onClick={() => setView("list")} aria-label="列表顯示"><List /></button></div></div></div>
-          <div className={`cf-units cf-units--${view}`}>{units.map((unit) => {
+            {features.nodeTags && <div className="cf-section-tools"><button className="cf-tag-button" aria-pressed={floorTagged} onClick={() => onToggleTag({ buildingId: building.id, floorId: activeFloorId }, floorTagged ? undefined : "FOLLOW_UP")} title={floorTagged ? "取消本層的跟進標記" : "為本層加上跟進標記"}><Flag size={15} />{floorTagged ? "已標記" : "標記本層"}</button></div>}</div>
+          <div className="cf-units cf-units--grid">{units.map((unit) => {
             const coverage = getCoverageStatus(snapshot, building.id, unit.id);
             const state = unitState(snapshot, building.id, unit.id);
             const clue = clueOf(snapshot, building.id, unit.id);
