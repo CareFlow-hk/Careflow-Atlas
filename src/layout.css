@@ -39,3 +39,6 @@
   .workspace.has-selection .map-prompt{display:none}
   .workspace.has-selection ~ .toast{left:calc(50% - 200px)}
 }
+
+/* The header, and the account menu that drops from it, sit above the floating cards. */
+.app-shell .app-header{position:relative;z-index:30}
