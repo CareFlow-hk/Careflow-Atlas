@@ -31,3 +31,12 @@ describe('basemap-aligned demo geometry', () => {
     }
   });
 });
+
+describe('addresses saved before 2026-09-29', () => {
+  it('still align a legacy demo building whose address ends in 「（合成）」', () => {
+    const binding = geometry.buildings[0];
+    const legacy = { ...demoSnapshot.buildings.find(b => b.id === binding.id)!, address: `${binding.address}（合成）`, coordinates: { ...binding.legacyCoordinates } };
+    delete legacy.footprint;
+    expect(alignDemoBuilding(legacy).footprint).toEqual(binding.footprint);
+  });
+});

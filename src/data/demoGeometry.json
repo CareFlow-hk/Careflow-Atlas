@@ -6,7 +6,7 @@
     {
       "id": "bldg-yu-an",
       "name": "裕安樓",
-      "address": "西營盤示範街 1 號（合成）",
+      "address": "西營盤示範街 1 號",
       "legacyCoordinates": {
         "lng": 114.1418,
         "lat": 22.2863
@@ -42,7 +42,7 @@
     {
       "id": "bldg-hoi-king",
       "name": "海景樓",
-      "address": "西營盤示範街 8 號（合成）",
+      "address": "西營盤示範街 8 號",
       "legacyCoordinates": {
         "lng": 114.14252,
         "lat": 22.28652
@@ -110,7 +110,7 @@
     {
       "id": "bldg-duk-cheong",
       "name": "德昌樓",
-      "address": "西營盤示範街 16 號（合成）",
+      "address": "西營盤示範街 16 號",
       "legacyCoordinates": {
         "lng": 114.14135,
         "lat": 22.28681
@@ -146,7 +146,7 @@
     {
       "id": "bldg-on-wo",
       "name": "安和樓",
-      "address": "西營盤示範街 24 號（合成）",
+      "address": "西營盤示範街 24 號",
       "legacyCoordinates": {
         "lng": 114.14211,
         "lat": 22.28582
