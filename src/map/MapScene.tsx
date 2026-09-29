@@ -28,6 +28,8 @@ interface MapSceneProps {
   onSelectFloor: (id: string) => void;
   onToggleExpanded: () => void;
   onOverview: () => void;
+  /** Pixels covered by floating panels at the left and right edge; the camera frames around them. */
+  insets?: { left: number; right: number };
 }
 
 export default function MapScene(props: MapSceneProps) {
@@ -57,7 +59,7 @@ export default function MapScene(props: MapSceneProps) {
     const width = map.getCanvas().clientWidth, height = map.getCanvas().clientHeight;
     const camera = bounds ? map.cameraForBounds(bounds, {
       bearing: DISTRICT_CAMERA.bearing, maxZoom: 17.3,
-      padding: { top: Math.min(145, height * .23), bottom: Math.min(120, height * .2), left: Math.min(65, width * .1), right: Math.min(95, width * .14) },
+      padding: { top: Math.min(145, height * .23), bottom: Math.min(120, height * .2), left: Math.min(65, width * .1) + (current.current.insets?.left ?? 0), right: Math.min(95, width * .14) + (current.current.insets?.right ?? 0) },
     }) : undefined;
     map.flyTo({ ...(camera ?? DISTRICT_CAMERA), zoom: camera ? (camera.zoom ?? DISTRICT_CAMERA.zoom) + .25 : DISTRICT_CAMERA.zoom,
       pitch: DISTRICT_CAMERA.pitch, offset: [0, 0], padding: 0,
@@ -319,7 +321,7 @@ export default function MapScene(props: MapSceneProps) {
       const stackZoom = 18.7 + Math.log2(8 / Math.max(8, active.floors.length)) + Math.min(0, Math.log2(map.getCanvas().clientHeight / 700), Math.log2(map.getCanvas().clientWidth / 720));
       map.flyTo({ center: [active.longitude, active.latitude], zoom: compact ? 17.8 : active.floors.length > 3 ? stackZoom : 18.7, pitch: 58, bearing: -24,
         // Reserve space above the floating controls, including on short desktops.
-        offset: [0, compact ? 20 : active.floors.length > 3 ? Math.min(110, Math.max(0, map.getCanvas().clientHeight / 2 - 225)) : 0],
+        offset: [((props.insets?.left ?? 0) - (props.insets?.right ?? 0)) / 2, compact ? 20 : active.floors.length > 3 ? Math.min(110, Math.max(0, map.getCanvas().clientHeight / 2 - 225)) : 0],
         duration: motionDuration(spatialMotion.focus), easing: easeInOutCubic, essential: false });
     } else {
       frameDistrict(map);

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { Building2, Check, ChevronRight, CircleHelp, FileSpreadsheet, Footprints, MapPin, RotateCcw, Search, Upload, X } from 'lucide-react';
+import { Building2, Check, ChevronDown, ChevronRight, CircleHelp, FileSpreadsheet, Footprints, MapPin, RotateCcw, Search, Upload, X } from 'lucide-react';
 import { useWorkspace } from './store';
 import { registerWorkspaceTools } from './webmcp';
 import { createRecordId } from './recordId';
@@ -18,6 +18,7 @@ import { detectWorkbook, mergeOverride, recognitionBlocker, remapWorkbook, type 
 import '../components/workflow.css';
 import '../styles.css';
 import '../refinement.css';
+import '../layout.css';
 
 const MapScene = lazy(() => import('../map/MapScene'));
 interface EditTarget { buildingId: string; floorId?: string; unitId?: string; label: string; eventId: string; visitId: string; }
@@ -45,6 +46,21 @@ export default function App() {
   const [filter, setFilter] = useState<'ALL' | 'FOLLOWUP'>('ALL');
   const [toast, setToast] = useState('');
   const [helpOpen, setHelpOpen] = useState(false);
+  // Desktop floats the finder and the building panel over the map; phones stack them.
+  const [floating, setFloating] = useState(() => typeof matchMedia === 'function' && matchMedia('(min-width: 761px)').matches);
+  useEffect(() => {
+    if (typeof matchMedia !== 'function') return;
+    const query = matchMedia('(min-width: 761px)');
+    const change = () => setFloating(query.matches);
+    query.addEventListener('change', change);
+    return () => query.removeEventListener('change', change);
+  }, []);
+  // Open while there is nothing to show; once data arrives the map comes first.
+  const [finderOpen, setFinderOpen] = useState(true);
+  const hasSnapshot = Boolean(snapshot);
+  useEffect(() => { setFinderOpen(!hasSnapshot); }, [hasSnapshot]);
+  /** What the floating cards cover, so the camera centres a building in the visible map. */
+  const mapInsets = useMemo(() => ({ left: floating && finderOpen ? 356 : 0, right: floating && selectedBuildingId ? 412 : 0 }), [floating, finderOpen, selectedBuildingId]);
   // The "start with a building" hint is for a first look only; once a building has been opened it stays away.
   const [explored, setExplored] = useState(() => { try { return localStorage.getItem('careflow-atlas.explored') === '1'; } catch { return false; } });
   useEffect(() => { if (!selectedBuildingId || explored) return; setExplored(true); try { localStorage.setItem('careflow-atlas.explored', '1'); } catch { /* a hint only */ } }, [selectedBuildingId, explored]);
@@ -191,7 +207,15 @@ export default function App() {
       <AccountMenu />
     </header>
     <main className={`workspace ${selectedBuildingId ? 'has-selection' : ''}`}>
-      <aside className={`district-sidebar ${hasDistrictDemo ? 'is-expanded-demo' : ''}`} aria-label="外展大廈清單">
+      {/* On desktop the finder floats over the map: a one-line bar, opened when needed to
+          locate a building and closed again once one is chosen. Phones keep the stacked list. */}
+      <aside className={`district-sidebar ${hasDistrictDemo ? 'is-expanded-demo' : ''} ${finderOpen ? 'is-open' : ''}`} aria-label="外展大廈清單">
+        <button type="button" className="finder-bar" aria-expanded={finderOpen} aria-controls="finder-body" onClick={() => setFinderOpen(!finderOpen)}>
+          <MapPin size={16} /><strong>西營盤</strong>
+          <span>{snapshot ? `${snapshot.buildings.length} 幢 · ${followupCount} 幢待跟進` : '未載入資料'}</span>
+          <ChevronDown size={16} className="finder-bar__chevron" />
+        </button>
+        <div className="finder-body" id="finder-body">
         <div className={`sidebar-heading ${snapshot ? "has-records" : ""}`}><span className="eyebrow">FIELD OUTREACH</span><h1>{snapshot ? "街區外展" : <>每一次到訪，<br /><span>都有跡可循。</span></>}</h1><p>西營盤社區客廳 · 洗樓示範</p></div>
         {snapshot && <div className="workspace-tabs" data-filter={filter}><button aria-pressed={filter === 'ALL'} className={filter === 'ALL' ? 'active' : ''} onClick={() => setFilter('ALL')}><Building2 size={16} />大廈<span>{snapshot?.buildings.length ?? '—'}</span></button><button aria-pressed={filter === 'FOLLOWUP'} className={filter === 'FOLLOWUP' ? 'active' : ''} onClick={() => setFilter('FOLLOWUP')}><RotateCcw size={15} />待跟進<span>{followupCount}</span></button></div>}
         {snapshot ? <>
@@ -201,15 +225,16 @@ export default function App() {
             const summary = getCoverageSummary(snapshot, building.id);
             const state = buildingState(snapshot, building.id);
             const selected = selectedBuildingId === building.id;
-            return <BuildingCard key={building.id} name={building.name} address={building.address} floorCount={building.floorCount} index={index} state={state} summary={summary} selected={selected} onSelect={() => workspace.selectBuilding(building.id)} />;
+            return <BuildingCard key={building.id} name={building.name} address={building.address} floorCount={building.floorCount} index={index} state={state} summary={summary} selected={selected} onSelect={() => { workspace.selectBuilding(building.id); setFinderOpen(false); }} />;
           })}{!buildings.length && <div className="list-empty"><Search size={24} /><p>{query ? '找不到相符的大廈' : '暫無待跟進大廈'}</p><button onClick={() => { setQuery(''); setFilter('ALL'); }}>查看所有大廈</button></div>}</div>
         </> : <div className="start-import"><span className="import-file-icon"><FileSpreadsheet size={30} strokeWidth={1.4} /></span><h2>從示範資料開始</h2><p>載入一個虛構街區：20 幢大廈、多次探訪和待跟進事項。</p><button className="primary-button" disabled={importLoading} onClick={() => void loadDemo()}><Upload size={16} />{importLoading ? '載入中…' : '載入示範資料'}<ChevronRight size={16} /></button></div>}
         {/* One way into paper and Excel: printing, exporting and importing all live in that dialog. */}
         {snapshot && <div className="sidebar-footer"><button onClick={openImport}><FileSpreadsheet size={16} />紙本與 Excel</button></div>}
+        </div>
       </aside>
       <section className="spatial-workspace" aria-label="街區探索">
         <div className="map-topbar"><div><MapPin size={15} /><span>西營盤</span>{selectedBuildingId && <><ChevronRight size={13} /><strong>{snapshot?.buildings.find(b => b.id === selectedBuildingId)?.name}</strong>{selectedFloorId && <><ChevronRight size={13} /><span>{snapshot?.floors.find(f => f.id === selectedFloorId)?.label}</span></>}{selectedUnitId && <><ChevronRight size={13} /><span>{snapshot?.units.find(u => u.id === selectedUnitId)?.label.replace(/^.*? /, '')}</span></>}</>}</div></div>
-        <div className="spatial-content"><Suspense fallback={<div className="map-loading">正在準備地圖…</div>}><MapScene buildings={mapBuildings} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} expanded={expanded} onSelectBuilding={workspace.selectBuilding} onSelectFloor={workspace.selectFloor} onToggleExpanded={workspace.toggleExpanded} onOverview={() => workspace.selectBuilding()} /></Suspense></div>
+        <div className="spatial-content"><Suspense fallback={<div className="map-loading">正在準備地圖…</div>}><MapScene buildings={mapBuildings} insets={mapInsets} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} expanded={expanded} onSelectBuilding={workspace.selectBuilding} onSelectFloor={workspace.selectFloor} onToggleExpanded={workspace.toggleExpanded} onOverview={() => workspace.selectBuilding()} /></Suspense></div>
         {!selectedBuildingId && snapshot && !explored && <div className="map-prompt"><span><Building2 size={19} /></span><div><strong>從一幢大廈開始</strong><p>選擇地圖標記，讓每一層的記錄展開。</p></div><ChevronRight size={18} /></div>}
       </section>
       {snapshot && selectedBuildingId && <BuildingDetail snapshot={snapshot} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} selectedUnitId={selectedUnitId} onBack={() => workspace.selectBuilding()} onSelectFloor={workspace.selectFloor} onSelectUnit={workspace.selectUnit} onToggleTag={workspace.setTag} onFollowUpAction={workspace.actOnFollowUp} onStartObservation={startObservation} />}
