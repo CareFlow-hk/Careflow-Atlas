@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { HttpError, requireValue, publicUser } from './auth.mjs';
+import { HttpError, requireValue, publicUser, SESSION_IDLE_MS } from './auth.mjs';
 
 export function createAuthServer(auth, { origin, secure = true, trustProxy = false }) {
   requireValue(new URL(origin).origin === origin, 500, 'APP_ORIGIN 必须是完整 origin，不带路径或末尾斜线。');
@@ -55,7 +55,7 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
         await auth.changePassword(row, body.oldPassword, body.password);
         res.setHeader('Set-Cookie', cookie('', 0)); return send(res, 200, { ok: true });
       }
-      if (req.method === 'GET' && path === '/api/sessions') return send(res, 200, { sessions: auth.all('SELECT id,created_at,seen_at,expires_at FROM sessions WHERE user_id=? AND expires_at>? AND seen_at>? ORDER BY created_at DESC', user.id, Date.now(), Date.now() - 30 * 60_000).map(s => ({ ...s, current: s.id === row.id })) });
+      if (req.method === 'GET' && path === '/api/sessions') return send(res, 200, { sessions: auth.all('SELECT id,created_at,seen_at,expires_at FROM sessions WHERE user_id=? AND expires_at>? AND seen_at>? ORDER BY created_at DESC', user.id, Date.now(), Date.now() - SESSION_IDLE_MS).map(s => ({ ...s, current: s.id === row.id })) });
       if (req.method === 'POST' && path === '/api/sessions/revoke-others') {
         auth.transaction(() => { auth.run('DELETE FROM sessions WHERE user_id=? AND id<>?', user.id, row.id); auth.audit(user.id, 'other_sessions_revoked'); });
         return send(res, 200, { ok: true });

@@ -59,7 +59,7 @@ export function AccountPanel({ session, onClose, onSignedOut }: { session: Sessi
         <label>确认新密码<input name="confirm" type="password" autoComplete="new-password" required minLength={15} maxLength={128} /></label>
         <p>15–128 个字符，可使用长句。修改后所有设备都需要重新登录。</p><button disabled={busy}>修改并重新登录</button>
       </form></section>
-      <section><h2>登录会话</h2><p>连续 30 分钟无操作或登录满 12 小时后过期。</p>
+      <section><h2>登录会话</h2><p>连续 6 小时无操作或登录满 12 小时后过期。</p>
         <ul>{devices.map(device => <li key={device.id}>{device.current ? '当前会话' : '其他会话'} · 登录于 {new Date(device.created_at).toLocaleString('zh-CN')}</li>)}</ul>
         <button disabled={busy} onClick={() => void perform(async () => { await api('/sessions/revoke-others', 'POST'); await reload(); setMessage('其他设备已退出。'); })}>退出其他设备</button>
       </section>

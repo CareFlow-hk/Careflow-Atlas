@@ -7,6 +7,9 @@ import { dirname } from 'node:path';
 const scrypt = promisify(scryptCallback);
 export const digest = value => createHash('sha256').update(value).digest('hex');
 const secret = () => randomBytes(32).toString('base64url');
+/** A session ends after this long without a request, or 12 hours after login. */
+export const SESSION_IDLE_MS = 6 * 60 * 60_000;
+export const SESSION_ABSOLUTE_MS = 12 * 60 * 60_000;
 export class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }
 export const requireValue = (condition, status, message) => { if (!condition) throw new HttpError(status, message); };
 export function emailValue(value) {
@@ -72,7 +75,7 @@ export function openAuth(path, { now = Date.now } = {}) {
     catch (error) { db.exec('ROLLBACK'); throw error; }
   }
   function clean() {
-    run('DELETE FROM sessions WHERE expires_at<=? OR seen_at<=?', now(), now() - 30 * 60_000);
+    run('DELETE FROM sessions WHERE expires_at<=? OR seen_at<=?', now(), now() - SESSION_IDLE_MS);
     run('DELETE FROM grants WHERE expires_at<=?', now());
     run('DELETE FROM rate_limits WHERE expires_at<=?', now());
   }
@@ -105,13 +108,13 @@ export function openAuth(path, { now = Date.now } = {}) {
   function session(token, touch = true) {
     if (!token || !/^[\w-]{43}$/.test(token)) return undefined;
     const row = get(`SELECT s.*, u.version FROM sessions s JOIN users u ON u.id=s.user_id
-      WHERE s.hash=? AND u.disabled=0 AND s.expires_at>? AND s.seen_at>?`, digest(token), now(), now() - 30 * 60_000);
+      WHERE s.hash=? AND u.disabled=0 AND s.expires_at>? AND s.seen_at>?`, digest(token), now(), now() - SESSION_IDLE_MS);
     if (row && touch) run('UPDATE sessions SET seen_at=? WHERE hash=?', now(), row.hash);
     return row;
   }
   function assertSession(row, admin = false) {
     const fresh = get(`SELECT s.hash FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.hash=?
-      AND u.disabled=0 AND s.expires_at>? AND s.seen_at>?`, row.hash, now(), now() - 30 * 60_000);
+      AND u.disabled=0 AND s.expires_at>? AND s.seen_at>?`, row.hash, now(), now() - SESSION_IDLE_MS);
     requireValue(fresh, 401, '会话已过期，请重新登录。');
     const user = userById(row.user_id);
     requireValue(!admin || user.role === 'ADMIN', 403, '需要管理员权限。');
@@ -122,7 +125,7 @@ export function openAuth(path, { now = Date.now } = {}) {
     // At most ten active sessions per account, oldest first.
     const old = all('SELECT hash FROM sessions WHERE user_id=? ORDER BY created_at DESC', userId);
     for (const row of old.slice(9)) run('DELETE FROM sessions WHERE hash=?', row.hash);
-    run('INSERT INTO sessions VALUES(?,?,?,?,?,?,?)', digest(token), randomUUID(), userId, secret(), timestamp, timestamp, timestamp + 12 * 60 * 60_000);
+    run('INSERT INTO sessions VALUES(?,?,?,?,?,?,?)', digest(token), randomUUID(), userId, secret(), timestamp, timestamp, timestamp + SESSION_ABSOLUTE_MS);
     return { token, row: session(token) };
   }
   async function login(email, password, ip) {

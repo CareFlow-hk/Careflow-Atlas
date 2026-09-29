@@ -1,5 +1,7 @@
 export interface Account { id: string; email: string; name: string; role: 'ADMIN' | 'MEMBER'; disabled: boolean; pending: boolean; createdAt: number; }
 export interface Session { user: Account; csrf: string; expiresAt: number; }
+/** Browser copy of server/auth.mjs SESSION_IDLE_MS (the server cannot be bundled); keep the two equal. */
+export const SESSION_IDLE_MS = 6 * 60 * 60_000;
 export class ApiError extends Error { constructor(public status: number, message: string) { super(message); } }
 let csrf: string | undefined;
 export function setCsrf(value?: string) { csrf = value; }

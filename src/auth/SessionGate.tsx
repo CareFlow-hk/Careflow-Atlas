@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { api, ApiError, setCsrf, type Session } from './api';
+import { api, ApiError, SESSION_IDLE_MS, setCsrf, type Session } from './api';
 import { setWorkspaceAccount } from '../app/store';
 import { AccountPanel } from './AccountPanel';
 import './accounts.css';
@@ -58,7 +58,7 @@ export function SessionGate({ children }: { children: ReactNode }) {
     const check = () => { if (!document.hidden && Date.now() - lastActivity.current < 60_000) void refresh(); };
     const focus = () => { active(); void refresh(); };
     const timer = window.setInterval(check, 30_000);
-    const expiry = window.setTimeout(() => { drop(); setNotice('会话已过期，请重新登录。'); }, Math.min(session.expiresAt - Date.now(), 30 * 60_000));
+    const expiry = window.setTimeout(() => { drop(); setNotice('会话已过期，请重新登录。'); }, Math.min(session.expiresAt - Date.now(), SESSION_IDLE_MS));
     window.addEventListener('pointerdown', active); window.addEventListener('keydown', active); window.addEventListener('focus', focus);
     return () => { clearInterval(timer); clearTimeout(expiry); window.removeEventListener('pointerdown', active); window.removeEventListener('keydown', active); window.removeEventListener('focus', focus); };
   }, [session, refresh, drop]);

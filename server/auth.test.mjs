@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { backup } from 'node:sqlite';
-import { openAuth } from './auth.mjs';
+import { openAuth, SESSION_IDLE_MS } from './auth.mjs';
 import { createAuthServer } from './http.mjs';
 import { config } from './config.mjs';
 
@@ -128,7 +128,8 @@ test('logout and revoke-other-sessions only affect intended sessions', async t =
 
 test('idle and absolute session expiration are enforced server-side', async t => {
   const f = await fixture(t); const admin = await f.account();
-  f.tick(30 * 60_000 + 1); assert.equal((await f.request('/api/session', admin)).status, 401);
+  f.tick(SESSION_IDLE_MS - 60_000); assert.equal((await f.request('/api/session', admin)).status, 200);
+  f.tick(SESSION_IDLE_MS + 1); assert.equal((await f.request('/api/session', admin)).status, 401);
   const login = await f.request('/api/login', { method: 'POST', body: { email: admin.email, password } });
   f.auth.run('UPDATE sessions SET expires_at=0');
   assert.equal((await f.request('/api/session', { cookie: login.cookie })).status, 401);
