@@ -46,7 +46,7 @@ describe('a status reads the same wherever it appears', () => {
       const history = renderHistory(snapshot);
       // The unit cell names the four-state result; the history chip names the coverage.
       expect(detail).toContain(stateLabels[unitState(snapshot, 'b1', 'u1')]);
-      expect(detail).toContain(`title="${coverageLabels[coverage]}"`);
+      expect(detail).toContain(coverageLabels[coverage]);
       expect(history).toContain(coverageLabels[coverage]);
       // No older wording may reappear anywhere in either view.
       for (const retired of ['覆蓋未明', '由工作人員確認', '未能確定']) expect(detail + history).not.toContain(retired);
@@ -117,8 +117,9 @@ describe('two markers, never a fifth colour', () => {
     expect(verified).toContain(clueLabels.VERIFIED);
     expect(suspected).not.toContain(clueLabels.VERIFIED);
     expect(verified).not.toContain(clueLabels.SUSPECTED);
-    expect(suspected).toContain('cf-clue');
-    expect(verified).toContain('cf-clue--verified');
+    expect(suspected).toContain('cf-cell__clue');
+    expect(suspected).not.toContain('cf-cell__clue is-verified');
+    expect(verified).toContain('cf-cell__clue is-verified');
   });
 });
 
@@ -394,8 +395,8 @@ describe('the building panel', () => {
     expect(renderDetail(tagged)).not.toContain('標記本層');
     expect(renderDetail(tagged)).not.toContain('標記跟進');
     expect(unitState(tagged, 'b1', 'u1')).toBe(unitState(plain, 'b1', 'u1'));
-    // The unit still reads 已完成, not 需留意.
-    const unitCard = (html: string) => html.slice(html.indexOf('cf-units'));
+    // The unit cell still reads 已完成, not 需留意.
+    const unitCard = (html: string) => html.slice(html.indexOf('cf-matrix'));
     expect(unitCard(renderDetail(tagged))).toContain(stateLabels.GREEN);
     expect(unitCard(renderDetail(tagged))).not.toContain(stateLabels.YELLOW);
   });

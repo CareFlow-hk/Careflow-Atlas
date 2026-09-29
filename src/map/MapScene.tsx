@@ -101,6 +101,18 @@ export default function MapScene(props: MapSceneProps) {
         setFailed(false);
         setNotice('');
         const firstLabel = map.getStyle().layers.find(layer => layer.type === 'symbol')?.id;
+        // Re-ink the basemap in the atlas tones; layers it does not recognise keep their style.
+        for (const layer of map.getStyle().layers) {
+          const id = layer.id.toLowerCase();
+          const tone = layer.type === 'background' ? mapSceneColors.paper
+            : layer.type !== 'fill' ? undefined
+              : id.includes('water') ? mapSceneColors.water
+                : /park|wood|grass|forest|scrub/.test(id) ? mapSceneColors.park
+                  : id.includes('building') ? mapSceneColors.basemapBuilding
+                    : /landuse|landcover|residential/.test(id) ? mapSceneColors.landuse : undefined;
+          if (!tone) continue;
+          try { map.setPaintProperty(layer.id, layer.type === 'background' ? 'background-color' : 'fill-color', tone); } catch { /* a style without that property keeps its own */ }
+        }
         // Preserve string IDs through vector tiling for per-building animation state.
         map.addSource('outreach-buildings', { type: 'geojson', promoteId: 'id', data: buildingFeatures(current.current.buildings) });
         map.addSource('focused-city', { type: 'geojson', promoteId: 'id', data: { type: 'FeatureCollection', features: [] } });

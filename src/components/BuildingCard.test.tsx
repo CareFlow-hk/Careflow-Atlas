@@ -32,12 +32,12 @@ function card(snapshot: OutreachSnapshot) {
  * open tasks has to say so there rather than only after it is opened.
  */
 describe('a building with open tasks is marked in the list', () => {
-  it('carries the same yellow mark and wording the floor strip uses', () => {
+  it('marks the entry and names how many tasks are open', () => {
     const markup = card(district([observation({ id: 'o1', coverage: 'ATTEMPTED', followUp: { action: '與同事討論後再訪', status: 'OPEN' } })]));
     expect(markup).toContain('has-followup');
     expect(markup).toContain('待跟進');
-    expect(markup).toContain('1 待跟進');
-    expect(markup).toContain('title="1 項待跟進"');
+    expect(markup).toContain('1 項待跟進');
+    expect(markup).toMatch(/building-row__task[^>]*>.*1<\/span>/);
   });
 
   it('stays unmarked when nothing is open', () => {
@@ -54,7 +54,7 @@ describe('a building with open tasks is marked in the list', () => {
       observation({ id: 'o1', floorId: 'f1', unitId: 'u1', coverage: 'ATTEMPTED', followUp: { action: '再訪', status: 'OPEN' } }),
       observation({ id: 'o2', floorId: undefined, unitId: undefined, coverage: 'ATTEMPTED', followUp: { action: '問管理處', status: 'OPEN' } }),
     ]));
-    expect(markup).toContain('2 待跟進');
+    expect(markup).toContain('2 項待跟進');
   });
 
   it('drops the mark once the task is closed, not merely recorded', () => {

@@ -16,19 +16,20 @@ export const stateLabels: Record<State, string> = {
   GRAY: '尚待了解',
 };
 
+/* Atlas palette (UI option B, 2026-09-29): muted, printed-map tones. */
 export const stateColors: Record<State, string> = {
-  GREEN: '#4c9f70',
-  YELLOW: '#d4a35e',
-  RED: '#c0564f',
-  GRAY: '#acb8b2',
+  GREEN: '#5a8462',
+  YELLOW: '#c58c38',
+  RED: '#a94b3b',
+  GRAY: '#c3bcad',
 };
 
 /** The same four hues, deepened. Selection changes brightness only, never meaning. */
 export const stateSelectedColors: Record<State, string> = {
-  GREEN: '#3b7f58',
-  YELLOW: '#b8833c',
-  RED: '#9c443e',
-  GRAY: '#8c9a93',
+  GREEN: '#476b4e',
+  YELLOW: '#a6742b',
+  RED: '#8b3c2f',
+  GRAY: '#a39c8c',
 };
 
 /**
@@ -48,9 +49,15 @@ export const stateLegendNotes: Record<State, string> = {
  * by the pipeline, it is the backdrop the four states are drawn on.
  */
 export const mapSceneColors = {
-  contextBuilding: '#d5d8cf',
-  selectionOutline: '#195f4e',
-  light: '#ffffff',
+  contextBuilding: '#ebe7de',
+  selectionOutline: '#1d2622',
+  light: '#fffaf0',
+  /* The basemap is re-inked in the same printed-map tones as the panels. */
+  paper: '#efe9dc',
+  water: '#d3d9cf',
+  park: '#e2e2cd',
+  landuse: '#e9e2d2',
+  basemapBuilding: '#e6e1d6',
 } as const;
 
 /** Reads an aggregated node's composition, e.g. "2 綠 · 1 紅 · 3 未訪". */

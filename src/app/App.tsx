@@ -201,7 +201,7 @@ export default function App() {
   return <div className="app-shell">
     <header className="app-header">
       <a className="brand" href="#" onClick={e => { e.preventDefault(); workspace.selectBuilding(); }} aria-label="CareFlow 街區總覽"><span className="brand-symbol"><Footprints size={21} strokeWidth={1.8} /></span><strong>CareFlow<span>Atlas</span></strong></a>
-      <div className="product-divider" /><span className="product-name">外展工作台</span>
+      <span className="cf-caps app-header__place">西營盤 · Sai Ying Pun · 外展工作台</span>
       <span className="demo-badge"><span />示範資料</span>
       <button ref={helpButtonRef} className="help-button icon-button" aria-label="示範說明" aria-expanded={helpOpen} aria-controls="demo-help" onClick={() => setHelpOpen(!helpOpen)}><CircleHelp size={19} /></button>
       <AccountMenu />
@@ -220,7 +220,7 @@ export default function App() {
         {snapshot && <div className="workspace-tabs" data-filter={filter}><button aria-pressed={filter === 'ALL'} className={filter === 'ALL' ? 'active' : ''} onClick={() => setFilter('ALL')}><Building2 size={16} />大廈<span>{snapshot?.buildings.length ?? '—'}</span></button><button aria-pressed={filter === 'FOLLOWUP'} className={filter === 'FOLLOWUP' ? 'active' : ''} onClick={() => setFilter('FOLLOWUP')}><RotateCcw size={15} />待跟進<span>{followupCount}</span></button></div>}
         {snapshot ? <>
           <label className="building-search"><Search size={17} /><input ref={searchRef} type="search" onKeyDown={event => { if (event.key === 'Escape') setQuery(''); }} aria-label="搜尋大廈或地址" placeholder="搜尋大廈或地址" value={query} onChange={e => setQuery(e.target.value)} /><button type="button" className="search-clear" aria-label="清除搜尋" disabled={!query} onClick={() => { setQuery(''); searchRef.current?.focus(); }}><X size={15} /></button></label>
-          <div className="list-heading"><span>{filter === 'FOLLOWUP' ? '需要繼續跟進' : '街區大廈'}</span><span>{buildings.length} 幢</span></div>
+          <div className="list-heading"><span className="cf-caps">Index · {filter === 'FOLLOWUP' ? '需要繼續跟進' : '街區大廈'}</span><span>{buildings.length} 幢</span></div>
           <div className="building-list">{buildings.map((building, index) => {
             const summary = getCoverageSummary(snapshot, building.id);
             const state = buildingState(snapshot, building.id);
