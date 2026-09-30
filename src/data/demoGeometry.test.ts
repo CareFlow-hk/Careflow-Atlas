@@ -9,7 +9,7 @@ describe('basemap-aligned demo geometry', () => {
   it('shares the exact source ring between map shells and every floor', () => {
     for (const binding of geometry.buildings) {
       const building = demoSnapshot.buildings.find(b => b.id === binding.id)!;
-      const mapBuilding: MapBuilding = { ...building, longitude: building.coordinates.lng, latitude: building.coordinates.lat, state: 'GRAY', followUps: 0, floors: [{ id: 'floor', label: '1F', level: 1, state: 'GRAY', total: 0, recorded: 0, hasFollowUp: false }] };
+      const mapBuilding: MapBuilding = { ...building, longitude: building.coordinates.lng, latitude: building.coordinates.lat, state: 'GRAY', followUps: 0, tagged: false, floors: [{ id: 'floor', label: '1F', level: 1, state: 'GRAY', total: 0, recorded: 0, hasFollowUp: false, breakdown: { GREEN: 0, YELLOW: 0, RED: 0, GRAY: 0 }, tagged: false }] };
       expect(buildingFeatures([mapBuilding]).features[0].geometry.coordinates[0]).toEqual(binding.footprint);
       for (const progress of [0, .5, 1]) expect(floorFeatures(mapBuilding, progress).features[0].geometry.coordinates[0]).toEqual(binding.footprint);
     }
@@ -29,5 +29,14 @@ describe('basemap-aligned demo geometry', () => {
     for (const building of [demo, { ...demo, footprint: undefined, coordinates: { lng: 114.2, lat: 22.3 } }, { ...demo, footprint: undefined, name: 'Different building' }]) {
       expect(alignDemoBuilding(building)).toBe(building);
     }
+  });
+});
+
+describe('addresses saved before 2026-09-29', () => {
+  it('still align a legacy demo building whose address ends in 「（合成）」', () => {
+    const binding = geometry.buildings[0];
+    const legacy = { ...demoSnapshot.buildings.find(b => b.id === binding.id)!, address: `${binding.address}（合成）`, coordinates: { ...binding.legacyCoordinates } };
+    delete legacy.footprint;
+    expect(alignDemoBuilding(legacy).footprint).toEqual(binding.footprint);
   });
 });

@@ -2,6 +2,8 @@ import { StrictMode, Component, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './app/App';
 import { SessionGate } from './auth/SessionGate';
+// Last, so the atlas theme sits over every earlier stylesheet, including the sign-in page.
+import './theme-atlas.css';
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };

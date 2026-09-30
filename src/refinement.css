@@ -264,3 +264,23 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 @media(max-width:760px){.excel-district-demo{flex-wrap:wrap}.excel-district-demo>div{flex-basis:100%}}
 
 .is-expanded-demo .sidebar-heading.has-records{padding-top:18px;padding-bottom:14px}.is-expanded-demo .sidebar-heading h1{margin:7px 0}.is-expanded-demo .building-card{padding-top:12px;padding-bottom:12px}.is-expanded-demo .building-card-meta{margin-top:7px}.is-expanded-demo .sidebar-context{padding-top:8px;padding-bottom:8px}.is-expanded-demo .sidebar-context p span{display:none}.is-expanded-demo .district-demo-entry{padding-top:9px;padding-bottom:9px;margin-bottom:8px}.is-expanded-demo .district-demo-entry small{display:none}
+
+/* v1: one header. The signed-in account replaces the separate account bar. */
+.account-menu{position:relative}
+.account-menu>summary{list-style:none;display:flex;align-items:center;gap:8px;min-height:40px;padding:4px 8px 4px 4px;border-radius:999px;cursor:pointer;color:#28473d;font-size:13px}
+.account-menu>summary::-webkit-details-marker{display:none}
+.account-menu>summary:hover,.account-menu[open]>summary{background:var(--teal-soft)}
+.account-menu__avatar{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:#e8eeea;color:#315049;font-weight:600}
+.account-menu__list{position:absolute;right:0;top:calc(100% + 6px);min-width:180px;background:#fff;border:1px solid #dbe5e1;border-radius:10px;box-shadow:0 12px 30px #16352d24;padding:6px;z-index:40;display:grid}
+.account-menu__list p{margin:4px 10px 6px;font-size:12px;color:#6b7d78}
+.account-menu__list button{display:flex;align-items:center;gap:8px;min-height:40px;border:0;background:transparent;border-radius:7px;padding:0 10px;font:inherit;color:#203b36;cursor:pointer;text-align:left}
+.account-menu__list button:hover{background:#f0f6f3}
+.help-popover h3{font-size:13px;margin:12px 0 6px}
+.help-legend{list-style:none;padding:0;margin:0 0 10px;display:grid;gap:6px;font-size:12px;color:#5f716d}
+.help-legend li{display:grid;grid-template-columns:10px auto;column-gap:7px}
+.help-legend i{width:9px;height:9px;border-radius:2px;margin-top:4px;grid-row:span 2}
+.help-legend b{color:#203b36;font-weight:600}
+.help-credit{font-size:11px;color:#7c8c87}
+.account-advanced{margin-top:24px;border-top:1px solid #dbe5e1;padding-top:14px}
+.account-advanced>summary{cursor:pointer;font-weight:600}
+@media(max-width:760px){.account-menu__name{display:none}}

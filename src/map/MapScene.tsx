@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Map as LibreMap, Marker, MercatorCoordinate, NavigationControl, ScaleControl, setWorkerUrl, type ExpressionSpecification, type GeoJSONSource, type MapMouseEvent } from 'maplibre-gl';
 import mapWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
-import { Compass, Layers3, Minus, Plus, RotateCcw, RotateCw, Scan, WifiOff } from 'lucide-react';
+import { Compass, Flag, Layers3, Minus, Plus, Scan, WifiOff } from 'lucide-react';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { FeatureCollection, Polygon } from 'geojson';
 import { buildingFeatures, districtBounds, visibleDistrictLabels, DISTRICT_CAMERA, floorFeatures, floorBase, footprintOf, markerLabel, FLOOR_HEIGHT, type MapBuilding } from './mapModel';
 import { easeInOutCubic, motionDuration, spatialMotion } from '../app/motion';
-import { contextPosition, focusHeight } from './focusContext';
-import { mapSceneColors, stateColors, stateLabels, stateLegendNotes } from '../domain/presentation';
+import { contextPosition, cutawayEnabled, CutawayTransition, CUTAWAY_DURATION, focusCameraState, focusHeight, shouldLowerBuilding } from './focusContext';
+import { breakdownLabel, mapSceneColors, nodeTagLabel, stateColors, stateLabels, stateLegendNotes } from '../domain/presentation';
 import { OUTREACH_STATES } from '../domain/types';
 import './map.css';
 
@@ -18,6 +18,8 @@ setWorkerUrl(mapWorkerUrl);
 // Focused context keeps its existing camera-relative cutaway and source heights.
 const overviewContextHeight: ExpressionSpecification = ['min', 24, ['*', ['get', 'height'], .35]];
 const overviewContextBase: ExpressionSpecification = ['min', overviewContextHeight, ['*', ['get', 'base'], .35]];
+/** Roughly the width of a floor label with its breakdown, in screen pixels. */
+const FLOOR_LABEL_ALLOWANCE = 120;
 
 interface MapSceneProps {
   buildings: MapBuilding[];
@@ -28,6 +30,8 @@ interface MapSceneProps {
   onSelectFloor: (id: string) => void;
   onToggleExpanded: () => void;
   onOverview: () => void;
+  /** Pixels covered by floating panels at the left and right edge; the camera frames around them. */
+  insets?: { left: number; right: number };
 }
 
 export default function MapScene(props: MapSceneProps) {
@@ -35,6 +39,8 @@ export default function MapScene(props: MapSceneProps) {
   const mapRef = useRef<LibreMap | null>(null);
   const current = useRef(props);
   const separation = useRef(0);
+  const cutawayFeatures = useRef<Record<string, FeatureCollection<Polygon>>>({});
+  const refreshCutaway = useRef<(() => void) | undefined>(undefined);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
   const [notice, setNotice] = useState('');
@@ -55,7 +61,7 @@ export default function MapScene(props: MapSceneProps) {
     const width = map.getCanvas().clientWidth, height = map.getCanvas().clientHeight;
     const camera = bounds ? map.cameraForBounds(bounds, {
       bearing: DISTRICT_CAMERA.bearing, maxZoom: 17.3,
-      padding: { top: Math.min(145, height * .23), bottom: Math.min(120, height * .2), left: Math.min(65, width * .1), right: Math.min(95, width * .14) },
+      padding: { top: Math.min(145, height * .23), bottom: Math.min(120, height * .2), left: Math.min(65, width * .1) + (current.current.insets?.left ?? 0), right: Math.min(95, width * .14) + (current.current.insets?.right ?? 0) },
     }) : undefined;
     map.flyTo({ ...(camera ?? DISTRICT_CAMERA), zoom: camera ? (camera.zoom ?? DISTRICT_CAMERA.zoom) + .25 : DISTRICT_CAMERA.zoom,
       pitch: DISTRICT_CAMERA.pitch, offset: [0, 0], padding: 0,
@@ -96,10 +102,22 @@ export default function MapScene(props: MapSceneProps) {
         window.clearTimeout(timeout);
         setFailed(false);
         setNotice('');
-        map.setGlobalStateProperty('focusBearing', map.getBearing());
         const firstLabel = map.getStyle().layers.find(layer => layer.type === 'symbol')?.id;
-        map.addSource('outreach-buildings', { type: 'geojson', data: buildingFeatures(current.current.buildings) });
-        map.addSource('focused-city', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+        // Re-ink the basemap in the atlas tones; layers it does not recognise keep their style.
+        for (const layer of map.getStyle().layers) {
+          const id = layer.id.toLowerCase();
+          const tone = layer.type === 'background' ? mapSceneColors.paper
+            : layer.type !== 'fill' ? undefined
+              : id.includes('water') ? mapSceneColors.water
+                : /park|wood|grass|forest|scrub/.test(id) ? mapSceneColors.park
+                  : id.includes('building') ? mapSceneColors.basemapBuilding
+                    : /landuse|landcover|residential/.test(id) ? mapSceneColors.landuse : undefined;
+          if (!tone) continue;
+          try { map.setPaintProperty(layer.id, layer.type === 'background' ? 'background-color' : 'fill-color', tone); } catch { /* a style without that property keeps its own */ }
+        }
+        // Preserve string IDs through vector tiling for per-building animation state.
+        map.addSource('outreach-buildings', { type: 'geojson', promoteId: 'id', data: buildingFeatures(current.current.buildings) });
+        map.addSource('focused-city', { type: 'geojson', promoteId: 'id', data: { type: 'FeatureCollection', features: [] } });
         map.addLayer({ id: 'focused-city', source: 'focused-city', type: 'fill-extrusion', paint: {
           'fill-extrusion-color': mapSceneColors.contextBuilding, 'fill-extrusion-height': overviewContextHeight,
           'fill-extrusion-base': overviewContextBase, 'fill-extrusion-opacity': .72,
@@ -182,7 +200,6 @@ export default function MapScene(props: MapSceneProps) {
       map.on('pitchend', () => setIs3D(map.getPitch() > 10));
       map.on('rotate', () => {
         if (!loaded) return;
-        map.setGlobalStateProperty('focusBearing', map.getBearing());
         setBearing(Math.round(map.getBearing()));
       });
       map.on('pitch', () => { if (map.getLayer('focused-city')) map.setPaintProperty('focused-city', 'fill-extrusion-opacity', (current.current.selectedBuildingId ? .4 : .72) * Math.min(1, map.getPitch() / 45)); });
@@ -203,7 +220,9 @@ export default function MapScene(props: MapSceneProps) {
     if (!map || !ready) return;
     const others = buildingFeatures(props.buildings, props.selectedBuildingId);
     if (active) others.features.forEach(feature => Object.assign(feature.properties!, contextPosition(feature.geometry.coordinates[0], active)));
+    cutawayFeatures.current['outreach-buildings'] = others;
     (map.getSource('outreach-buildings') as GeoJSONSource).setData(others);
+    refreshCutaway.current?.();
     map.setPaintProperty('outreach-buildings', 'fill-extrusion-height', active ? focusHeight : ['get', 'height']);
     (map.getSource('outreach-selected') as GeoJSONSource).setData(buildingFeatures(active ? [active] : []));
     map.setLayoutProperty('outreach-selected', 'visibility', active?.floors.length ? 'none' : 'visible');
@@ -226,6 +245,11 @@ export default function MapScene(props: MapSceneProps) {
       const dot = document.createElement('span'); dot.style.background = stateColors[building.state];
       const name = document.createElement('strong'); name.textContent = building.name;
       button.append(dot, name);
+      if (label.tagged) {
+        const flag = document.createElement('em'); flag.className = 'building-map-marker__tag';
+        flag.textContent = '⚑'; flag.setAttribute('aria-hidden', 'true');
+        button.append(flag);
+      }
       if (label.task) {
         const task = document.createElement('em'); task.className = 'building-map-marker__task';
         task.textContent = label.task;
@@ -241,15 +265,82 @@ export default function MapScene(props: MapSceneProps) {
 
   useEffect(() => {
     const map = mapRef.current;
+    if (!map || !ready || !active) return;
+    const transitions = new Map<string, { source: string; id: string | number; animation: CutawayTransition; painted?: number }>();
+    let enabled = false;
+    let frame = 0;
+    const paint = (now: number) => {
+      frame = 0;
+      let running = false;
+      for (const entry of transitions.values()) {
+        const value = entry.animation.value(now);
+        if (entry.painted !== value) {
+          map.setFeatureState({ source: entry.source, id: entry.id }, { cutaway: value });
+          entry.painted = value;
+        }
+        running ||= entry.animation.running(now);
+      }
+      if (running) frame = requestAnimationFrame(paint);
+    };
+    const syncCamera = () => {
+      const now = performance.now();
+      const duration = motionDuration(CUTAWAY_DURATION);
+      const camera = focusCameraState(active, map.getCenter(), map.getBearing());
+      enabled = cutawayEnabled(map.getZoom(), map.getPitch(), enabled);
+      const present = new Set<string>();
+      for (const [source, collection] of Object.entries(cutawayFeatures.current)) {
+        for (const feature of collection.features) {
+          if (feature.id === undefined) continue;
+          const key = `${source}:${feature.id}`;
+          present.add(key);
+          let entry = transitions.get(key);
+          if (!entry) {
+            entry = { source, id: feature.id, animation: new CutawayTransition() };
+            transitions.set(key, entry);
+          }
+          const p = feature.properties!;
+          const lowered = shouldLowerBuilding({ east: p.east, north: p.north, radius: p.radius }, camera, enabled, entry.animation.target === 1);
+          entry.animation.set(lowered, now, duration);
+        }
+      }
+      for (const [key, entry] of transitions) if (!present.has(key)) {
+        map.removeFeatureState({ source: entry.source, id: entry.id }, 'cutaway');
+        transitions.delete(key);
+      }
+      if (!frame) frame = requestAnimationFrame(paint);
+    };
+    refreshCutaway.current = syncCamera;
+    syncCamera();
+    // `move` includes dragging, wheel zoom, pitch, rotation and fly/ease animations.
+    // Only a change in binary target starts an animation; moving never restarts it.
+    map.on('move', syncCamera);
+    map.on('resize', syncCamera);
+    return () => {
+      refreshCutaway.current = undefined;
+      cancelAnimationFrame(frame);
+      map.off('move', syncCamera); map.off('resize', syncCamera);
+      if (mapRef.current === map) for (const entry of transitions.values()) {
+        map.removeFeatureState({ source: entry.source, id: entry.id }, 'cutaway');
+      }
+    };
+  }, [active, ready]);
+
+  useEffect(() => {
+    const map = mapRef.current;
     if (!map || !ready) return;
     map.resize();
     setHover(undefined);
     setNotice('');
     if (active) {
-      const stackZoom = 18.7 + Math.log2(8 / Math.max(8, active.floors.length)) + Math.min(0, Math.log2(map.getCanvas().clientHeight / 700), Math.log2(map.getCanvas().clientWidth / 720));
+      // Size the stack to the part of the map the floating cards leave visible, but only
+      // gently: floors thinner than their labels would stack the labels on each other.
+      const visibleWidth = Math.max(320, map.getCanvas().clientWidth - (props.insets?.left ?? 0) - (props.insets?.right ?? 0));
+      const stackZoom = 18.7 + Math.log2(8 / Math.max(8, active.floors.length)) + Math.min(0, Math.log2(map.getCanvas().clientHeight / 700), Math.log2(visibleWidth / 560));
       map.flyTo({ center: [active.longitude, active.latitude], zoom: compact ? 17.8 : active.floors.length > 3 ? stackZoom : 18.7, pitch: 58, bearing: -24,
-        // Reserve space above the floating controls, including on short desktops.
-        offset: [0, compact ? 20 : active.floors.length > 3 ? Math.min(110, Math.max(0, map.getCanvas().clientHeight / 2 - 225)) : 0],
+        // Reserve space above the floating controls, including on short desktops. The
+        // floor labels hang to the right of the stack, so the stack sits left of centre
+        // and the pair is centred together rather than the labels running into the tools.
+        offset: [((props.insets?.left ?? 0) - (props.insets?.right ?? 0)) / 2 - (compact ? 0 : FLOOR_LABEL_ALLOWANCE / 2), compact ? 20 : active.floors.length > 3 ? Math.min(110, Math.max(0, map.getCanvas().clientHeight / 2 - 225)) : 0],
         duration: motionDuration(spatialMotion.focus), easing: easeInOutCubic, essential: false });
     } else {
       frameDistrict(map);
@@ -280,11 +371,16 @@ export default function MapScene(props: MapSceneProps) {
           const key = `${feature.id}:${JSON.stringify(ring)}`;
           if (seen.has(key)) continue;
           seen.add(key);
-          collection.features.push({ type: 'Feature', geometry: { type: 'Polygon', coordinates: polygon }, properties: { ...(active ? contextPosition(ring, active) : { east: 0, north: 0, radius: 0 }), height: Number(feature.properties.render_height) || 6, base: Number(feature.properties.render_min_height) || 0 } });
+          collection.features.push({ type: 'Feature', id: key, geometry: { type: 'Polygon', coordinates: polygon }, properties: { id: key, ...(active ? contextPosition(ring, active) : { east: 0, north: 0, radius: 0 }), height: Number(feature.properties.render_height) || 6, base: Number(feature.properties.render_min_height) || 0 } });
         }
       }
       const signature = JSON.stringify(collection);
-      if (signature !== previous) { previous = signature; (map.getSource('focused-city') as GeoJSONSource).setData(collection); }
+      if (signature !== previous) {
+        previous = signature;
+        cutawayFeatures.current['focused-city'] = collection;
+        (map.getSource('focused-city') as GeoJSONSource).setData(collection);
+        refreshCutaway.current?.();
+      }
     };
     map.on('idle', refresh);
     refresh();
@@ -349,32 +445,28 @@ export default function MapScene(props: MapSceneProps) {
     <div className="floor-map-labels" aria-hidden={!props.expanded || !is3D}>{active?.floors.map(floor => <button key={floor.id} ref={element => { if (element) floorLabelElements.current.set(floor.id, element); else floorLabelElements.current.delete(floor.id); }}
       className={`floor-map-label ${floor.hasFollowUp ? 'needs-followup' : ''} ${props.selectedFloorId === floor.id ? 'selected' : ''}`}
       style={{ '--cf-state': stateColors[floor.state] } as CSSProperties}
-      aria-label={`在立體地圖選擇 ${floor.label} · ${stateLabels[floor.state]}${floor.hasFollowUp ? ' 待跟進' : ''}`} tabIndex={props.expanded && is3D ? 0 : -1}
-      onClick={() => props.onSelectFloor(floor.id)}><strong>{floor.label}</strong>{floor.hasFollowUp && <span>待跟進</span>}</button>)}</div>
+      aria-label={`在立體地圖選擇 ${floor.label} · ${stateLabels[floor.state]}${breakdownLabel(floor.breakdown) ? ` · ${breakdownLabel(floor.breakdown)}` : ''}${floor.hasFollowUp ? ' 待跟進' : ''}${floor.tagged ? ` · ${nodeTagLabel}` : ''}`} tabIndex={props.expanded && is3D ? 0 : -1}
+      onClick={() => props.onSelectFloor(floor.id)}><strong>{floor.label}</strong>{floor.tagged && <Flag className="floor-map-label__tag" size={12} aria-hidden="true" />}{floor.hasFollowUp && <span>待跟進</span>}
+      {/* Composition sits to the right of the label: one dot and a count per state present. */}
+      <span className="floor-map-label__breakdown" aria-hidden="true">{OUTREACH_STATES.filter(state => floor.breakdown[state] > 0).map(state => <i key={state} title={stateLabels[state]}><b style={{ background: stateColors[state] }} />{floor.breakdown[state]}</i>)}</span></button>)}</div>
     {!ready && !failed && <div className="map-loading"><span className="loading-orbit" />正在載入西營盤地圖</div>}
     {failed && <div className="map-failure" role="status"><WifiOff size={22} /><strong>底圖暫時無法顯示</strong><span>你仍可從大廈清單查看樓層、記錄結果。</span></div>}
     <div className="map-location"><span>香港 · 中西區 / 外展街區</span><strong>西營盤 <small>Sai Ying Pun</small></strong>
-      <div className="district-map-summary"><b>{props.buildings.length.toString().padStart(2, '0')}</b><span>個業務地點<small>{knownUnits ? `${recordedUnits} / ${knownUnits} 個已知單位有記錄` : '樓層與單位待確認'}</small></span></div>
+      {props.buildings.length > 0 && <div className="district-map-summary"><b>{props.buildings.length.toString().padStart(2, '0')}</b><span>個業務地點<small>{knownUnits ? `${recordedUnits} / ${knownUnits} 個已知單位有記錄` : '樓層與單位待確認'}</small></span></div>}
     </div>
     <div className="map-tools" role="group" aria-label="相機控制" title="右鍵拖曳可自由旋轉及調整傾角">
-      <button className="map-tool" aria-label="框選全部大廈" title="框選全部大廈" disabled={!ready} onClick={() => { if (active) props.onOverview(); else if (mapRef.current) frameDistrict(mapRef.current); }}><Scan size={19} /></button>
+      {active && active.floors.length > 0 && <button className={`map-tool ${props.expanded ? 'is-active' : ''}`} aria-label={props.expanded ? '合攏樓層' : '展開樓層'} title={props.expanded ? '合攏樓層' : '展開樓層'} aria-pressed={props.expanded} onClick={props.onToggleExpanded} disabled={!ready}><Layers3 size={19} /></button>}
+      <button className="map-tool" aria-label={active ? '返回街區總覽' : '框選全部大廈'} title={active ? '返回街區總覽' : '框選全部大廈'} disabled={!ready} onClick={() => { if (active) props.onOverview(); else if (mapRef.current) frameDistrict(mapRef.current); }}><Scan size={19} /></button>
       <button className="map-tool" onClick={toggle3D} aria-label={is3D ? '切換平面地圖' : '切換立體地圖'} disabled={!ready}>{is3D ? '2D' : '3D'}</button>
       <button className="map-tool" aria-label="放大地圖" onClick={() => mapRef.current?.zoomIn({ duration: motionDuration(300), easing: easeInOutCubic })} disabled={!ready}><Plus size={19} /></button>
       <button className="map-tool" aria-label="縮小地圖" onClick={() => mapRef.current?.zoomOut({ duration: motionDuration(300), easing: easeInOutCubic })} disabled={!ready}><Minus size={19} /></button>
-      <button className="map-tool rotation-tool" aria-label="向左旋轉視角 45 度" title="向左旋轉 45°" onClick={() => rotateCamera((mapRef.current?.getBearing() ?? 0) - 45)} disabled={!ready}><RotateCcw size={19} /></button>
-      <button className="map-tool" aria-label="向右旋轉視角 45 度" title="向右旋轉 45°" onClick={() => rotateCamera((mapRef.current?.getBearing() ?? 0) + 45)} disabled={!ready}><RotateCw size={19} /></button>
+      {/* Rotation is a drag (right-drag with a mouse); the compass puts north back. */}
       <button className="map-tool compass" aria-label="地圖朝北" title="回正北方" onClick={() => rotateCamera(0)} disabled={!ready}><Compass size={20} style={{ transform: `rotate(${-bearing}deg)` }} /><span>N</span></button>
       <output className="camera-bearing" aria-label="相機方位角">{(bearing + 360) % 360}°</output>
     </div>
-    {active && <div className="building-focus-bar">
-      <div><span className="eyebrow">正在查看 · 示意結構</span><strong>{active.name}<small>{active.floors.length ? `${active.floors.length} 層` : '樓層待確認'}</small></strong></div>
-      <button className={`primary-button ${props.expanded ? 'is-active' : ''}`} onClick={props.onToggleExpanded} disabled={!active.floors.length}><Layers3 size={17} />{props.expanded ? '合攏樓層' : '展開樓層'}</button>
-      <button className="icon-button" aria-label="返回街區總覽" onClick={props.onOverview}><RotateCcw size={18} /></button>
-    </div>}
     {hover && <div className="map-hover" style={{ left: hover.x, top: hover.y }}><strong>{hover.title}</strong><span>{hover.subtitle}</span></div>}
     {notice && <button className="map-notice" onClick={() => setNotice('')} role="status">{notice}<span>×</span></button>}
-    {/* Yellow is not "待跟進": a task shows as a badge, and a yellow without one means the levels disagree. */}
-    <div className="map-legend">{OUTREACH_STATES.map(state => <span key={state} title={stateLegendNotes[state]}><i className="legend-swatch" style={{ background: stateColors[state] }} />{stateLabels[state]}<small>{stateLegendNotes[state]}</small></span>)}</div>
-    <div className="geometry-note">{active ? '聚焦視圖 · 前景遮擋已壓低' : '背景高度已壓縮 · 業務地點及樓層為合成示意'}</div>
+    {/* One compact row; what each colour means is in the help panel (and the tooltip). */}
+    <div className="map-legend">{OUTREACH_STATES.map(state => <span key={state} title={stateLegendNotes[state]}><i className="legend-swatch" style={{ background: stateColors[state] }} />{stateLabels[state]}</span>)}</div>
   </div>;
 }

@@ -1,0 +1,274 @@
+/*
+ * Atlas theme (UI option B, chosen 2026-09-29): warm paper, serif headings, hairline
+ * rules, an index for the district and a plate for each building. Loaded last and
+ * scoped under .app-shell / the account pages so it overrides the older layers without
+ * editing them. State hues never appear here: they come from presentation.ts through
+ * --cf-state.
+ */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Serif+TC:wght@500;600;700&display=swap');
+
+:root{
+  --atlas-paper:#f7f4ec; --atlas-card:#fffdf8; --atlas-ink:#1d2622; --atlas-mute:#7a766b; --atlas-rule:#ddd6c6;
+  --atlas-soft:#efe8da; --atlas-acc:#7d3b27; --atlas-task:#9a6420; --atlas-task-bg:#fbf3e3;
+  --atlas-serif:'Noto Serif TC',serif; --atlas-sans:'Inter','Noto Sans TC',-apple-system,sans-serif;
+  --font:var(--atlas-sans); --ink:var(--atlas-ink); --muted:var(--atlas-mute); --line:var(--atlas-rule);
+  --teal:var(--atlas-ink); --teal-soft:var(--atlas-soft); background:var(--atlas-paper);
+}
+body{background:var(--atlas-paper)}
+.cf-caps{font-family:'Inter',sans-serif;font-size:10px;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--atlas-mute)}
+
+/* ------------------------------------------------------------------ header */
+.app-shell{background:var(--atlas-paper);color:var(--atlas-ink)}
+.app-shell .app-header{height:52px;background:var(--atlas-paper);border-bottom:1px solid var(--atlas-rule);gap:18px;padding:0 20px}
+.app-shell .brand strong{font-family:var(--atlas-serif);font-size:18px;font-weight:600;color:var(--atlas-ink);letter-spacing:0}
+.app-shell .brand strong span{color:var(--atlas-acc);font-style:normal;margin-left:4px;font-weight:600}
+.app-shell .brand-symbol{background:var(--atlas-ink);color:var(--atlas-paper);border-radius:3px}
+.app-shell .app-header__place{white-space:nowrap}
+.app-shell .demo-badge{background:transparent;border:0;padding:0;font-family:'Inter',sans-serif;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--atlas-acc)}
+.app-shell .demo-badge>span{background:var(--atlas-acc)}
+.app-shell .icon-button{color:var(--atlas-mute);border-radius:3px}
+.app-shell .icon-button:hover,.app-shell .account-menu>summary:hover,.app-shell .account-menu[open]>summary{background:var(--atlas-soft)}
+.app-shell .account-menu>summary{border-radius:3px;color:var(--atlas-ink)}
+.app-shell .account-menu__avatar{border-radius:3px;background:var(--atlas-ink);color:var(--atlas-paper);font-family:var(--atlas-serif)}
+.app-shell .account-menu__list{background:var(--atlas-card);border-color:var(--atlas-rule);border-radius:3px;box-shadow:0 14px 36px #3a2e1a24}
+.app-shell .account-menu__list button:hover{background:var(--atlas-soft)}
+.app-shell .help-popover{background:var(--atlas-card);border:1px solid var(--atlas-rule);border-radius:3px;box-shadow:0 14px 36px #3a2e1a24}
+.app-shell .help-popover strong{font-family:var(--atlas-serif);font-weight:600;color:var(--atlas-ink)}
+.app-shell .help-popover p,.app-shell .help-popover li{color:var(--atlas-mute)}
+.app-shell .help-popover button{background:var(--atlas-ink);color:var(--atlas-paper);border-radius:3px}
+.app-shell .help-legend i{border-radius:1px}
+
+/* ------------------------------------------------------------------ finder / index */
+.app-shell .district-sidebar{background:var(--atlas-card)}
+.app-shell .finder-bar{font-size:13px;color:var(--atlas-ink)}
+.app-shell .finder-bar strong{font-family:var(--atlas-serif);font-size:16px;font-weight:600}
+.app-shell .workspace-tabs{padding:0 16px;gap:18px;border-bottom:1px solid var(--atlas-rule)}
+.app-shell .workspace-tabs button{padding:10px 0 9px;color:var(--atlas-mute);font-size:12.5px;gap:6px}
+.app-shell .workspace-tabs button svg{display:none}
+.app-shell .workspace-tabs button.active{color:var(--atlas-ink);font-weight:500}
+.app-shell .workspace-tabs button.active:after{left:0;right:0;height:1.5px;background:var(--atlas-acc)}
+.app-shell .workspace-tabs button>span{background:transparent;padding:0;font-size:11px;color:inherit;font-variant-numeric:tabular-nums}
+.app-shell .building-search{margin:10px 16px 4px;border:0;border-bottom:1px solid var(--atlas-rule);border-radius:0;background:transparent;padding:0}
+.app-shell .building-search input{background:transparent;font-size:13px}
+.app-shell .list-heading{padding:8px 16px 4px;color:var(--atlas-mute);font-size:11px}
+.app-shell .building-list{padding:0 16px 8px}
+.app-shell .building-row{display:grid;grid-template-columns:22px auto 1fr auto;align-items:baseline;gap:8px;width:100%;padding:8px 0;border:0;border-bottom:1px dotted var(--atlas-rule);background:transparent;text-align:left;color:var(--atlas-ink);font:inherit}
+.app-shell .building-row:hover .building-row__name{color:var(--atlas-acc)}
+.app-shell .building-row.selected .building-row__name{color:var(--atlas-acc)}
+.app-shell .building-row__n{font-family:'Inter',sans-serif;font-size:10px;color:var(--atlas-mute);font-variant-numeric:tabular-nums}
+.app-shell .building-row__name{font-family:var(--atlas-serif);font-size:14.5px;font-weight:600;display:flex;align-items:center;gap:7px;white-space:nowrap}
+.app-shell .building-row__name i{width:7px;height:7px;border-radius:1px;background:var(--cf-state);flex:none}
+.app-shell .building-row__leader{border-bottom:1px dotted #cbc3b1;height:8px;min-width:12px}
+.app-shell .building-row__v{font-size:12px;color:var(--atlas-mute);font-variant-numeric:tabular-nums;white-space:nowrap;display:flex;align-items:baseline;gap:8px}
+.app-shell .building-row__v b{color:var(--atlas-ink);font-weight:500}
+.app-shell .building-row__task{display:inline-flex;align-items:center;gap:2px;color:var(--atlas-acc);font-weight:500}
+.app-shell .sidebar-footer{border-top:1px solid var(--atlas-rule);padding:6px 12px}
+.app-shell .sidebar-footer button{color:var(--atlas-ink);font-size:12.5px;border-radius:3px}
+.app-shell .sidebar-footer button:hover{background:var(--atlas-soft)}
+.app-shell .start-import{padding:18px 18px 22px}
+.app-shell .start-import h2{font-family:var(--atlas-serif);font-weight:600;font-size:22px}
+.app-shell .start-import p{color:var(--atlas-mute)}
+.app-shell .import-file-icon{background:var(--atlas-soft);color:var(--atlas-ink);border-radius:3px}
+.app-shell .primary-button{background:var(--atlas-ink);color:var(--atlas-paper);border-radius:3px;box-shadow:none}
+
+/* ------------------------------------------------------------------ floating cards */
+.app-shell .district-sidebar,.app-shell .workspace>.cf-building-panel{border:1px solid var(--atlas-rule);border-radius:3px;box-shadow:0 1px 0 #fff inset,0 16px 40px #3a2e1a24}
+.app-shell .cf-building-panel{background:var(--atlas-card);color:var(--atlas-ink);padding:0;display:flex;flex-direction:column}
+.app-shell .cf-building-panel .cf-building-content{flex:1;min-height:0}
+
+/* ------------------------------------------------------------------ building plate */
+.app-shell .cf-plate__head{display:flex;align-items:flex-start;gap:6px;padding:16px 18px 12px;border-bottom:1px solid var(--atlas-rule)}
+.app-shell .cf-plate__head .cf-icon-button{min-width:32px;min-height:32px;margin:-4px 0 0 -8px;color:var(--atlas-mute)}
+.app-shell .cf-plate__title{min-width:0}
+.app-shell .cf-plate__title h2{margin:3px 0 2px;font-family:var(--atlas-serif);font-size:27px;font-weight:700;letter-spacing:.01em;line-height:1.25}
+.app-shell .cf-plate__title p{margin:0;color:var(--atlas-mute);font-size:12.5px}
+.app-shell .cf-plate__state{display:inline-flex;align-items:center;gap:5px;color:var(--atlas-ink)}
+.app-shell .cf-plate__state i{width:7px;height:7px;border-radius:1px;background:var(--cf-state)}
+.app-shell .cf-plate__figures{display:flex;gap:24px;padding:12px 18px;border-bottom:1px solid var(--atlas-rule);margin:0;background:transparent}
+.app-shell .cf-plate__figures div{display:flex;align-items:baseline;gap:5px}
+.app-shell .cf-plate__figures b{font-family:var(--atlas-serif);font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--atlas-ink)}
+.app-shell .cf-plate__figures span{color:var(--atlas-mute);font-size:11.5px}
+.app-shell .cf-plate__figures .is-alert b{color:var(--atlas-acc)}
+.app-shell .cf-plate__sec{padding:12px 18px;border-bottom:1px solid var(--atlas-rule);margin:0;border-top:0}
+.app-shell .cf-plate__sec>h3{margin:0 0 10px;display:flex;justify-content:space-between;align-items:baseline;font-size:12px;font-weight:400}
+.app-shell .cf-plate__key,.app-shell .cf-plate__count{font-size:11px;color:var(--atlas-mute)}
+.app-shell .cf-plate__unit{font-family:var(--atlas-serif);font-size:17px;font-weight:600;color:var(--atlas-ink)}
+.app-shell .cf-plate__facts{display:grid;grid-template-columns:56px 1fr;gap:5px 12px;margin:0 0 12px;font-size:12.5px}
+.app-shell .cf-plate__facts dt{color:var(--atlas-mute)}
+.app-shell .cf-plate__facts dd{margin:0}
+.app-shell .cf-building-tasks ul{margin:0}
+
+/* The elevation matrix: every floor and unit of the building in one view. */
+.app-shell .cf-matrix{display:grid;grid-template-columns:40px repeat(var(--cf-cols),minmax(0,1fr)) 40px;gap:3px;align-items:center;max-height:340px;overflow:auto}
+.app-shell .cf-matrix__col{font-family:'Inter',sans-serif;font-size:10px;letter-spacing:.06em;color:var(--atlas-mute);text-align:center;padding-bottom:2px;position:sticky;top:0;background:var(--atlas-card);z-index:1}
+.app-shell .cf-matrix__floor{border:0;background:transparent;font-family:'Inter',sans-serif;font-size:11px;color:var(--atlas-mute);text-align:left;padding:0 2px;min-height:22px;border-radius:1px;display:flex;align-items:center;gap:3px}
+.app-shell .cf-matrix__floor:hover,.app-shell .cf-matrix__floor.is-active{color:var(--atlas-ink);background:var(--atlas-soft)}
+.app-shell .cf-matrix__sum{font-size:10.5px;color:var(--atlas-mute);text-align:right;font-variant-numeric:tabular-nums}
+.app-shell .cf-cell{position:relative;height:22px;border:1px solid transparent;border-radius:1px;background:var(--cf-state);color:#fff;cursor:pointer;padding:0;font:inherit}
+.app-shell .cf-cell.is-gray{background:repeating-linear-gradient(135deg,#ece6d8 0 4px,#e2dbca 4px 8px);color:#8b8576}
+.app-shell .cf-cell.is-none{background:transparent;cursor:default}
+.app-shell .cf-cell:hover{filter:brightness(1.06);border-color:#0000002a}
+.app-shell .cf-cell.is-selected{outline:2px solid var(--atlas-acc);outline-offset:1px}
+.app-shell .cf-cell__task{position:absolute;right:3px;top:1px;font-size:9px;line-height:1.2}
+.app-shell .cf-cell__clue{position:absolute;left:3px;bottom:1px;font-size:8px;line-height:1.2}
+
+/* Ledger: the history as dated entries. */
+.app-shell .cf-history{margin-top:4px}
+.app-shell .cf-event__rail span{background:var(--atlas-card);border:1.5px solid var(--atlas-acc);width:9px;height:9px}
+.app-shell .cf-event__meta{color:var(--atlas-mute);font-size:11px}
+.app-shell .cf-event__meta span{font-family:'Inter',sans-serif;letter-spacing:.1em;text-transform:uppercase;font-size:9.5px}
+.app-shell .cf-event h4{font-size:13.5px;font-weight:400;line-height:1.7;margin:4px 0}
+.app-shell .cf-chip{background:transparent;border:0;padding:0 10px 0 0;border-radius:0;font-size:11px;color:var(--atlas-mute)}
+.app-shell .cf-chip:before{content:'— '}
+.app-shell .cf-chip svg{display:none}
+.app-shell .cf-chip--uncertain{color:var(--atlas-acc)}
+.app-shell .cf-event__note,.app-shell .cf-event__recorded{color:var(--atlas-mute);font-size:11.5px}
+.app-shell .cf-followup{background:var(--atlas-task-bg);color:var(--atlas-ink);border-left:2px solid var(--atlas-task);border-radius:0;font-size:12.5px}
+.app-shell .cf-followup svg{color:var(--atlas-task)}
+.app-shell .cf-followup.is-resolved{background:transparent;border-left-color:var(--atlas-rule);color:var(--atlas-mute)}
+.app-shell .cf-followup-trail{color:var(--atlas-mute)}
+.app-shell .cf-resolved-note,.app-shell .cf-superseded-note{color:var(--atlas-mute);font-size:11.5px}
+.app-shell .cf-record-action{background:var(--atlas-card);border-top:1px solid var(--atlas-rule);box-shadow:none;padding:10px 18px 14px}
+.app-shell .cf-record-action>span{color:var(--atlas-mute);font-size:11.5px}
+
+/* ------------------------------------------------------------------ buttons & inputs */
+.app-shell .cf-button{border-radius:3px;font-weight:500}
+.app-shell .cf-button--primary{background:var(--atlas-ink);color:var(--atlas-paper)}
+.app-shell .cf-button--primary:hover{background:#2e3a35}
+.app-shell .cf-button--secondary{background:transparent;color:var(--atlas-ink);border:1px solid var(--atlas-ink)}
+.app-shell .cf-button--ghost{background:transparent;color:var(--atlas-ink);border:1px solid var(--atlas-rule)}
+.app-shell .cf-button--small{min-height:30px}
+.app-shell .cf-dialog{background:var(--atlas-card);color:var(--atlas-ink);border-radius:4px;box-shadow:0 24px 64px #2a200f40}
+.app-shell .cf-dialog::backdrop{background:#2a2419a6}
+.app-shell .cf-dialog h2{font-family:var(--atlas-serif);font-weight:700}
+.app-shell .cf-eyebrow{font-family:'Inter',sans-serif;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--atlas-mute)}
+.app-shell .cf-callout{background:var(--atlas-soft);color:var(--atlas-ink);border-radius:2px}
+.app-shell .cf-choice-row legend{font-weight:500}
+.app-shell .cf-choice{border:1px solid var(--atlas-rule);border-radius:2px;background:transparent;min-height:38px;padding:7px 11px;font-size:13px}
+.app-shell .cf-choice.is-on{border-color:var(--atlas-ink);background:var(--atlas-soft);font-weight:500}
+.app-shell .cf-form-grid input,.app-shell .cf-form-grid textarea,.app-shell .cf-form-grid select,.app-shell .cf-editor input,.app-shell .cf-followup-actions__cancel input{border:1px solid var(--atlas-rule);border-radius:2px;background:#fff}
+.app-shell .cf-followup-fields{background:var(--atlas-paper);border-radius:2px}
+.app-shell .cf-more{border-color:var(--atlas-rule);border-radius:2px}
+.app-shell .cf-more>summary{color:var(--atlas-ink);font-weight:500}
+.app-shell .cf-dialog__footer{border-top-color:var(--atlas-rule);color:var(--atlas-mute)}
+.app-shell .excel-steps section,.app-shell .cf-review__summary,.app-shell .cf-counts div{background:var(--atlas-paper);border-color:var(--atlas-rule);border-radius:2px}
+.app-shell .excel-steps h3{font-family:var(--atlas-serif);font-weight:600}
+.app-shell .cf-dropzone{background:var(--atlas-paper);border-color:#cbc3b1;border-radius:2px;color:var(--atlas-ink)}
+.app-shell .cf-issue-table,.app-shell .cf-recognition{border-color:var(--atlas-rule);border-radius:2px}
+
+/* ------------------------------------------------------------------ map chrome */
+.app-shell .map-scene .map-tools{background:var(--atlas-card);border:1px solid var(--atlas-rule);border-radius:3px;box-shadow:0 8px 24px #3a2e1a1f}
+.app-shell .map-scene .map-tool{background:var(--atlas-card);color:var(--atlas-mute);font-family:'Inter',sans-serif}
+.app-shell .map-scene .map-tool:hover,.app-shell .map-scene .map-tool.is-active{background:var(--atlas-soft);color:var(--atlas-ink)}
+.app-shell .map-scene .map-legend{background:var(--atlas-card);border:1px solid var(--atlas-rule);border-radius:3px;box-shadow:none;color:var(--atlas-mute);font-size:11px}
+.app-shell .map-scene .legend-swatch{border-radius:1px}
+.app-shell .map-prompt{background:var(--atlas-card);border:1px solid var(--atlas-rule);border-radius:3px;box-shadow:0 12px 30px #3a2e1a1f}
+.app-shell .map-prompt strong{font-family:var(--atlas-serif);font-weight:600}
+.app-shell .map-prompt>span{background:var(--atlas-soft);color:var(--atlas-ink);border-radius:2px}
+.app-shell .map-scene .building-map-marker{background:#fffdf8f2;border:1px solid var(--atlas-rule);border-radius:2px;box-shadow:0 4px 14px #3a2e1a1f;color:var(--atlas-ink);min-height:30px;padding:5px 9px}
+.app-shell .map-scene .building-map-marker strong{font-family:var(--atlas-serif);font-weight:600;font-size:12.5px}
+.app-shell .map-scene .building-map-marker span{border-radius:1px}
+.app-shell .map-scene .building-map-marker__task{color:var(--atlas-acc);background:transparent;border:0;font-style:normal;font-size:11px}
+.app-shell .map-scene .floor-map-label{background:#fffdf8f2;border-color:var(--atlas-rule);border-radius:2px;color:var(--atlas-ink)}
+.app-shell .map-scene .floor-map-label.needs-followup{background:var(--atlas-task-bg);border-color:#e5cf9f;color:var(--atlas-task)}
+.app-shell .map-scene .floor-map-label.selected{background:var(--atlas-ink);border-color:var(--atlas-ink);color:var(--atlas-paper)}
+.app-shell .map-scene .floor-map-label.selected:before{background:var(--atlas-ink)}
+.app-shell .map-scene .floor-map-label__breakdown b{border-radius:1px}
+.app-shell .toast{background:var(--atlas-ink);border-color:var(--atlas-ink);color:var(--atlas-paper);border-radius:3px}
+
+/* ------------------------------------------------------------------ settings & sign-in */
+.login-page,.account-loading{background:var(--atlas-paper);color:var(--atlas-ink)}
+.login-card{background:var(--atlas-card);border:1px solid var(--atlas-rule);border-radius:3px;box-shadow:0 18px 44px #3a2e1a1f}
+.login-card h1{font-family:var(--atlas-serif);font-weight:700}
+.login-card button:not(.account-text-button){background:var(--atlas-ink);border-color:var(--atlas-ink);color:var(--atlas-paper);border-radius:3px}
+.login-card input{border-radius:2px;border-color:var(--atlas-rule)}
+.authenticated-app{background:var(--atlas-paper)}
+.account-page{background:var(--atlas-paper);color:var(--atlas-ink)}
+.account-page h1,.account-page h2{font-family:var(--atlas-serif);font-weight:600}
+.account-page section{background:var(--atlas-card);border-color:var(--atlas-rule);border-radius:3px}
+.account-page button{border-radius:3px;border-color:var(--atlas-rule)}
+.account-page input,.account-page select{border-radius:2px;border-color:var(--atlas-rule)}
+.app-shell .workspace-tabs{justify-content:flex-start}
+.app-shell .workspace-tabs button{flex:none;justify-content:flex-start}
+.app-shell .list-heading{margin:0;padding:10px 16px 2px}
+.account-page button{background:transparent;color:var(--atlas-ink);border:1px solid var(--atlas-rule)}
+.account-page button:hover{background:var(--atlas-soft)}
+.account-page form button,.account-page .account-invite button{background:var(--atlas-ink);color:var(--atlas-paper);border-color:var(--atlas-ink)}
+.account-page form button:hover{background:#2e3a35}
+
+/* ------------------------------------------------------------------ paper form */
+/* The printed sheet keeps its A4 geometry from paper.css; only type and ink change. */
+.app-shell .paper-shell{background:#e7e1d3;color:var(--atlas-ink)}
+.app-shell .paper-controls{font-size:13px}
+.app-shell .paper-controls>span{color:var(--atlas-mute);font-size:12px}
+.app-shell .paper-controls select{border-color:var(--atlas-rule);border-radius:2px;background:var(--atlas-card);font-family:var(--atlas-serif);font-weight:600}
+.app-shell .paper-page{background:#fffefa;box-shadow:0 1px 0 #fff inset,0 18px 48px #3a2e1a2e;font-family:var(--atlas-sans);color:var(--atlas-ink)}
+.app-shell .paper-page header{border-bottom:1.5px solid var(--atlas-ink);padding-bottom:12px}
+.app-shell .paper-page header>span{font-family:'Inter',sans-serif;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--atlas-acc)}
+.app-shell .paper-page h1{font-family:var(--atlas-serif);font-weight:700;font-size:26px;letter-spacing:.02em}
+.app-shell .paper-page header p{font-family:var(--atlas-serif);font-weight:600;margin:4px 0}
+.app-shell .paper-page header small{color:var(--atlas-mute);font-variant-numeric:tabular-nums}
+.app-shell .paper-page th,.app-shell .paper-page td{border-color:#8f887a}
+.app-shell .paper-page th{background:var(--atlas-soft);font-weight:600;text-align:left}
+.app-shell .paper-page td:first-child{color:var(--atlas-mute);font-variant-numeric:tabular-nums}
+.app-shell .paper-page section,.app-shell .paper-page footer{border-top-color:var(--atlas-rule)}
+.app-shell .paper-page h2{font-family:var(--atlas-serif);font-weight:600}
+.app-shell .paper-page footer,.app-shell .paper-key{color:var(--atlas-mute)}
+@media print{.app-shell .paper-shell{background:#fff}.app-shell .paper-page{box-shadow:none;background:#fff}}
+
+/* ------------------------------------------------------------------ import review */
+/* Summary, counts and the three tables (field mapping, new records, issues) as ruled
+   ledgers: hairlines, caps headings, tabular figures, no tinted cards. */
+.app-shell .cf-dialog--import h3,.app-shell .cf-issues>h3,.app-shell .excel-record-preview>h3{font-family:var(--atlas-serif);font-weight:600;font-size:15px}
+.app-shell .cf-issues>h3 span,.app-shell .excel-record-preview>h3 span{font-family:'Inter',sans-serif;font-weight:400;font-size:11px;color:var(--atlas-mute)}
+.app-shell .cf-review__summary{background:transparent;border:0;border-top:1.5px solid var(--atlas-ink);border-bottom:1px solid var(--atlas-rule);border-radius:0;padding:12px 0}
+.app-shell .cf-review__summary strong{font-family:var(--atlas-serif);font-weight:600}
+.app-shell .cf-review__summary small{color:var(--atlas-mute)}
+.app-shell .cf-ready{color:var(--atlas-ink);font-weight:500}
+.app-shell .cf-not-ready{color:var(--atlas-acc);font-weight:500}
+.app-shell .cf-counts{gap:0;border-bottom:1px solid var(--atlas-rule)}
+.app-shell .cf-counts div{background:transparent;border:0;border-right:1px dotted var(--atlas-rule);border-radius:0;padding:10px 12px}
+.app-shell .cf-counts div:last-child{border-right:0}
+.app-shell .cf-counts dt{font-size:11px;color:var(--atlas-mute)}
+.app-shell .cf-counts dd{font-family:var(--atlas-serif);font-size:24px;font-weight:600;color:var(--atlas-ink);font-variant-numeric:tabular-nums}
+.app-shell .excel-district-demo{background:transparent;border:0;border-top:1px solid var(--atlas-rule);border-bottom:1px solid var(--atlas-rule);border-radius:0;padding:12px 0}
+.app-shell .excel-district-demo strong{font-family:var(--atlas-serif);font-weight:600;color:var(--atlas-ink)}
+.app-shell .excel-district-demo p{color:var(--atlas-mute)}
+.app-shell .excel-merge-summary{background:transparent;border-bottom:1px solid var(--atlas-rule);border-radius:0;padding:10px 0;color:var(--atlas-mute);font-size:13px}
+.app-shell .excel-merge-summary b{font-family:var(--atlas-serif);font-weight:600;color:var(--atlas-ink)}
+.app-shell .excel-record-preview>div,.app-shell .cf-issue-table{border:0;border-top:1px solid var(--atlas-ink);border-bottom:1px solid var(--atlas-rule);border-radius:0}
+.app-shell .excel-record-preview article{border-bottom:1px dotted var(--atlas-rule);padding:9px 2px}
+.app-shell .excel-record-preview article strong{font-family:var(--atlas-serif);font-weight:600}
+.app-shell .excel-record-preview article p{color:var(--atlas-mute)}
+.app-shell .cf-issue-row{border-top:1px dotted var(--atlas-rule);font-size:12px}
+.app-shell .cf-issue-row--head,.app-shell .cf-mapping__row--head{background:var(--atlas-card);font-family:'Inter',sans-serif;font-size:10px;font-weight:500;letter-spacing:.12em;color:var(--atlas-mute);border-top:0;border-bottom:1px solid var(--atlas-rule)}
+.app-shell .cf-issue-row span:nth-child(2){font-variant-numeric:tabular-nums}
+.app-shell .cf-issue-row.is-error{border-left:2px solid var(--atlas-acc)}
+.app-shell .cf-issue-row.is-warning{border-left:2px solid var(--atlas-task)}
+.app-shell .cf-success{background:transparent;color:var(--atlas-ink);padding:8px 0}
+.app-shell .cf-error{background:#f6e9e3;color:var(--atlas-acc);border-radius:2px}
+.app-shell .cf-recognition,.app-shell .cf-recognition.is-unknown,.app-shell .cf-recognition.is-ambiguous{background:transparent;border:0;border-top:1px solid var(--atlas-ink);border-radius:0}
+.app-shell .cf-recognition__head,.app-shell .cf-recognition.is-unknown .cf-recognition__head,.app-shell .cf-recognition.is-ambiguous .cf-recognition__head{background:transparent;padding:12px 0}
+.app-shell .cf-recognition__head h3{font-family:var(--atlas-serif);font-weight:600}
+.app-shell .cf-recognition__head p,.app-shell .cf-recognition__profile small,.app-shell .cf-mapping__basis{color:var(--atlas-mute)}
+.app-shell .cf-status{border-radius:2px;background:var(--atlas-soft);color:var(--atlas-ink)}
+.app-shell .cf-status.is-ambiguous{background:var(--atlas-task-bg);color:var(--atlas-task)}
+.app-shell .cf-status.is-unknown{background:#f6e9e3;color:var(--atlas-acc)}
+.app-shell .cf-status.is-candidate,.app-shell .cf-status.is-template{background:transparent;border:1px solid var(--atlas-rule);color:var(--atlas-mute)}
+.app-shell .cf-recognition__facts{background:var(--atlas-rule);border-top-color:var(--atlas-rule)}
+.app-shell .cf-recognition__facts>div{background:var(--atlas-card);padding:9px 0 9px 12px}
+.app-shell .cf-recognition__facts dt{color:var(--atlas-mute)}
+.app-shell .cf-recognition__profile,.app-shell .cf-mapping,.app-shell .cf-recognition__extra,.app-shell .cf-recognition__issues{border-top-color:var(--atlas-rule)}
+.app-shell .cf-recognition__profile,.app-shell .cf-mapping__row,.app-shell .cf-recognition__extra,.app-shell .cf-recognition__issues li{padding-left:0;padding-right:0}
+.app-shell .cf-recognition__profile select,.app-shell .cf-mapping select{border-color:var(--atlas-rule);border-radius:2px}
+.app-shell .cf-mapping__row{border-bottom:1px dotted var(--atlas-rule)}
+.app-shell .cf-mapping__row.is-ambiguous,.app-shell .cf-mapping__row.is-unknown{background:var(--atlas-task-bg)}
+.app-shell .cf-mapping__field strong{font-weight:600}
+.app-shell .cf-required{border-radius:2px;background:transparent;border:1px solid #d9b8ad;color:var(--atlas-acc)}
+.app-shell .cf-field-status.is-ambiguous,.app-shell .cf-field-status.is-unknown,.app-shell .cf-candidates{color:var(--atlas-task)}
+.app-shell .cf-recognition__applied{background:var(--atlas-soft);color:var(--atlas-ink)}
+.app-shell .cf-recognition__extra li{background:var(--atlas-soft);border-radius:2px}
+.app-shell .cf-recognition__issues li{border-bottom:1px dotted var(--atlas-rule)}
+.app-shell .cf-recognition__issues li.is-error{background:transparent;color:var(--atlas-acc)}
+.app-shell .cf-recognition__issues li.is-warning{background:transparent;color:var(--atlas-task)}
+.app-shell .cf-recognition__detail>summary{color:var(--atlas-ink);font-weight:500}

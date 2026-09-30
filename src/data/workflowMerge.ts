@@ -2,23 +2,25 @@ import { validateSnapshot } from '../domain/schema';
 import type { Observation, OutreachSnapshot } from '../domain/types';
 import type { WorkbookImportIssue } from './workbookImport';
 export interface MergeSummary { added: number; updated: number; duplicates: number; retained: number; }
-const collections = ['buildings', 'floors', 'units', 'people', 'households', 'householdMemberships', 'householdResidences', 'memberships', 'visits', 'observations'] as const;
+const collections = ['buildings', 'floors', 'units', 'people', 'households', 'householdMemberships', 'householdResidences', 'memberships', 'visits', 'observations', 'followUpEvents'] as const;
 const normalize = (v: unknown): unknown => Array.isArray(v) ? v.map(normalize) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).filter(([, value]) => value !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([k, value]) => [k, normalize(value)])) : v;
 const same = (a: unknown, b: unknown) => JSON.stringify(normalize(a)) === JSON.stringify(normalize(b));
 export function mergeWorkflow(current: OutreachSnapshot | undefined, incoming: OutreachSnapshot, baseline?: OutreachSnapshot) {
   const summary: MergeSummary = { added: 0, updated: 0, duplicates: 0, retained: 0 };
   const issues: WorkbookImportIssue[] = [];
-  if (!current) { summary.added = collections.reduce((n, key) => n + incoming[key].length, 0); return { snapshot: validateSnapshot(incoming), summary, issues }; }
+  if (!current) { summary.added = collections.reduce((n, key) => n + (incoming[key]?.length ?? 0), 0); return { snapshot: validateSnapshot(incoming), summary, issues }; }
   const next = structuredClone(current);
   for (const key of collections) {
-    const rows = next[key] as Array<{ id: string }>;
+    // followUpEvents is absent in snapshots saved before it existed; never add an empty one.
+    if (!incoming[key]?.length) continue;
+    const rows = (next[key] ??= []) as Array<{ id: string }>;
     for (const candidate of incoming[key]) {
       const index = rows.findIndex(row => row.id === candidate.id);
       if (index < 0) { rows.push(candidate); summary.added++; continue; }
       if (same(rows[index], candidate)) { summary.duplicates++; continue; }
       if (key === 'observations' && 'paperRef' in candidate && candidate.paperRef && paperRecordEqual(rows[index] as Observation, candidate as Observation)) { summary.duplicates++; continue; }
       if (key === 'visits' && candidate.id.startsWith('paper-visit:') && same({ ...rows[index], recordedAt: '' }, { ...candidate, recordedAt: '' })) { summary.duplicates++; continue; }
-      const original = baseline?.[key].find(row => row.id === candidate.id);
+      const original = baseline?.[key]?.find(row => row.id === candidate.id);
       if (original && same(candidate, original)) { summary.retained++; continue; }
       if (['buildings', 'people'].includes(key) && original && same(rows[index], original)) { rows[index] = candidate; summary.updated++; continue; }
       issues.push({ severity: 'error', code: 'MERGE_CONFLICT', sheet: key === 'observations' ? '紙本回錄' : key === 'people' ? '個人名冊' : key, field: '編號', message: `${candidate.id} 與本機內容衝突。到訪請新增行；檔案如已過期，請重新匯出後回錄。` });

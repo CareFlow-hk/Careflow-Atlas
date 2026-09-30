@@ -1,8 +1,8 @@
 import { createServer } from 'node:http';
-import { HttpError, requireValue, publicUser } from './auth.mjs';
+import { HttpError, requireValue, publicUser, SESSION_IDLE_MS } from './auth.mjs';
 
 export function createAuthServer(auth, { origin, secure = true, trustProxy = false }) {
-  requireValue(new URL(origin).origin === origin, 500, 'APP_ORIGIN 必须是完整 origin，不带路径或末尾斜线。');
+  requireValue(new URL(origin).origin === origin, 500, 'APP_ORIGIN 必須是完整 origin，不帶路徑或末尾斜線。');
   requireValue(!secure || origin.startsWith('https://'), 500, '安全 Cookie 需要 HTTPS APP_ORIGIN。');
   const cookieName = secure ? '__Host-atlas_session' : 'atlas_session';
   const cookie = (token, maxAge = 43200) => `${cookieName}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure ? '; Secure' : ''}`;
@@ -19,17 +19,17 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
       requireValue(path.startsWith('/api/'), 404, '找不到接口。');
       const mutation = req.method !== 'GET';
       if (mutation) {
-        requireValue(req.headers.origin === origin, 403, '请求来源不匹配。');
-        requireValue(req.headers['content-type']?.split(';')[0] === 'application/json', 415, '需要 JSON 请求。');
+        requireValue(req.headers.origin === origin, 403, '請求來源不匹配。');
+        requireValue(req.headers['content-type']?.split(';')[0] === 'application/json', 415, '需要 JSON 請求。');
       }
-      requireValue(!req.headers['sec-fetch-site'] || ['same-origin', 'none'].includes(req.headers['sec-fetch-site']), 403, '不允许跨站请求。');
+      requireValue(!req.headers['sec-fetch-site'] || ['same-origin', 'none'].includes(req.headers['sec-fetch-site']), 403, '不允許跨站請求。');
       let body = {};
       if (mutation) {
-        requireValue(!req.headers['content-length'] || Number(req.headers['content-length']) <= 8192, 413, '请求过大。');
+        requireValue(!req.headers['content-length'] || Number(req.headers['content-length']) <= 8192, 413, '請求過大。');
         const chunks = []; let length = 0;
-        for await (const chunk of req) { length += chunk.length; requireValue(length <= 8192, 413, '请求过大。'); chunks.push(chunk); }
-        try { body = JSON.parse(Buffer.concat(chunks).toString()); } catch { throw new HttpError(400, 'JSON 格式不正确。'); }
-        requireValue(body && typeof body === 'object' && !Array.isArray(body), 400, '无效请求。');
+        for await (const chunk of req) { length += chunk.length; requireValue(length <= 8192, 413, '請求過大。'); chunks.push(chunk); }
+        try { body = JSON.parse(Buffer.concat(chunks).toString()); } catch { throw new HttpError(400, 'JSON 格式不正確。'); }
+        requireValue(body && typeof body === 'object' && !Array.isArray(body), 400, '無效請求。');
       }
       // Only enable behind the bundled proxy, which overwrites this header.
       const ip = trustProxy ? String(req.headers['x-real-ip'] ?? req.socket.remoteAddress) : req.socket.remoteAddress;
@@ -43,8 +43,8 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
       }
       const token = req.headers.cookie?.split(';').map(v => v.trim()).find(v => v.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1);
       const row = auth.session(token);
-      requireValue(row, 401, '请登录后继续。');
-      if (mutation) requireValue(req.headers['x-csrf-token'] === row.csrf, 403, '请求校验失败，请刷新页面。');
+      requireValue(row, 401, '請登入後繼續。');
+      if (mutation) requireValue(req.headers['x-csrf-token'] === row.csrf, 403, '請求校驗失敗，請重新整理頁面。');
       const user = auth.assertSession(row);
       if (req.method === 'GET' && path === '/api/session') return send(res, 200, view(row));
       if (req.method === 'POST' && path === '/api/logout') {
@@ -55,7 +55,7 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
         await auth.changePassword(row, body.oldPassword, body.password);
         res.setHeader('Set-Cookie', cookie('', 0)); return send(res, 200, { ok: true });
       }
-      if (req.method === 'GET' && path === '/api/sessions') return send(res, 200, { sessions: auth.all('SELECT id,created_at,seen_at,expires_at FROM sessions WHERE user_id=? AND expires_at>? AND seen_at>? ORDER BY created_at DESC', user.id, Date.now(), Date.now() - 30 * 60_000).map(s => ({ ...s, current: s.id === row.id })) });
+      if (req.method === 'GET' && path === '/api/sessions') return send(res, 200, { sessions: auth.all('SELECT id,created_at,seen_at,expires_at FROM sessions WHERE user_id=? AND expires_at>? AND seen_at>? ORDER BY created_at DESC', user.id, Date.now(), Date.now() - SESSION_IDLE_MS).map(s => ({ ...s, current: s.id === row.id })) });
       if (req.method === 'POST' && path === '/api/sessions/revoke-others') {
         auth.transaction(() => { auth.run('DELETE FROM sessions WHERE user_id=? AND id<>?', user.id, row.id); auth.audit(user.id, 'other_sessions_revoked'); });
         return send(res, 200, { ok: true });
@@ -72,7 +72,7 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
         if (match && req.method === 'PATCH' && !match[2]) return send(res, 200, { user: auth.updateUser(row, match[1], body) });
         if (match && req.method === 'POST' && match[2]) {
           auth.limit(`admin:${user.id}`, 30);
-          const target = auth.userById(match[1]); requireValue(target && !target.disabled, 400, '账号不存在或已停用。');
+          const target = auth.userById(match[1]); requireValue(target && !target.disabled, 400, '帳號不存在或已停用。');
           const token = auth.transaction(() => auth.grant(target.id, user.id));
           return send(res, 200, { link: link(token) });
         }
@@ -83,7 +83,7 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
       if (status === 429 || status === 503) res.setHeader('Retry-After', status === 429 ? '900' : '5');
       // Never log request bodies, passwords, cookies, reset tokens or SQL values.
       if (status === 500) process.stderr.write('Account request failed unexpectedly.\n');
-      if (!res.headersSent) send(res, status, { error: status === 500 ? '服务暂时不可用。' : error.message });
+      if (!res.headersSent) send(res, status, { error: status === 500 ? '服務暫時不可用。' : error.message });
       else res.end();
     }
   });

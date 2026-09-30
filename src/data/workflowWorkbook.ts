@@ -35,7 +35,7 @@ export function parseWorkflowWorkbook(buffer: ArrayBuffer, file: string, now = n
   if (!workbook.SheetNames.includes('使用說明')) return undefined;
   const issues: WorkbookImportIssue[] = [];
   const add = (sheet: string, row: number | undefined, field: string, message: string, severity: 'error' | 'warning' = 'error') => issues.push({ sheet, row, field, message, severity, code: severity === 'error' ? 'WORKFLOW_INVALID' : 'WORKFLOW_NOTE' });
-  for (const name of workbook.SheetNames) if (!['使用說明', '大廈總表', '個人名冊', '紙本回錄', '待跟進', '關聯封存'].includes(name)) add(name, undefined, '', '未識別的工作表，請移至另一個檔案後再匯入，避免遺漏內容。');
+  for (const name of workbook.SheetNames) if (!['使用說明', '大廈總表', '個人名冊', '紙本回錄', '待跟進', '跟進處理', '關聯封存'].includes(name)) add(name, undefined, '', '未識別的工作表，請移至另一個檔案後再匯入，避免遺漏內容。');
   const read = (name: string, headers: string[], optionalHeaders: string[] = []) => {
     const sheet = workbook.Sheets[name];
     if (!sheet) { add(name, undefined, '', '缺少此工作表。'); return []; }
@@ -132,6 +132,8 @@ export function parseWorkflowWorkbook(buffer: ArrayBuffer, file: string, now = n
     const floors = incoming.floors.filter(f => f.buildingId === buildingId && (f.id === floorLabel || f.label === floorLabel));
     const units = incoming.units.filter(u => u.buildingId === buildingId && (u.id === unitLabel || u.label === unitLabel) && (!floorLabel || u.floorId === floors[0]?.id));
     if ((floorLabel && floors.length !== 1) || (unitLabel && units.length !== 1)) { add(sheet, row, '樓層／單位', '位置未能唯一對應。請用已有樓層及完整單位標籤；未知位置可留空並保留在原話欄。'); continue; }
+    // Floors keep no record of their own: a floor's colour is only the sum of its units.
+    if (floorLabel && !unitLabel) { add(sheet, row, '樓層／單位', '請填單位；如果是整棟的情況，樓層留空。'); continue; }
     const coverage = enumValue(v['覆蓋結果'], coverageLabels, sheet, row, '覆蓋結果', acceptedCoverage);
     if (!coverage) add(sheet, row, '覆蓋結果', '請明確選擇；資料不足可選「暫無可靠記錄」，不能以空白代表無發現。');
     const action = optional(v['跟進行動']);
@@ -153,6 +155,12 @@ export function parseWorkflowWorkbook(buffer: ArrayBuffer, file: string, now = n
   const tasks = read('待跟進', referenceSheets.find(s => s.name === '待跟進')!.headers);
   const taskSpec = referenceSheets.find(s => s.name === '待跟進')!;
   if (!same(tasks.map(r => taskSpec.headers.map(h => r.values[h])), taskSpec.rows)) add('待跟進', undefined, '', '此頁是參考清單，修改不會套用；請在紙本回錄新增結果。', 'warning');
+  // 跟進處理 is a reading view like 待跟進; files exported before it existed have none.
+  if (workbook.SheetNames.includes('跟進處理')) {
+    const eventSpec = referenceSheets.find(s => s.name === '跟進處理')!;
+    const events = read('跟進處理', eventSpec.headers);
+    if (!same(events.map(r => eventSpec.headers.map(h => r.values[h])), eventSpec.rows)) add('跟進處理', undefined, '', '此頁只供閱讀，修改不會套用；請在工作台標記完成或取消。', 'warning');
+  }
   const counts = { Buildings: incoming.buildings.length, People: incoming.people.length, Units: incoming.units.length, Observations: incoming.observations.length };
   if (issues.some(i => i.severity === 'error')) return { issues, counts, baseline };
   try { return { snapshot: validateSnapshot(incoming), baseline, issues, counts }; }

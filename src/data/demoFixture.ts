@@ -3,10 +3,10 @@ import { alignDemoBuilding } from './demoGeometry';
 
 const synthetic = { isSynthetic: true, provisional: true } as const;
 const buildingDefinitions = [
-  ["bldg-yu-an", "裕安樓", "西營盤示範街 1 號（合成）", 0, 0, 8, true],
-  ["bldg-hoi-king", "海景樓", "西營盤示範街 8 號（合成）", 0.00072, 0.00022, 2, true],
-  ["bldg-duk-cheong", "德昌樓", "西營盤示範街 16 號（合成）", -0.00045, 0.00051, undefined, false],
-  ["bldg-on-wo", "安和樓", "西營盤示範街 24 號（合成）", 0.00031, -0.00048, undefined, false],
+  ["bldg-yu-an", "裕安樓", "西營盤示範街 1 號", 0, 0, 8, true],
+  ["bldg-hoi-king", "海景樓", "西營盤示範街 8 號", 0.00072, 0.00022, 2, true],
+  ["bldg-duk-cheong", "德昌樓", "西營盤示範街 16 號", -0.00045, 0.00051, undefined, false],
+  ["bldg-on-wo", "安和樓", "西營盤示範街 24 號", 0.00031, -0.00048, undefined, false],
 ] as const;
 
 export const demoBuildings: Building[] = buildingDefinitions.map<Building>(([id, name, addressLabel, lngOffset, latOffset, floorCount, layoutDeclared]) => ({

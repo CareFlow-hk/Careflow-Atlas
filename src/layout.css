@@ -1,0 +1,44 @@
+/*
+ * Map-first layout (2026-09-29). On desktop the map fills the workspace; the building
+ * finder and the building panel float over it as cards. The finder is a one-line bar
+ * that opens into a dropdown; the panel is open whenever a building is selected.
+ * Phones (≤760px) keep the stacked layout from styles.css.
+ */
+.finder-bar{display:none}
+
+@media (min-width: 761px) {
+  .workspace,.workspace.has-selection{display:block;position:relative;grid-template-columns:none}
+  .spatial-workspace{position:absolute;inset:0}
+  /* The map is the background: no top bar, no district caption behind the finder. */
+  .workspace .map-topbar,.workspace .map-scene .map-location{display:none}
+
+  /* Finder: a floating bar at the top left that opens into the building list. */
+  .district-sidebar{position:absolute;top:14px;left:14px;z-index:8;width:340px;max-height:calc(100% - 96px);
+    display:flex;flex-direction:column;border:1px solid #dbe5e1;border-right:1px solid #dbe5e1;border-radius:12px;
+    background:#fffffff5;backdrop-filter:blur(10px);box-shadow:0 10px 32px #16352d24;overflow:hidden}
+  .has-selection .district-sidebar{display:flex}
+  .finder-bar{display:flex;align-items:center;gap:8px;width:100%;min-height:48px;padding:0 14px;border:0;background:transparent;
+    font:inherit;font-size:13px;color:#203b36;cursor:pointer;text-align:left;flex-shrink:0}
+  .finder-bar strong{font-weight:600}
+  .finder-bar>span{color:#6b7d78;font-size:12px;margin-left:2px;white-space:nowrap}
+  .finder-bar__chevron{margin-left:auto;color:#6b7d78;transition:transform 160ms}
+  .district-sidebar.is-open .finder-bar{border-bottom:1px solid #e3ebe8}
+  .district-sidebar.is-open .finder-bar__chevron{transform:rotate(180deg)}
+  .finder-body{display:flex;flex-direction:column;min-height:0;flex:1}
+  .district-sidebar:not(.is-open) .finder-body{display:none}
+  .district-sidebar .sidebar-heading{display:none}
+  .district-sidebar .building-list{flex:1;min-height:0}
+
+  /* Building panel: a floating card on the right, open while a building is selected. */
+  .workspace>.cf-building-panel{position:absolute;top:14px;right:14px;bottom:14px;z-index:8;width:390px;height:auto;
+    border:1px solid #dbe5e1;border-radius:12px;box-shadow:0 10px 32px #16352d24;overflow:auto}
+
+  /* Map chrome moves clear of the floating cards. */
+  .workspace.has-selection .map-tools{right:418px}
+  .workspace.has-selection .map-legend{left:14px}
+  .workspace.has-selection .map-prompt{display:none}
+  .workspace.has-selection ~ .toast{left:calc(50% - 200px)}
+}
+
+/* The header, and the account menu that drops from it, sit above the floating cards. */
+.app-shell .app-header{position:relative;z-index:30}

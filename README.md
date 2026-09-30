@@ -48,7 +48,7 @@ npm run build
 npm run dev             # vite --host 127.0.0.1
 ```
 
-请先按 [账号开发步骤](docs/ACCOUNTS.md#本机开发) 配置 `.env`、初始化管理员并启动 `npm run auth:dev`。登录后揀 **紙本與 Excel** → **檢視 mock 範例**，可以先睇中文工作簿再決定合併。生产验证请使用 Docker 同源双服务部署。
+请先按 [账号开发步骤](docs/ACCOUNTS.md#本机开发) 配置 `.env`、初始化管理员并启动 `npm run auth:dev`。登入後揀 **載入示範資料**；想睇 Excel 核對流程，就揀 **紙本與 Excel** → **重新載入示範資料**。生产验证请使用 Docker 同源双服务部署。
 
 | 檔案 | 用途 |
 | --- | --- |

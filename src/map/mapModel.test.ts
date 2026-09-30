@@ -3,8 +3,8 @@ import { stateLabels } from '../domain/presentation';
 import { buildingFeatures, districtBounds, visibleDistrictLabels, floorFeatures, footprintOf, markerLabel, FLOOR_HEIGHT, type MapBuilding } from './mapModel';
 
 const building: MapBuilding = {
-  id: 'test', name: 'Synthetic', longitude: 114.1418, latitude: 22.2863, state: 'YELLOW', followUps: 1,
-  floors: Array.from({ length: 8 }, (_, index) => ({ id: `f${index + 1}`, label: `${index + 1}F`, level: index + 1, state: index === 4 ? 'YELLOW' as const : 'GRAY' as const, hasFollowUp: index === 4, recorded: 0, total: 4 })),
+  id: 'test', name: 'Synthetic', longitude: 114.1418, latitude: 22.2863, state: 'YELLOW', followUps: 1, tagged: false,
+  floors: Array.from({ length: 8 }, (_, index) => ({ id: `f${index + 1}`, label: `${index + 1}F`, level: index + 1, state: index === 4 ? 'YELLOW' as const : 'GRAY' as const, hasFollowUp: index === 4, recorded: 0, total: 4, breakdown: { GREEN: 0, YELLOW: 0, RED: 0, GRAY: 4 }, tagged: false })),
 };
 describe('spatial adapter', () => {
   it('keeps an exploded building anchored to the same geographical footprint', () => {
@@ -118,5 +118,18 @@ describe('a building marker names its own task', () => {
   it('declares the extra width, so the tag is not laid out under a neighbouring name', () => {
     const without = markerLabel(withTasks(0), false).labelWidth;
     expect(markerLabel(withTasks(1), false).labelWidth).toBe(without + 60);
+  });
+});
+
+describe('the manual mark on a building marker', () => {
+  it('is named in the marker without changing the state it reports', () => {
+    const tagged = markerLabel({ ...building, tagged: true }, false);
+    expect(tagged.tagged).toBe(true);
+    expect(tagged.title).toContain('已標記跟進');
+    expect(tagged.title).toContain(stateLabels[building.state]);
+    expect(markerLabel(building, false).tagged).toBe(false);
+  });
+  it('widens the declared label so collision accounts for the flag', () => {
+    expect(markerLabel({ ...building, tagged: true }, false).labelWidth).toBeGreaterThan(markerLabel(building, false).labelWidth);
   });
 });

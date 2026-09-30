@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { backup } from 'node:sqlite';
-import { openAuth } from './auth.mjs';
+import { openAuth, SESSION_IDLE_MS } from './auth.mjs';
 import { createAuthServer } from './http.mjs';
 import { config } from './config.mjs';
 
@@ -53,10 +53,10 @@ test('invitation activation, password policy, expiry and one-time use', async t 
   assert.equal(invite.user.email, 'person@example.test');
   await assert.rejects(f.auth.redeem(invite.token, 'short', 'test'), /15–128/);
   await f.auth.redeem(invite.token, password, 'test');
-  await assert.rejects(f.auth.redeem(invite.token, password, 'test'), /链接无效/);
+  await assert.rejects(f.auth.redeem(invite.token, password, 'test'), /連結無效/);
   const other = f.auth.createUser({ email: 'other@example.test', name: 'Other', role: 'MEMBER' });
   f.tick(60 * 60_000 + 1);
-  await assert.rejects(f.auth.redeem(other.token, password, 'test'), /链接无效/);
+  await assert.rejects(f.auth.redeem(other.token, password, 'test'), /連結無效/);
   const raw = readFileSync(f.path);
   assert.equal(raw.includes(Buffer.from(password)), false);
   assert.equal(raw.includes(Buffer.from(invite.token)), false);
@@ -91,7 +91,7 @@ test('disable revokes every session and reset grant; enabling does not restore t
   assert.equal((await f.request('/api/session', member)).status, 401);
   assert.equal((await f.request('/api/login', { method: 'POST', body: { email: member.email, password } })).status, 401);
   await update(false);
-  await assert.rejects(f.auth.redeem(reset.value.link.split('=')[1], password, 'test'), /链接无效/);
+  await assert.rejects(f.auth.redeem(reset.value.link.split('=')[1], password, 'test'), /連結無效/);
   assert.equal((await f.request('/api/session', member)).status, 401);
 });
 
@@ -99,7 +99,7 @@ test('password reset invalidates old grants and every session; no auto login', a
   const f = await fixture(t); const admin = await f.account(); const member = await f.account('MEMBER');
   const make = () => f.request(`/api/admin/users/${member.id}/reset`, { method: 'POST', ...admin });
   const a = (await make()).value.link.split('=')[1], b = (await make()).value.link.split('=')[1];
-  await assert.rejects(f.auth.redeem(a, password, 'test'), /链接无效/);
+  await assert.rejects(f.auth.redeem(a, password, 'test'), /連結無效/);
   const reset = await f.request('/api/set-password', { method: 'POST', body: { token: b, password: password + 'new' } });
   assert.equal(reset.status, 200); assert.equal(reset.cookie, 'atlas_session=');
   assert.equal((await f.request('/api/session', member)).status, 401);
@@ -128,7 +128,8 @@ test('logout and revoke-other-sessions only affect intended sessions', async t =
 
 test('idle and absolute session expiration are enforced server-side', async t => {
   const f = await fixture(t); const admin = await f.account();
-  f.tick(30 * 60_000 + 1); assert.equal((await f.request('/api/session', admin)).status, 401);
+  f.tick(SESSION_IDLE_MS - 60_000); assert.equal((await f.request('/api/session', admin)).status, 200);
+  f.tick(SESSION_IDLE_MS + 1); assert.equal((await f.request('/api/session', admin)).status, 401);
   const login = await f.request('/api/login', { method: 'POST', body: { email: admin.email, password } });
   f.auth.run('UPDATE sessions SET expires_at=0');
   assert.equal((await f.request('/api/session', { cookie: login.cookie })).status, 401);
@@ -140,14 +141,14 @@ test('login throttling persists across database connections and ignores spoofed 
   const denied = await f.request('/api/login', { method: 'POST', body: { email: 'unknown@example.test', password } });
   assert.equal(denied.status, 429); assert.equal(denied.headers.get('retry-after'), '900');
   const second = openAuth(f.path);
-  try { assert.throws(() => second.limit('login-email:unknown@example.test', 10), /频繁/); } finally { second.close(); }
+  try { assert.throws(() => second.limit('login-email:unknown@example.test', 10), /頻繁/); } finally { second.close(); }
 });
 
 test('async password operations cannot resurrect a disabled account or revoked session', async t => {
   const f = await fixture(t); const admin = await f.account(); const member = await f.account('MEMBER');
   const changing = f.auth.changePassword(f.auth.session(member.cookie.split('=')[1]), password, password + 'new');
   f.auth.updateUser(f.auth.session(admin.cookie.split('=')[1]), member.id, { name: 'Member', role: 'MEMBER', disabled: true });
-  await assert.rejects(changing, /会话已过期/);
+  await assert.rejects(changing, /登入已過期/);
   const pending = f.auth.login(admin.email, password, 'race');
   f.auth.run('UPDATE users SET version=version+1 WHERE id=?', admin.id);
   await assert.rejects(pending, /不可用/);
@@ -196,5 +197,5 @@ test('simultaneous redemption of the same link succeeds only once', async t => {
 test('newer account database schema cannot be silently downgraded', async t => {
   const f = await fixture(t);
   f.auth.run('PRAGMA user_version=2');
-  assert.throws(() => openAuth(f.path), /拒绝降级/);
+  assert.throws(() => openAuth(f.path), /拒絕降級/);
 });

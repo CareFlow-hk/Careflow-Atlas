@@ -61,3 +61,24 @@ describe('account demo cache isolation', () => {
     } finally { setWorkspaceAccount(); vi.unstubAllGlobals(); }
   });
 });
+
+describe('closing a task in the app', () => {
+  it('names the signed-in account as operator, and refuses when nobody is signed in', async () => {
+    const { setWorkspaceAccount } = await import('./store');
+    const { getOpenFollowUps } = await import('../domain/types');
+    const values = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value) });
+    try {
+      setWorkspaceAccount('account-a', '合成操作員');
+      useWorkspace.getState().importSnapshot(demoSnapshot);
+      const [task] = getOpenFollowUps(demoSnapshot);
+      useWorkspace.getState().actOnFollowUp(task.observationId, 'DONE');
+      const [event] = useWorkspace.getState().snapshot!.followUpEvents!;
+      expect(event.operator).toEqual({ accountId: 'account-a', name: '合成操作員' });
+      expect(getOpenFollowUps(useWorkspace.getState().snapshot!).some(open => open.observationId === task.observationId)).toBe(false);
+      setWorkspaceAccount();
+      useWorkspace.setState({ snapshot: demoSnapshot });
+      expect(() => useWorkspace.getState().actOnFollowUp(task.observationId, 'DONE')).toThrow('請先登入');
+    } finally { setWorkspaceAccount(); vi.unstubAllGlobals(); }
+  });
+});

@@ -26,6 +26,10 @@ export interface RecognitionPanelProps {
 export function RecognitionPanel({ recognition, onRemap }: RecognitionPanelProps) {
   const { status, fields, headers, unmatchedColumns, appliedOverrides } = recognition;
   const warned = unmatchedColumns.filter((column) => column.hasData);
+  /* A clean recognition needs no decision, so its detail stays folded. Anything that asks
+     for a person's judgement — a guess, a clash, an override, an unmatched column with
+     data, an issue — opens it. */
+  const clean = status === 'KNOWN' && appliedOverrides.length === 0 && warned.length === 0 && recognition.issues.length === 0;
   return <section className={`cf-recognition is-${status.toLowerCase()}`} aria-labelledby="recognition-title">
     <header className="cf-recognition__head">
       <div>
@@ -39,6 +43,8 @@ export function RecognitionPanel({ recognition, onRemap }: RecognitionPanelProps
       </div>
     </header>
 
+    <details className="cf-recognition__detail" open={!clean}>
+    <summary>{clean ? '查看欄位對應' : '核對欄位對應'}</summary>
     <dl className="cf-recognition__facts">
       <div><dt>工作表</dt><dd>{recognition.sheetName ?? '—'}</dd></div>
       <div><dt>表頭行</dt><dd>{recognition.headerRow === undefined ? '—' : recognition.headerRow + 1}</dd></div>
@@ -82,6 +88,8 @@ export function RecognitionPanel({ recognition, onRemap }: RecognitionPanelProps
         <span role="cell" className="cf-mapping__basis">{field.basis}</span>
       </div>)}
     </div>}
+
+    </details>
 
     {appliedOverrides.length > 0 && <p className="cf-recognition__applied"><CheckCircle2 size={15} />已按你的選擇更新：{appliedOverrides.join('、')}</p>}
 

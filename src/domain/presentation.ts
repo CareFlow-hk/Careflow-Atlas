@@ -4,7 +4,7 @@
  * one deliberate exception is the paper/Excel vocabulary below, which is a
  * separate view of the same data and is commented as such.
  */
-import { CONTACT_OUTCOMES, COVERAGE_STATUSES, HOUSING_ASSESSMENTS, SOURCE_TYPES, SUPPORT_CATEGORIES, type ClueLevel, type ContactOutcome, type CoverageStatus, type HousingAssessment, type SourceType, type State, type StateBreakdown, type SupportCategory } from './types';
+import { CONTACT_OUTCOMES, COVERAGE_STATUSES, HOUSING_ASSESSMENTS, SOURCE_TYPES, SUPPORT_CATEGORIES, type ClueLevel, type FollowUpEventAction, type ContactOutcome, type CoverageStatus, type HousingAssessment, type SourceType, type State, type StateBreakdown, type SupportCategory } from './types';
 
 /* ---------------------------------------------------------------- states --- */
 
@@ -16,19 +16,20 @@ export const stateLabels: Record<State, string> = {
   GRAY: '尚待了解',
 };
 
+/* Atlas palette (UI option B, 2026-09-29): muted, printed-map tones. */
 export const stateColors: Record<State, string> = {
-  GREEN: '#4c9f70',
-  YELLOW: '#d4a35e',
-  RED: '#c0564f',
-  GRAY: '#acb8b2',
+  GREEN: '#5a8462',
+  YELLOW: '#c58c38',
+  RED: '#a94b3b',
+  GRAY: '#c3bcad',
 };
 
 /** The same four hues, deepened. Selection changes brightness only, never meaning. */
 export const stateSelectedColors: Record<State, string> = {
-  GREEN: '#3b7f58',
-  YELLOW: '#b8833c',
-  RED: '#9c443e',
-  GRAY: '#8c9a93',
+  GREEN: '#476b4e',
+  YELLOW: '#a6742b',
+  RED: '#8b3c2f',
+  GRAY: '#a39c8c',
 };
 
 /**
@@ -48,9 +49,15 @@ export const stateLegendNotes: Record<State, string> = {
  * by the pipeline, it is the backdrop the four states are drawn on.
  */
 export const mapSceneColors = {
-  contextBuilding: '#d5d8cf',
-  selectionOutline: '#195f4e',
-  light: '#ffffff',
+  contextBuilding: '#ebe7de',
+  selectionOutline: '#1d2622',
+  light: '#fffaf0',
+  /* The basemap is re-inked in the same printed-map tones as the panels. */
+  paper: '#efe9dc',
+  water: '#d3d9cf',
+  park: '#e2e2cd',
+  landuse: '#e9e2d2',
+  basemapBuilding: '#e6e1d6',
 } as const;
 
 /** Reads an aggregated node's composition, e.g. "2 綠 · 1 紅 · 3 未訪". */
@@ -74,9 +81,16 @@ export function breakdownLabel(counts: StateBreakdown): string {
  *              chip is never ambiguous once both axes are shown side by side.
  */
 
+/*
+ * The two values the entry form now stores read back as the form's own wording, so
+ * a person sees what they picked: 未能完成探訪 stores ATTEMPTED and 已完成探訪 stores
+ * VISITED_NO_FINDING. Older records with the finer values (PARTIAL, INACCESSIBLE,
+ * VISITED_WITH_FINDING) keep their more specific wording. Paper/Excel wording below
+ * is a separate vocabulary and is not changed by this.
+ */
 export const coverageLabels: Record<CoverageStatus, string> = {
-  UNKNOWN: '暫無可靠記錄', UNVISITED: '未到訪', ATTEMPTED: '曾嘗試',
-  PARTIAL: '部分完成', VISITED_NO_FINDING: '已訪，無記錄發現',
+  UNKNOWN: '暫無可靠記錄', UNVISITED: '未到訪', ATTEMPTED: '未能完成探訪',
+  PARTIAL: '部分完成', VISITED_NO_FINDING: '已完成探訪',
   VISITED_WITH_FINDING: '已訪，有記錄', INACCESSIBLE: '未能進入',
 };
 
@@ -100,6 +114,17 @@ export const supportCategoryLabels: Record<SupportCategory, string> = {
 };
 /** A task with no category is shown as unclassified, never silently as 一般跟進. */
 export const uncategorisedFollowUpLabel = '待跟進';
+
+/** What a person did to a task in the app, as the trail reads it. */
+export const followUpEventLabels: Record<FollowUpEventAction, string> = {
+  DONE: '標記完成', CANCELLED: '取消跟進', REOPENED: '撤銷',
+};
+/** The task's status line once an app event has closed it. */
+export const followUpClosedLabels: Record<Exclude<FollowUpEventAction, 'REOPENED'>, string> = {
+  DONE: '已標記完成', CANCELLED: '已取消',
+};
+/** The separate marker a building or floor carries when someone tagged it. */
+export const nodeTagLabel = '已標記跟進';
 
 /** The two clue levels stay apart: they differ in how strong the evidence is. */
 export const clueLabels: Record<ClueLevel, string> = {
@@ -202,7 +227,7 @@ export function contactGroupOf(outcome: ContactOutcome): ContactGroup {
 
 /** Wordings an earlier version of this product wrote, and no longer writes. */
 export const retiredLabels = {
-  coverage: { '覆蓋未明': 'UNKNOWN' },
+  coverage: { '覆蓋未明': 'UNKNOWN', '曾嘗試': 'ATTEMPTED', '已訪，無記錄發現': 'VISITED_NO_FINDING' },
   contact: {},
   assessment: { '由工作人員確認': 'STAFF_VERIFIED' },
   source: {},
