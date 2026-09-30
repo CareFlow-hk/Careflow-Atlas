@@ -59,8 +59,10 @@ export default function App() {
   const [finderOpen, setFinderOpen] = useState(true);
   const hasSnapshot = Boolean(snapshot);
   useEffect(() => { setFinderOpen(!hasSnapshot); }, [hasSnapshot]);
-  /** What the floating cards cover, so the camera centres a building in the visible map. */
-  const mapInsets = useMemo(() => ({ left: floating && finderOpen ? 356 : 0, right: floating && selectedBuildingId ? 412 : 0 }), [floating, finderOpen, selectedBuildingId]);
+  /** What the floating cards cover, so the camera centres a building in the visible map.
+      With a building open the map tools sit beside the panel, so the right side keeps
+      their column too (panel 412 + tools 58). */
+  const mapInsets = useMemo(() => ({ left: floating && finderOpen ? 356 : 0, right: floating && selectedBuildingId ? 470 : 0 }), [floating, finderOpen, selectedBuildingId]);
   // The "start with a building" hint is for a first look only; once a building has been opened it stays away.
   const [explored, setExplored] = useState(() => { try { return localStorage.getItem('careflow-atlas.explored') === '1'; } catch { return false; } });
   useEffect(() => { if (!selectedBuildingId || explored) return; setExplored(true); try { localStorage.setItem('careflow-atlas.explored', '1'); } catch { /* a hint only */ } }, [selectedBuildingId, explored]);

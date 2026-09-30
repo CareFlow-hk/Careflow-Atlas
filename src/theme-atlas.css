@@ -195,3 +195,80 @@ body{background:var(--atlas-paper)}
 .account-page button:hover{background:var(--atlas-soft)}
 .account-page form button,.account-page .account-invite button{background:var(--atlas-ink);color:var(--atlas-paper);border-color:var(--atlas-ink)}
 .account-page form button:hover{background:#2e3a35}
+
+/* ------------------------------------------------------------------ paper form */
+/* The printed sheet keeps its A4 geometry from paper.css; only type and ink change. */
+.app-shell .paper-shell{background:#e7e1d3;color:var(--atlas-ink)}
+.app-shell .paper-controls{font-size:13px}
+.app-shell .paper-controls>span{color:var(--atlas-mute);font-size:12px}
+.app-shell .paper-controls select{border-color:var(--atlas-rule);border-radius:2px;background:var(--atlas-card);font-family:var(--atlas-serif);font-weight:600}
+.app-shell .paper-page{background:#fffefa;box-shadow:0 1px 0 #fff inset,0 18px 48px #3a2e1a2e;font-family:var(--atlas-sans);color:var(--atlas-ink)}
+.app-shell .paper-page header{border-bottom:1.5px solid var(--atlas-ink);padding-bottom:12px}
+.app-shell .paper-page header>span{font-family:'Inter',sans-serif;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--atlas-acc)}
+.app-shell .paper-page h1{font-family:var(--atlas-serif);font-weight:700;font-size:26px;letter-spacing:.02em}
+.app-shell .paper-page header p{font-family:var(--atlas-serif);font-weight:600;margin:4px 0}
+.app-shell .paper-page header small{color:var(--atlas-mute);font-variant-numeric:tabular-nums}
+.app-shell .paper-page th,.app-shell .paper-page td{border-color:#8f887a}
+.app-shell .paper-page th{background:var(--atlas-soft);font-weight:600;text-align:left}
+.app-shell .paper-page td:first-child{color:var(--atlas-mute);font-variant-numeric:tabular-nums}
+.app-shell .paper-page section,.app-shell .paper-page footer{border-top-color:var(--atlas-rule)}
+.app-shell .paper-page h2{font-family:var(--atlas-serif);font-weight:600}
+.app-shell .paper-page footer,.app-shell .paper-key{color:var(--atlas-mute)}
+@media print{.app-shell .paper-shell{background:#fff}.app-shell .paper-page{box-shadow:none;background:#fff}}
+
+/* ------------------------------------------------------------------ import review */
+/* Summary, counts and the three tables (field mapping, new records, issues) as ruled
+   ledgers: hairlines, caps headings, tabular figures, no tinted cards. */
+.app-shell .cf-dialog--import h3,.app-shell .cf-issues>h3,.app-shell .excel-record-preview>h3{font-family:var(--atlas-serif);font-weight:600;font-size:15px}
+.app-shell .cf-issues>h3 span,.app-shell .excel-record-preview>h3 span{font-family:'Inter',sans-serif;font-weight:400;font-size:11px;color:var(--atlas-mute)}
+.app-shell .cf-review__summary{background:transparent;border:0;border-top:1.5px solid var(--atlas-ink);border-bottom:1px solid var(--atlas-rule);border-radius:0;padding:12px 0}
+.app-shell .cf-review__summary strong{font-family:var(--atlas-serif);font-weight:600}
+.app-shell .cf-review__summary small{color:var(--atlas-mute)}
+.app-shell .cf-ready{color:var(--atlas-ink);font-weight:500}
+.app-shell .cf-not-ready{color:var(--atlas-acc);font-weight:500}
+.app-shell .cf-counts{gap:0;border-bottom:1px solid var(--atlas-rule)}
+.app-shell .cf-counts div{background:transparent;border:0;border-right:1px dotted var(--atlas-rule);border-radius:0;padding:10px 12px}
+.app-shell .cf-counts div:last-child{border-right:0}
+.app-shell .cf-counts dt{font-size:11px;color:var(--atlas-mute)}
+.app-shell .cf-counts dd{font-family:var(--atlas-serif);font-size:24px;font-weight:600;color:var(--atlas-ink);font-variant-numeric:tabular-nums}
+.app-shell .excel-district-demo{background:transparent;border:0;border-top:1px solid var(--atlas-rule);border-bottom:1px solid var(--atlas-rule);border-radius:0;padding:12px 0}
+.app-shell .excel-district-demo strong{font-family:var(--atlas-serif);font-weight:600;color:var(--atlas-ink)}
+.app-shell .excel-district-demo p{color:var(--atlas-mute)}
+.app-shell .excel-merge-summary{background:transparent;border-bottom:1px solid var(--atlas-rule);border-radius:0;padding:10px 0;color:var(--atlas-mute);font-size:13px}
+.app-shell .excel-merge-summary b{font-family:var(--atlas-serif);font-weight:600;color:var(--atlas-ink)}
+.app-shell .excel-record-preview>div,.app-shell .cf-issue-table{border:0;border-top:1px solid var(--atlas-ink);border-bottom:1px solid var(--atlas-rule);border-radius:0}
+.app-shell .excel-record-preview article{border-bottom:1px dotted var(--atlas-rule);padding:9px 2px}
+.app-shell .excel-record-preview article strong{font-family:var(--atlas-serif);font-weight:600}
+.app-shell .excel-record-preview article p{color:var(--atlas-mute)}
+.app-shell .cf-issue-row{border-top:1px dotted var(--atlas-rule);font-size:12px}
+.app-shell .cf-issue-row--head,.app-shell .cf-mapping__row--head{background:var(--atlas-card);font-family:'Inter',sans-serif;font-size:10px;font-weight:500;letter-spacing:.12em;color:var(--atlas-mute);border-top:0;border-bottom:1px solid var(--atlas-rule)}
+.app-shell .cf-issue-row span:nth-child(2){font-variant-numeric:tabular-nums}
+.app-shell .cf-issue-row.is-error{border-left:2px solid var(--atlas-acc)}
+.app-shell .cf-issue-row.is-warning{border-left:2px solid var(--atlas-task)}
+.app-shell .cf-success{background:transparent;color:var(--atlas-ink);padding:8px 0}
+.app-shell .cf-error{background:#f6e9e3;color:var(--atlas-acc);border-radius:2px}
+.app-shell .cf-recognition,.app-shell .cf-recognition.is-unknown,.app-shell .cf-recognition.is-ambiguous{background:transparent;border:0;border-top:1px solid var(--atlas-ink);border-radius:0}
+.app-shell .cf-recognition__head,.app-shell .cf-recognition.is-unknown .cf-recognition__head,.app-shell .cf-recognition.is-ambiguous .cf-recognition__head{background:transparent;padding:12px 0}
+.app-shell .cf-recognition__head h3{font-family:var(--atlas-serif);font-weight:600}
+.app-shell .cf-recognition__head p,.app-shell .cf-recognition__profile small,.app-shell .cf-mapping__basis{color:var(--atlas-mute)}
+.app-shell .cf-status{border-radius:2px;background:var(--atlas-soft);color:var(--atlas-ink)}
+.app-shell .cf-status.is-ambiguous{background:var(--atlas-task-bg);color:var(--atlas-task)}
+.app-shell .cf-status.is-unknown{background:#f6e9e3;color:var(--atlas-acc)}
+.app-shell .cf-status.is-candidate,.app-shell .cf-status.is-template{background:transparent;border:1px solid var(--atlas-rule);color:var(--atlas-mute)}
+.app-shell .cf-recognition__facts{background:var(--atlas-rule);border-top-color:var(--atlas-rule)}
+.app-shell .cf-recognition__facts>div{background:var(--atlas-card);padding:9px 0 9px 12px}
+.app-shell .cf-recognition__facts dt{color:var(--atlas-mute)}
+.app-shell .cf-recognition__profile,.app-shell .cf-mapping,.app-shell .cf-recognition__extra,.app-shell .cf-recognition__issues{border-top-color:var(--atlas-rule)}
+.app-shell .cf-recognition__profile,.app-shell .cf-mapping__row,.app-shell .cf-recognition__extra,.app-shell .cf-recognition__issues li{padding-left:0;padding-right:0}
+.app-shell .cf-recognition__profile select,.app-shell .cf-mapping select{border-color:var(--atlas-rule);border-radius:2px}
+.app-shell .cf-mapping__row{border-bottom:1px dotted var(--atlas-rule)}
+.app-shell .cf-mapping__row.is-ambiguous,.app-shell .cf-mapping__row.is-unknown{background:var(--atlas-task-bg)}
+.app-shell .cf-mapping__field strong{font-weight:600}
+.app-shell .cf-required{border-radius:2px;background:transparent;border:1px solid #d9b8ad;color:var(--atlas-acc)}
+.app-shell .cf-field-status.is-ambiguous,.app-shell .cf-field-status.is-unknown,.app-shell .cf-candidates{color:var(--atlas-task)}
+.app-shell .cf-recognition__applied{background:var(--atlas-soft);color:var(--atlas-ink)}
+.app-shell .cf-recognition__extra li{background:var(--atlas-soft);border-radius:2px}
+.app-shell .cf-recognition__issues li{border-bottom:1px dotted var(--atlas-rule)}
+.app-shell .cf-recognition__issues li.is-error{background:transparent;color:var(--atlas-acc)}
+.app-shell .cf-recognition__issues li.is-warning{background:transparent;color:var(--atlas-task)}
+.app-shell .cf-recognition__detail>summary{color:var(--atlas-ink);font-weight:500}

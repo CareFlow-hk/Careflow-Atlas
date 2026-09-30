@@ -18,6 +18,8 @@ setWorkerUrl(mapWorkerUrl);
 // Focused context keeps its existing camera-relative cutaway and source heights.
 const overviewContextHeight: ExpressionSpecification = ['min', 24, ['*', ['get', 'height'], .35]];
 const overviewContextBase: ExpressionSpecification = ['min', overviewContextHeight, ['*', ['get', 'base'], .35]];
+/** Roughly the width of a floor label with its breakdown, in screen pixels. */
+const FLOOR_LABEL_ALLOWANCE = 120;
 
 interface MapSceneProps {
   buildings: MapBuilding[];
@@ -330,10 +332,15 @@ export default function MapScene(props: MapSceneProps) {
     setHover(undefined);
     setNotice('');
     if (active) {
-      const stackZoom = 18.7 + Math.log2(8 / Math.max(8, active.floors.length)) + Math.min(0, Math.log2(map.getCanvas().clientHeight / 700), Math.log2(map.getCanvas().clientWidth / 720));
+      // Size the stack to the part of the map the floating cards leave visible, but only
+      // gently: floors thinner than their labels would stack the labels on each other.
+      const visibleWidth = Math.max(320, map.getCanvas().clientWidth - (props.insets?.left ?? 0) - (props.insets?.right ?? 0));
+      const stackZoom = 18.7 + Math.log2(8 / Math.max(8, active.floors.length)) + Math.min(0, Math.log2(map.getCanvas().clientHeight / 700), Math.log2(visibleWidth / 560));
       map.flyTo({ center: [active.longitude, active.latitude], zoom: compact ? 17.8 : active.floors.length > 3 ? stackZoom : 18.7, pitch: 58, bearing: -24,
-        // Reserve space above the floating controls, including on short desktops.
-        offset: [((props.insets?.left ?? 0) - (props.insets?.right ?? 0)) / 2, compact ? 20 : active.floors.length > 3 ? Math.min(110, Math.max(0, map.getCanvas().clientHeight / 2 - 225)) : 0],
+        // Reserve space above the floating controls, including on short desktops. The
+        // floor labels hang to the right of the stack, so the stack sits left of centre
+        // and the pair is centred together rather than the labels running into the tools.
+        offset: [((props.insets?.left ?? 0) - (props.insets?.right ?? 0)) / 2 - (compact ? 0 : FLOOR_LABEL_ALLOWANCE / 2), compact ? 20 : active.floors.length > 3 ? Math.min(110, Math.max(0, map.getCanvas().clientHeight / 2 - 225)) : 0],
         duration: motionDuration(spatialMotion.focus), easing: easeInOutCubic, essential: false });
     } else {
       frameDistrict(map);
