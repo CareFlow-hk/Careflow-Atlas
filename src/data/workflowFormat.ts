@@ -1,4 +1,5 @@
 import { effectiveObservations, getCoverageSummary, getOpenFollowUps, type OutreachSnapshot, type Observation } from '../domain/types';
+import { layoutSummary, UNDECLARED_LAYOUT } from './layoutSummary';
 import { exportAssessmentLabels, exportContactLabels, exportCoverageLabels, exportSourceLabels, followUpEventLabels, supportCategoryLabels } from '../domain/presentation';
 
 export const WORKFLOW_VERSION = 'careflow-paper-excel-v1';
@@ -67,14 +68,15 @@ export function workflowSheets(snapshot: OutreachSnapshot): WorkflowSheet[] {
       ['日期與來源', '日期用 Excel 日期；時間可留空。「明年二月」「翌日午後」留在時間原話欄，未確認前不換算期限。'],
       ['匯入', '先核對新增、重複、更新及衝突，再合併。刪掉 Excel 行不會刪掉本機資料。'],
       ['參考欄', '大廈摘要、會員狀態與家庭編號是參考。請勿用它們覆寫明細；修改會在匯入時提示。'],
+      ['新增大廈', '在大廈總表末尾新增一行，填大廈編號、名稱、地址、經度、緯度。未有樓層的大廈可在「樓層單位摘要」由最低一層開始，一行一層寫「1 樓：1樓 A室、1樓 B室」；匯入核對時會列出將新建的樓層及單位。已有樓層的大廈不能在此修改。'],
       ['關聯封存', '最後一頁保存樓層、單位、家庭、會員及歷史關聯，用於完整匯出和衝突核對；請保留原樣。'],
       ['依據', 'Master 資料包 S25、01_MASTER_CONTEXT §4.4–5；mock/person_view、building_view、visit_paper_view。精確原始表頭、顏色與唯一鍵仍待機構提供。'],
       ['新情境', '住屋變動、健康關懷、服務邀約為暫擬分類。轉錄有雜音；不從原話推定診斷、搬遷日期或法規結論。'],
     ] },
-    { name: '大廈總表', note: '一幢大廈一行；摘要由回錄明細計算，不能代表整幢已完成。', headers: buildingHeaders, widths: [24, 18, 38, 42, 25, 18, 14, 20, 20], editable: ['大廈名稱', '地址', '經度', '緯度'], dates: ['最近到訪'], rows: snapshot.buildings.map(b => {
+    { name: '大廈總表', note: '一幢大廈一行；摘要由回錄明細計算，不能代表整幢已完成。未有樓層的大廈可在「樓層單位摘要」一行一層填寫樓層及單位。', headers: buildingHeaders, widths: [24, 18, 38, 42, 25, 18, 14, 20, 20], editable: ['大廈名稱', '地址', '經度', '緯度'], dates: ['最近到訪'], rows: snapshot.buildings.map(b => {
       const summary = getCoverageSummary(snapshot, b.id);
       const dates = effective.filter(o => o.buildingId === b.id).map(o => o.occurredAt).sort((a, b) => Date.parse(b) - Date.parse(a));
-      return [b.id, b.name, b.address, b.layoutDeclared ? snapshot.floors.filter(f => f.buildingId === b.id).map(f => `${f.label}：${snapshot.units.filter(u => u.floorId === f.id).map(u => u.label).join('、')}`).join('\n') : '樓層／單位未核實', coverageLabels[summary.status], dates[0] ? excelDate(hkParts(dates[0])[0]) : '', summary.followUps, b.coordinates.lng, b.coordinates.lat];
+      return [b.id, b.name, b.address, b.layoutDeclared ? layoutSummary(snapshot, b.id) : UNDECLARED_LAYOUT, coverageLabels[summary.status], dates[0] ? excelDate(hkParts(dates[0])[0]) : '', summary.followUps, b.coordinates.lng, b.coordinates.lat];
     }) },
     { name: '個人名冊', note: '一人一行。電話以文字保存；相同姓名或電話不代表同一人。', headers: personHeaders, widths: [24, 22, 20, 44, 50, 24, 28], editable: personHeaders.slice(1, 5), rows: snapshot.people.map(p => {
       const households = snapshot.householdMemberships.filter(h => h.personId === p.id).map(h => h.householdId);

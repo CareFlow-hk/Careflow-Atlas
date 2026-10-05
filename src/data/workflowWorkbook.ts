@@ -4,12 +4,15 @@ import { validateSnapshot, occurrenceSchema } from '../domain/schema';
 import { type Observation, type OutreachSnapshot } from '../domain/types';
 import { coverageLabels } from '../domain/presentation';
 import { alignDemoSnapshot } from './demoGeometry';
+import { isUndeclaredLayout, parseLayoutSummary } from './layoutSummary';
 import { WORKFLOW_VERSION, hkParts, assessmentLabels, buildingHeaders, contactLabels, observationRow, optionalPaperHeaders, paperHeaders, personHeaders, sourceLabels, workflowSheets } from './workflowFormat';
 import { getCorrectionConflicts } from '../domain/types';
 import { acceptedAssessment, acceptedContact, acceptedCoverage, acceptedSource, supportCategoryLabels } from '../domain/presentation';
 import type { WorkbookImportIssue } from './workbookImport';
 
-export interface WorkflowImport { snapshot?: OutreachSnapshot; baseline?: OutreachSnapshot; issues: WorkbookImportIssue[]; counts: Record<string, number>; }
+/** A floor/unit layout this file declares for a building that had none, shown for confirmation before merge. */
+export interface DeclaredLayout { buildingId: string; name: string; floors: number; units: number; }
+export interface WorkflowImport { snapshot?: OutreachSnapshot; baseline?: OutreachSnapshot; issues: WorkbookImportIssue[]; counts: Record<string, number>; layouts?: DeclaredLayout[]; }
 const flags = { isSynthetic: true, provisional: true } as const;
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -85,6 +88,7 @@ export function parseWorkflowWorkbook(buffer: ArrayBuffer, file: string, now = n
     return day;
   };
   const setRecord = <T extends { id: string }>(list: T[], item: T) => { const index = list.findIndex(r => r.id === item.id); if (index < 0) list.push(item); else list[index] = item; };
+  const layouts: DeclaredLayout[] = [];
   for (const [name, headers, key] of [['大廈總表', buildingHeaders, 'buildings'], ['個人名冊', personHeaders, 'people']] as const) {
     const seen = new Set<string>();
     const spec = referenceSheets.find(s => s.name === name)!;
@@ -93,13 +97,30 @@ export function parseWorkflowWorkbook(buffer: ArrayBuffer, file: string, now = n
       if (!id || seen.has(id)) { add(name, row, headers[0], '編號必填且不可重複。'); continue; } seen.add(id);
       const original = baseline[key].find(p => p.id === id);
       const previousRow = spec.rows.find(r => r[0] === id);
-      if (original && previousRow) headers.forEach((h, i) => { if (i && !spec.editable?.includes(h) && str(v[h]) !== str(previousRow[i])) add(name, row, h, '此為參考摘要，修改不會套用；請在紙本回錄新增明細。', 'warning'); });
+      // A building with no floors yet may declare them in 樓層單位摘要; every other summary cell stays read-only.
+      const layoutOpen = key === 'buildings' && !baseline.floors.some(f => f.buildingId === id);
+      const reference = (h: string) => !spec.editable?.includes(h) && !(layoutOpen && h === '樓層單位摘要');
+      if (original && previousRow) headers.forEach((h, i) => { if (i && reference(h) && str(v[h]) !== str(previousRow[i])) add(name, row, h, '此為參考摘要，修改不會套用；請在紙本回錄新增明細。', 'warning'); });
+      if (!original) headers.forEach((h, i) => { if (i && reference(h) && optional(v[h])) add(name, row, h, '此欄由系統計算或只供參考，新增時填寫的內容不會套用。', 'warning'); });
       if (key === 'buildings') {
         const b = baseline.buildings.find(b => b.id === id);
         const lng = Number(v['經度']), lat = Number(v['緯度']);
         if (!optional(v['大廈名稱']) || !optional(v['地址']) || v['經度'] === '' || v['緯度'] === '' || !Number.isFinite(lng) || !Number.isFinite(lat)) { add(name, row, '名稱／地址／座標', '名稱、地址與有效座標必填；不能將缺少座標當作零。'); continue; }
         if (b?.footprint && (lng !== b.coordinates.lng || lat !== b.coordinates.lat)) { add(name, row, '經度／緯度', '此大廈已綁定占地輪廓，不能只改中心座標。'); continue; }
-        setRecord(incoming.buildings, { ...(b ?? { ...flags, layoutDeclared: false }), id, name: str(v['大廈名稱']).trim(), address: str(v['地址']).trim(), coordinates: { lng, lat } });
+        const building = { ...(b ?? { ...flags, layoutDeclared: false }), id, name: str(v['大廈名稱']).trim(), address: str(v['地址']).trim(), coordinates: { lng, lat } };
+        const summary = str(v['樓層單位摘要']);
+        if (layoutOpen && !isUndeclaredLayout(summary)) {
+          const layout = parseLayoutSummary(id, summary);
+          if ('error' in layout) { add(name, row, '樓層單位摘要', layout.error); continue; }
+          const taken = [...layout.floors.filter(f => incoming.floors.some(x => x.id === f.id)), ...layout.units.filter(u => incoming.units.some(x => x.id === u.id))];
+          if (taken.length) { add(name, row, '樓層單位摘要', `樓層／單位編號 ${taken[0].id} 已被使用，請改用另一個大廈編號。`); continue; }
+          if (layout.floors.length) {
+            incoming.floors.push(...layout.floors); incoming.units.push(...layout.units);
+            Object.assign(building, { layoutDeclared: true, floorCount: layout.floors.length });
+            layouts.push({ buildingId: id, name: building.name, floors: layout.floors.length, units: layout.units.length });
+          }
+        }
+        setRecord(incoming.buildings, building);
       } else {
         const p = baseline.people.find(p => p.id === id);
         if (typeof v['電話'] === 'number') { add(name, row, '電話', '電話請設為文字並核對原值，數字格式可能已丟失開頭的 0。'); continue; }
@@ -163,6 +184,6 @@ export function parseWorkflowWorkbook(buffer: ArrayBuffer, file: string, now = n
   }
   const counts = { Buildings: incoming.buildings.length, People: incoming.people.length, Units: incoming.units.length, Observations: incoming.observations.length };
   if (issues.some(i => i.severity === 'error')) return { issues, counts, baseline };
-  try { return { snapshot: validateSnapshot(incoming), baseline, issues, counts }; }
+  try { return { snapshot: validateSnapshot(incoming), baseline, issues, counts, layouts }; }
   catch (error) { add('資料關聯', undefined, '', error instanceof Error ? error.message : '資料關聯未通過。'); return { issues, counts, baseline }; }
 }

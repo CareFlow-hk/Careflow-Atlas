@@ -1,5 +1,5 @@
 import { validateSnapshot } from '../domain/schema';
-import type { Observation, OutreachSnapshot } from '../domain/types';
+import type { Building, Observation, OutreachSnapshot } from '../domain/types';
 import type { WorkbookImportIssue } from './workbookImport';
 export interface MergeSummary { added: number; updated: number; duplicates: number; retained: number; }
 const collections = ['buildings', 'floors', 'units', 'people', 'households', 'householdMemberships', 'householdResidences', 'memberships', 'visits', 'observations', 'followUpEvents'] as const;
@@ -23,6 +23,9 @@ export function mergeWorkflow(current: OutreachSnapshot | undefined, incoming: O
       const original = baseline?.[key]?.find(row => row.id === candidate.id);
       if (original && same(candidate, original)) { summary.retained++; continue; }
       if (['buildings', 'people'].includes(key) && original && same(rows[index], original)) { rows[index] = candidate; summary.updated++; continue; }
+      // A file can declare floors for a building that has none here, even when the file predates
+      // the building: nothing else may differ, and no local floor can be overwritten.
+      if (key === 'buildings' && declaresLayoutOnly(next, rows[index] as Building, candidate as Building)) { rows[index] = candidate; summary.updated++; continue; }
       issues.push({ severity: 'error', code: 'MERGE_CONFLICT', sheet: key === 'observations' ? '紙本回錄' : key === 'people' ? '個人名冊' : key, field: '編號', message: `${candidate.id} 與本機內容衝突。到訪請新增行；檔案如已過期，請重新匯出後回錄。` });
     }
   }
@@ -37,4 +40,9 @@ export function mergeWorkflow(current: OutreachSnapshot | undefined, incoming: O
 export function paperRecordEqual(a: Observation, b: Observation) {
   const clean = (item: Observation) => ({ ...item, recordedAt: undefined, importSource: undefined });
   return same(clean(a), clean(b));
+}
+
+function declaresLayoutOnly(current: OutreachSnapshot, local: Building, candidate: Building) {
+  const rest = (b: Building) => ({ ...b, layoutDeclared: undefined, floorCount: undefined });
+  return !local.layoutDeclared && candidate.layoutDeclared && !current.floors.some(f => f.buildingId === local.id) && same(rest(local), rest(candidate));
 }

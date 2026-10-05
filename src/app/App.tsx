@@ -120,7 +120,12 @@ export default function App() {
       label: `${result.snapshot!.buildings.find(b => b.id === o.buildingId)?.name ?? o.buildingId} · ${result.snapshot!.units.find(u => u.id === o.unitId)?.label ?? result.snapshot!.floors.find(f => f.id === o.floorId)?.label ?? '大廈層面'} · ${o.occurredAt.slice(0, 10)}`,
       detail: [o.paperRef ? `紙本 ${o.paperRef}／${o.paperLine ?? '—'}` : '', o.note, o.followUp?.action, o.followUp?.timingNote].filter(Boolean).join(' · '),
     }));
-    setImportReview({ fileName, issues: [...result.issues, ...(merged?.issues ?? [])], counts: result.counts, canReplace: !!merged?.snapshot, changes: merged?.summary, preview, recognition });
+    // Only layouts this workspace does not have yet; a repeat import declares nothing new.
+    const layouts = workflow?.layouts?.filter(l => !workspace.snapshot?.floors.some(f => f.buildingId === l.buildingId)).map(l => ({
+      label: `${l.name} · 新建 ${l.floors} 層、${l.units} 個單位`,
+      detail: result.snapshot!.floors.filter(f => f.buildingId === l.buildingId).map(f => `${f.label}：${result.snapshot!.units.filter(u => u.floorId === f.id).map(u => u.label).join('、') || '未有單位'}`).join(' ／ '),
+    }));
+    setImportReview({ fileName, issues: [...result.issues, ...(merged?.issues ?? [])], counts: result.counts, canReplace: !!merged?.snapshot, changes: merged?.summary, preview, layouts, recognition });
   };
   /** Re-runs recognition only: the person's corrections change the preview, never the data. */
   const remapImport = (change: MappingOverride) => {
