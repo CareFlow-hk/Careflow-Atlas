@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createExpression } from '@maplibre/maplibre-gl-style-spec';
-import { contextPosition, cutawayEnabled, CutawayTransition, CUTAWAY_DURATION, CUTAWAY_ZOOM, focusCameraState, focusHeight, shouldLowerBuilding } from './focusContext';
+import { cameraGroundPoint, contextPosition, cutawayEnabled, CutawayTransition, CUTAWAY_DURATION, CUTAWAY_ZOOM, focusCameraState, focusHeight, shouldLowerBuilding, sightBearing } from './focusContext';
 import { footprintOf, type MapBuilding } from './mapModel';
 
 const parsed = createExpression(focusHeight, 'fill-extrusion-height');
@@ -89,3 +89,33 @@ describe('binary camera-relative foreground cutaway', () => {
     expect(state.bearing).toBe(42);
   });
 });
+
+describe('corridor for a building drawn off the screen centre', () => {
+  const focus = { longitude: 114.142, latitude: 22.286 };
+  const metresX = 111320 * Math.cos(focus.latitude * Math.PI / 180);
+  const at = (east: number, north: number) => ({ lng: focus.longitude + east / metresX, lat: focus.latitude + north / 111320 });
+  const angleOf = (degrees: number) => ((degrees % 360) + 540) % 360 - 180;
+
+  it('matches the map bearing when the building is at the centre', () => {
+    for (let bearing = -180; bearing < 180; bearing += 15) {
+      const eye = cameraGroundPoint(at(0, 0), bearing, 58, 600);
+      expect(angleOf(sightBearing(eye, at(0, 0)) - bearing)).toBeCloseTo(0, 6);
+    }
+  });
+  it('lowers what stands between the camera and the building, not what stands before the centre', () => {
+    // Looking north; the focus offset draws the building 120 m left (west) of the screen centre.
+    const centre = at(120, 0);
+    const eye = cameraGroundPoint(centre, 0, 58, 600);
+    const camera = focusCameraState(focus, at(0, 0), sightBearing(eye, at(0, 0)));
+    const eyeEast = (eye.lng - focus.longitude) * metresX, eyeNorth = (eye.lat - focus.latitude) * 111320;
+    const k = 160 / Math.hypot(eyeEast, eyeNorth);
+    const blocker = { east: eyeEast * k, north: eyeNorth * k, radius: 12 }; // on the sight line, 160 m out
+    const beforeCentre = { east: 120, north: -160, radius: 12 }; // in front of the screen centre instead
+    expect(shouldLowerBuilding(blocker, camera, true)).toBe(true);
+    expect(shouldLowerBuilding(beforeCentre, camera, true)).toBe(false);
+    // The previous anchor (screen centre, map bearing) missed the blocker.
+    const old = focusCameraState(focus, centre, 0);
+    expect(shouldLowerBuilding(blocker, old, true)).toBe(false);
+  });
+});
+

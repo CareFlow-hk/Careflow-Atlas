@@ -20,6 +20,26 @@ export function focusCameraState(focus: Pick<MapBuilding, 'latitude' | 'longitud
   };
 }
 
+/**
+ * Compass direction of the line of sight from the camera's ground position to a point.
+ * When the focused building is offset from the screen centre, this differs from the
+ * map bearing by enough to move the corridor off the building.
+ */
+/** Ground position below the camera: `distance` metres from the centre, back along the bearing. */
+export function cameraGroundPoint(center: { lng: number; lat: number }, bearing: number, pitch: number, distance: number) {
+  const back = distance * Math.sin(pitch * Math.PI / 180), angle = bearing * Math.PI / 180;
+  return {
+    lng: center.lng - back * Math.sin(angle) / (111320 * Math.cos(center.lat * Math.PI / 180)),
+    lat: center.lat - back * Math.cos(angle) / 111320,
+  };
+}
+
+export function sightBearing(eye: { lng: number; lat: number }, target: { lng: number; lat: number }): number {
+  const east = (target.lng - eye.lng) * Math.cos(target.lat * Math.PI / 180);
+  const north = target.lat - eye.lat;
+  return Math.atan2(east, north) * 180 / Math.PI;
+}
+
 export function shouldLowerBuilding(position: { east: number; north: number; radius: number },
   camera: ReturnType<typeof focusCameraState>, enabled: boolean, wasLowered = false): boolean {
   if (!enabled) return false;

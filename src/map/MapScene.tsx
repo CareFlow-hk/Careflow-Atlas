@@ -6,7 +6,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import type { FeatureCollection, Polygon } from 'geojson';
 import { buildingFeatures, districtBounds, visibleDistrictLabels, DISTRICT_CAMERA, floorFeatures, floorBase, footprintOf, markerLabel, FLOOR_HEIGHT, type MapBuilding } from './mapModel';
 import { easeInOutCubic, motionDuration, spatialMotion } from '../app/motion';
-import { contextPosition, cutawayEnabled, CutawayTransition, CUTAWAY_DURATION, focusCameraState, focusHeight, shouldLowerBuilding } from './focusContext';
+import { contextPosition, cutawayEnabled, CutawayTransition, CUTAWAY_DURATION, focusCameraState, focusHeight, shouldLowerBuilding, sightBearing, cameraGroundPoint } from './focusContext';
 import { breakdownLabel, mapSceneColors, nodeTagLabel, stateColors, stateLabels, stateLegendNotes } from '../domain/presentation';
 import { OUTREACH_STATES } from '../domain/types';
 import './map.css';
@@ -41,6 +41,8 @@ export default function MapScene(props: MapSceneProps) {
   const separation = useRef(0);
   const cutawayFeatures = useRef<Record<string, FeatureCollection<Polygon>>>({});
   const refreshCutaway = useRef<(() => void) | undefined>(undefined);
+  // Where the focused building sits on screen, relative to the centre (the focus flyTo offset).
+  const focusOffset = useRef<[number, number]>([0, 0]);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
   const [notice, setNotice] = useState('');
@@ -285,7 +287,16 @@ export default function MapScene(props: MapSceneProps) {
     const syncCamera = () => {
       const now = performance.now();
       const duration = motionDuration(CUTAWAY_DURATION);
-      const camera = focusCameraState(active, map.getCenter(), map.getBearing());
+      // The focus camera pushes the building off-centre to clear the panels and floor labels,
+      // so anchor the corridor where the building is drawn and aim it along the real line of
+      // sight. Using the screen centre and map bearing left the corridor beside the building.
+      const centre = map.project(map.getCenter());
+      const anchor = map.unproject([centre.x + focusOffset.current[0], centre.y + focusOffset.current[1]]);
+      // MapLibre keeps the camera (fov-derived) half a viewport height away from the centre.
+      const metresPerPixel = map.unproject([centre.x + 1, centre.y]).distanceTo(map.getCenter());
+      const cameraDistance = map.getCanvas().clientHeight / 2 / Math.tan(map.getVerticalFieldOfView() * Math.PI / 360) * metresPerPixel;
+      const eye = cameraGroundPoint(map.getCenter(), map.getBearing(), map.getPitch(), cameraDistance);
+      const camera = focusCameraState(active, anchor, sightBearing(eye, anchor));
       enabled = cutawayEnabled(map.getZoom(), map.getPitch(), enabled);
       const present = new Set<string>();
       for (const [source, collection] of Object.entries(cutawayFeatures.current)) {
@@ -336,11 +347,13 @@ export default function MapScene(props: MapSceneProps) {
       // gently: floors thinner than their labels would stack the labels on each other.
       const visibleWidth = Math.max(320, map.getCanvas().clientWidth - (props.insets?.left ?? 0) - (props.insets?.right ?? 0));
       const stackZoom = 18.7 + Math.log2(8 / Math.max(8, active.floors.length)) + Math.min(0, Math.log2(map.getCanvas().clientHeight / 700), Math.log2(visibleWidth / 560));
+      focusOffset.current = [((props.insets?.left ?? 0) - (props.insets?.right ?? 0)) / 2 - (compact ? 0 : FLOOR_LABEL_ALLOWANCE / 2), compact ? 20 : active.floors.length > 3 ? Math.min(110, Math.max(0, map.getCanvas().clientHeight / 2 - 225)) : 0];
+      refreshCutaway.current?.();
       map.flyTo({ center: [active.longitude, active.latitude], zoom: compact ? 17.8 : active.floors.length > 3 ? stackZoom : 18.7, pitch: 58, bearing: -24,
         // Reserve space above the floating controls, including on short desktops. The
         // floor labels hang to the right of the stack, so the stack sits left of centre
         // and the pair is centred together rather than the labels running into the tools.
-        offset: [((props.insets?.left ?? 0) - (props.insets?.right ?? 0)) / 2 - (compact ? 0 : FLOOR_LABEL_ALLOWANCE / 2), compact ? 20 : active.floors.length > 3 ? Math.min(110, Math.max(0, map.getCanvas().clientHeight / 2 - 225)) : 0],
+        offset: focusOffset.current,
         duration: motionDuration(spatialMotion.focus), easing: easeInOutCubic, essential: false });
     } else {
       frameDistrict(map);
