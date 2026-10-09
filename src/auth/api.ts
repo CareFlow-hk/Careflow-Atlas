@@ -5,12 +5,12 @@ export const SESSION_IDLE_MS = 6 * 60 * 60_000;
 export class ApiError extends Error { constructor(public status: number, message: string) { super(message); } }
 let csrf: string | undefined;
 export function setCsrf(value?: string) { csrf = value; }
-export async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+export async function api<T>(path: string, method = 'GET', body?: unknown, options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<T> {
   const requestCsrf = csrf;
   const response = await fetch(`/api${path}`, {
     method, credentials: 'same-origin', cache: 'no-store',
     headers: method === 'GET' ? {} : { 'Content-Type': 'application/json', ...(csrf ? { 'X-CSRF-Token': csrf } : {}) },
-    body: method === 'GET' ? undefined : JSON.stringify(body ?? {}), signal: AbortSignal.timeout(15000),
+    body: method === 'GET' ? undefined : JSON.stringify(body ?? {}), signal: AbortSignal.any([AbortSignal.timeout(options?.timeoutMs ?? 15000), ...(options?.signal ? [options.signal] : [])]),
   });
   let value: T & { error?: string };
   try { value = await response.json(); }

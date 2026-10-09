@@ -1,6 +1,8 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Building2, Check, ChevronDown, ChevronRight, CircleHelp, FileSpreadsheet, Footprints, MapPin, RotateCcw, Search, Upload, X } from 'lucide-react';
 import { useWorkspace } from './store';
+import { PhotoIntake } from '../photos/PhotoIntake';
+import { Camera } from 'lucide-react';
 import { registerWorkspaceTools } from './webmcp';
 import { createRecordId } from './recordId';
 import { OUTREACH_STATES, buildingState, floorState, getCoverageSummary, isTagged, stateBreakdown, unitState, type OutreachSnapshot } from '../domain/types';
@@ -38,6 +40,7 @@ export default function App() {
   const [pendingSnapshot, setPendingSnapshot] = useState<OutreachSnapshot>();
   const [importBaseline, setImportBaseline] = useState<OutreachSnapshot>();
   const [paperOpen, setPaperOpen] = useState(false);
+  const [photoOpen, setPhotoOpen] = useState(false);
   const [importError, setImportError] = useState<string>();
   const [importLoading, setImportLoading] = useState(false);
   const [editTarget, setEditTarget] = useState<EditTarget>();
@@ -207,6 +210,7 @@ export default function App() {
       <span className="demo-badge"><span />示範資料</span>
       <button ref={helpButtonRef} className="help-button icon-button" aria-label="示範說明" aria-expanded={helpOpen} aria-controls="demo-help" onClick={() => setHelpOpen(!helpOpen)}><CircleHelp size={19} /></button>
       <AccountMenu />
+      {snapshot && <button className="photo-entry" onClick={() => setPhotoOpen(true)}><Camera size={16} />照片回錄</button>}
     </header>
     <main className={`workspace ${selectedBuildingId ? 'has-selection' : ''}`}>
       {/* On desktop the finder floats over the map: a one-line bar, opened when needed to
@@ -246,6 +250,7 @@ export default function App() {
     {helpOpen && <div ref={helpRef} id="demo-help" className="help-popover" role="region" aria-label="示範說明"><strong>這是一個外展流程示範</strong><p>大廈、住戶及記錄全部虛構，只儲存在這個瀏覽器，不會同步到其他裝置。</p><h3>顏色</h3><ul className="help-legend">{OUTREACH_STATES.map(state => <li key={state}><i style={{ background: stateColors[state] }} /><b>{stateLabels[state]}</b>{stateLegendNotes[state]}</li>)}</ul><p>「沒有記錄」不等於「沒有發現」：先查看上次結果，再決定下一步。</p><p className="help-credit">地圖底圖由 OpenFreeMap / OpenStreetMap 提供。</p><button onClick={() => setHelpOpen(false)}>知道了</button></div>}
     <ImportDialog notice={toast.startsWith('Excel 已準備') ? toast : undefined} open={importOpen} review={importReview} loading={importLoading} error={importError} onClose={() => setImportOpen(false)} onFile={loadFile} onLoadDistrict={loadDistrict} onExport={snapshot ? () => void exportExcel() : undefined} onPrint={snapshot?.buildings.length ? () => { setImportOpen(false); setPaperOpen(true); } : undefined} onRetry={openImport} onRemap={remapImport} onConfirmReplace={confirmImport} />
     {paperOpen && snapshot && <PaperForm snapshot={snapshot} buildingId={selectedBuildingId} onClose={() => setPaperOpen(false)} />}
+    {snapshot && workspace.operator && <PhotoIntake key={workspace.operator.accountId} open={photoOpen} snapshot={snapshot} operator={workspace.operator} onClose={() => setPhotoOpen(false)} onSave={workspace.savePhotoPages} onView={(buildingId, unitId) => { workspace.selectBuilding(buildingId); if (unitId) workspace.selectUnit(unitId); setFinderOpen(false); }} />}
     {editTarget && <ObservationEditor open targetLabel={editTarget.label} subjectId={editTarget.unitId ?? editTarget.buildingId} subjectType={editTarget.unitId ? 'UNIT' : 'BUILDING'} optionPrefs={workspace.optionPrefs} onClose={() => setEditTarget(undefined)} onSubmit={saveObservation} />}
   </div>;
 }

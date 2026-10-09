@@ -47,6 +47,22 @@ test('unauthenticated access, origin, CSRF and content type are enforced on the 
   assert.ok(!JSON.stringify(session.value).includes('password_hash'));
 });
 
+test('photo endpoints require a session and CSRF; their larger body limit does not expand account routes', async t => {
+  let calls = 0;
+  const photos = { status: () => ({ configured: true, model: 'gpt-6-luna' }), recognize: async () => { calls++; return { rows: [], warnings: [], model: 'gpt-6-luna' }; } };
+  const f = await fixture(t, { photos });
+  assert.equal((await f.request('/api/photos/status')).status, 401);
+  assert.equal((await f.request('/api/photos/recognize', { method: 'POST' })).status, 401);
+  const member = await f.account('MEMBER');
+  assert.equal((await f.request('/api/photos/status', member)).status, 200);
+  assert.equal((await f.request('/api/photos/recognize', { method: 'POST', cookie: member.cookie })).status, 403);
+  assert.equal((await f.request('/api/photos/recognize', { method: 'POST', ...member, headers: { origin: 'https://evil.test' } })).status, 403);
+  assert.equal(calls, 0);
+  assert.equal((await f.request('/api/photos/recognize', { method: 'POST', ...member, body: { image: 'x'.repeat(10000) } })).status, 200);
+  assert.equal(calls, 1);
+  assert.equal((await f.request('/api/password', { method: 'POST', ...member, body: { extra: 'x'.repeat(10000) } })).status, 413);
+});
+
 test('invitation activation, password policy, expiry and one-time use', async t => {
   const f = await fixture(t);
   const invite = f.auth.createUser({ email: 'Person@Example.test', name: 'Member', role: 'MEMBER' });

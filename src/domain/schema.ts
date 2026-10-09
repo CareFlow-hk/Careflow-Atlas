@@ -11,6 +11,11 @@ export const instantSchema = z.string().datetime({ offset: true }).refine(value 
 export const occurrenceSchema = z.union([instantSchema, date]);
 const base = { id, isSynthetic: z.literal(true), provisional: z.literal(true) };
 const dates = { startsOn: date.optional(), endsOn: date.optional() };
+export const photoFallbackSchema = z.object({
+  primaryModel: id, model: id,
+  reason: z.enum(['LOW_LEGIBILITY', 'UNREADABLE', 'INVALID_OUTPUT']),
+  outcome: z.enum(['used', 'failed', 'kept_primary']),
+});
 export const observationSchema = z.object({
   ...base, visitId: id, buildingId: id, floorId: id.optional(), unitId: id.optional(),
   occurredAt: occurrenceSchema, recordedAt: instantSchema, workerName: id, coverage: z.enum(COVERAGE_STATUSES),
@@ -21,6 +26,7 @@ export const observationSchema = z.object({
   followUp: z.object({ action: id, dueDate: date.optional(), status: z.enum(FOLLOW_UP_STATUSES), category: z.enum(SUPPORT_CATEGORIES).optional(), assignee: id.optional(), timingNote: text.optional() }).optional(), resolvesObservationId: id.optional(),
   paperRef: id.optional(), paperLine: id.optional(), importSource: z.object({ file: id, sheet: id, row: z.number().int().positive() }).optional(),
   correctsObservationId: id.optional(), correctionReason: text.optional(),
+  photoSource: z.object({ hash: id, file: id, line: text, model: id, fallback: photoFallbackSchema.optional(), reviewedBy: z.object({ accountId: id, name: id }), reviewedAt: instantSchema, sample: z.boolean() }).optional(),
 }).refine(v => v.followUp?.status !== 'DONE' || !!v.resolvesObservationId, 'Completion must identify the original follow-up');
 
 /** Validate every entity at the replaceable storage/data boundary. */

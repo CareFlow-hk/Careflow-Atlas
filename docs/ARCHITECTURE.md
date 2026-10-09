@@ -56,7 +56,7 @@ If the map style or WebGL fails, the list, building detail, history, and record 
 
 ## Implemented boundaries
 
-The repository has seams for workbook import, persistence, and map presentation. It does not implement a backend, production database, authentication, RBAC, tenancy, offline sync, audit service, government-data integration, real Excel migration, or real approval workflow.
+The repository has seams for workbook import, persistence, and map presentation. The Node/SQLite account service provides login, account roles, sessions and account auditing. The photo service extends that authenticated server with Azure Responses recognition; browser-side image preparation and account-scoped IndexedDB drafts feed a human review step, then a single validated append updates the existing workspace. See [PHOTO_INTAKE.md](PHOTO_INTAKE.md) for the provider contract, configuration and retention boundary. There is still no shared production business database, tenancy, offline sync, government-data integration, real Excel migration, or real approval workflow.
 
 Production work must add an authenticated server-side data boundary before any real person, household, phone, address, membership, or outreach history is stored. It must also define conflict handling, audit, retention, deletion, backup, permissions, and provider governance with the NGO.
 

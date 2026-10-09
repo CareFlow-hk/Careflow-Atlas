@@ -78,6 +78,11 @@ export interface OptionNotes {
  */
 export const OPTION_FIELDS = ['coverage', 'contactOutcome', 'assessment', 'sourceType'] as const;
 export type OptionField = (typeof OPTION_FIELDS)[number];
+export interface PhotoFallback {
+  primaryModel: string; model: string;
+  reason: 'LOW_LEGIBILITY' | 'UNREADABLE' | 'INVALID_OUTPUT';
+  outcome: 'used' | 'failed' | 'kept_primary';
+}
 export interface Observation extends SyntheticRecord {
   id: string; visitId: string; buildingId: string; floorId?: string; unitId?: string;
   occurredAt: string; recordedAt: string; workerName: string; coverage: CoverageStatus;
@@ -93,6 +98,7 @@ export interface Observation extends SyntheticRecord {
   followUp?: { action: string; dueDate?: string; status: FollowUpStatus; category?: SupportCategory; assignee?: string; timingNote?: string };
   paperRef?: string;
   paperLine?: string;
+  photoSource?: { hash: string; file: string; line: string; model: string; fallback?: PhotoFallback; reviewedBy: Operator; reviewedAt: string; sample: boolean };
   importSource?: { file: string; sheet: string; row: number };
   /** A DONE follow-up event must name the open observation it closes. */
   resolvesObservationId?: string;
