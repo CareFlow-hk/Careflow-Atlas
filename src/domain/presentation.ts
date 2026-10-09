@@ -60,6 +60,9 @@ export const mapSceneColors = {
   basemapBuilding: '#e6e1d6',
 } as const;
 
+/** Neutral paper/image colours, never used to imply an outreach status. */
+export const photoPaperColors = { background: '#ffffff', paper: '#fffcf4', ink: '#242e29', rule: '#9b9180', grid: '#c9bda9', handwriting: '#494f65', annotation: '#855539', caption: '#9a6952' } as const;
+
 /** Reads an aggregated node's composition, e.g. "2 綠 · 1 紅 · 3 未訪". */
 export const breakdownLabels: Record<State, string> = { GREEN: '綠', YELLOW: '黃', RED: '紅', GRAY: '未訪' };
 export function breakdownLabel(counts: StateBreakdown): string {

@@ -5,6 +5,7 @@ import type { CustomOptions } from '../domain/optionPrefs';
 import { LocalStoragePersistenceAdapter, OutreachRepository } from '../data/repository';
 import { OptionPrefsRepository } from '../data/optionPrefsRepository';
 import { mergeWorkflow } from '../data/workflowMerge';
+import { appendPhotoPages, type PhotoPage } from '../photos/model';
 
 const adapter = new LocalStoragePersistenceAdapter();
 let repository = new OutreachRepository(adapter);
@@ -36,6 +37,7 @@ interface WorkspaceState {
   importSnapshot: (snapshot: OutreachSnapshot) => void;
   mergeSnapshot: (snapshot: OutreachSnapshot, baseline?: OutreachSnapshot) => void;
   saveObservation: (input: SaveObservationInput) => void;
+  savePhotoPages: (pages: PhotoPage[]) => { added: number; duplicates: number };
   /** Set or clear the manual mark on a building or a floor. A display change only. */
   setTag: (subject: { buildingId: string; floorId?: string }, tag?: NodeTag) => void;
   /** Writes the shortcut list for this account. Never touches the snapshot. */
@@ -74,6 +76,13 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     if (!current) return;
     const saved = repository.replaceSnapshot(tagNode(current, subject, tag));
     set({ snapshot: saved, storageError: undefined });
+  },
+  savePhotoPages: pages => {
+    const current = repository.getSnapshot(); const operator = get().operator;
+    if (!current || !operator) throw new Error('請先登入並載入街區資料。');
+    const result = appendPhotoPages(current, pages, operator);
+    if (result.added) set({ snapshot: repository.replaceSnapshot(result.snapshot), storageError: undefined });
+    return { added: result.added, duplicates: result.duplicates };
   },
   setOptionPrefs: prefs => set({ optionPrefs: prefsRepository.save(prefs) }),
   actOnFollowUp: (observationId, action, reason) => {

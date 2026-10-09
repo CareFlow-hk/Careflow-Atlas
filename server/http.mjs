@@ -1,7 +1,8 @@
 import { createServer } from 'node:http';
+import { createPhotoService, PHOTO_BODY_LIMIT } from './photos.mjs';
 import { HttpError, requireValue, publicUser, SESSION_IDLE_MS } from './auth.mjs';
 
-export function createAuthServer(auth, { origin, secure = true, trustProxy = false }) {
+export function createAuthServer(auth, { origin, secure = true, trustProxy = false, photos = createPhotoService() }) {
   requireValue(new URL(origin).origin === origin, 500, 'APP_ORIGIN 必須是完整 origin，不帶路徑或末尾斜線。');
   requireValue(!secure || origin.startsWith('https://'), 500, '安全 Cookie 需要 HTTPS APP_ORIGIN。');
   const cookieName = secure ? '__Host-atlas_session' : 'atlas_session';
@@ -23,11 +24,22 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
         requireValue(req.headers['content-type']?.split(';')[0] === 'application/json', 415, '需要 JSON 請求。');
       }
       requireValue(!req.headers['sec-fetch-site'] || ['same-origin', 'none'].includes(req.headers['sec-fetch-site']), 403, '不允許跨站請求。');
+      const photoRequest = req.method === 'POST' && path === '/api/photos/recognize';
+      // Authorize before allocating the larger upload buffer.
+      if (photoRequest) {
+        const token = req.headers.cookie?.split(';').map(v => v.trim()).find(v => v.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1);
+        const session = auth.session(token);
+        requireValue(session, 401, '請登入後繼續。');
+        requireValue(req.headers['x-csrf-token'] === session.csrf, 403, '請求校驗失敗，請重新整理頁面。');
+        const user = auth.assertSession(session);
+        auth.limit(`photo:${user.id}`, 40);
+      }
+      const bodyLimit = photoRequest ? PHOTO_BODY_LIMIT : 8192;
       let body = {};
       if (mutation) {
-        requireValue(!req.headers['content-length'] || Number(req.headers['content-length']) <= 8192, 413, '請求過大。');
+        requireValue(!req.headers['content-length'] || Number(req.headers['content-length']) <= bodyLimit, 413, '請求過大。');
         const chunks = []; let length = 0;
-        for await (const chunk of req) { length += chunk.length; requireValue(length <= 8192, 413, '請求過大。'); chunks.push(chunk); }
+        for await (const chunk of req) { length += chunk.length; requireValue(length <= bodyLimit, 413, '請求過大。'); chunks.push(chunk); }
         try { body = JSON.parse(Buffer.concat(chunks).toString()); } catch { throw new HttpError(400, 'JSON 格式不正確。'); }
         requireValue(body && typeof body === 'object' && !Array.isArray(body), 400, '無效請求。');
       }
@@ -46,6 +58,14 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
       requireValue(row, 401, '請登入後繼續。');
       if (mutation) requireValue(req.headers['x-csrf-token'] === row.csrf, 403, '請求校驗失敗，請重新整理頁面。');
       const user = auth.assertSession(row);
+      if (req.method === 'GET' && path === '/api/photos/status') return send(res, 200, photos.status());
+      if (photoRequest) {
+        const controller = new AbortController();
+        const abort = () => { if (!res.writableEnded) controller.abort(); };
+        res.on('close', abort);
+        try { return send(res, 200, await photos.recognize(body, user.id, controller.signal)); }
+        finally { res.off('close', abort); }
+      }
       if (req.method === 'GET' && path === '/api/session') return send(res, 200, view(row));
       if (req.method === 'POST' && path === '/api/logout') {
         auth.transaction(() => { auth.run('DELETE FROM sessions WHERE hash=?', row.hash); auth.audit(user.id, 'logout'); });
@@ -87,6 +107,6 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
       else res.end();
     }
   });
-  server.requestTimeout = 15_000; server.headersTimeout = 10_000; server.maxRequestsPerSocket = 100;
+  server.requestTimeout = 210_000; server.headersTimeout = 10_000; server.maxRequestsPerSocket = 100;
   return server;
 }
