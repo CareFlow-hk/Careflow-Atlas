@@ -36,6 +36,8 @@ interface WorkspaceState {
   initialize: () => void;
   importSnapshot: (snapshot: OutreachSnapshot) => void;
   mergeSnapshot: (snapshot: OutreachSnapshot, baseline?: OutreachSnapshot) => void;
+  /** Empty this account's workspace in this browser. Options and the account are kept. */
+  clearWorkspace: () => void;
   saveObservation: (input: SaveObservationInput) => void;
   savePhotoPages: (pages: PhotoPage[]) => { added: number; duplicates: number };
   /** Set or clear the manual mark on a building or a floor. A display change only. */
@@ -60,6 +62,10 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   importSnapshot: snapshot => {
     const saved = repository.replaceSnapshot(snapshot);
     set({ snapshot: saved, selectedBuildingId: undefined, selectedFloorId: undefined, selectedUnitId: undefined, expanded: false, storageError: undefined });
+  },
+  clearWorkspace: () => {
+    repository.clear();
+    set({ snapshot: undefined, storageError: undefined, selectedBuildingId: undefined, selectedFloorId: undefined, selectedUnitId: undefined, expanded: false });
   },
   mergeSnapshot: (incoming, baseline) => {
     const result = mergeWorkflow(repository.getSnapshot(), incoming, baseline);

@@ -5,7 +5,7 @@ import { alignDemoSnapshot } from './demoGeometry';
 export class PersistenceError extends Error {
   constructor(message: string, public readonly cause?: unknown) { super(message); this.name = 'PersistenceError'; }
 }
-export interface PersistenceAdapter { read(key: string): string | null; write(key: string, value: string): void; }
+export interface PersistenceAdapter { read(key: string): string | null; write(key: string, value: string): void; remove?(key: string): void; }
 export class LocalStoragePersistenceAdapter implements PersistenceAdapter {
   constructor(private readonly storage?: Storage) {}
   read(key: string): string | null {
@@ -15,6 +15,10 @@ export class LocalStoragePersistenceAdapter implements PersistenceAdapter {
   write(key: string, value: string): void {
     try { (this.storage ?? globalThis.localStorage).setItem(key, value); }
     catch (error) { throw new PersistenceError('本機儲存失敗。草稿仍保留，請確認瀏覽器儲存空間後重試。', error); }
+  }
+  remove(key: string): void {
+    try { (this.storage ?? globalThis.localStorage).removeItem(key); }
+    catch (error) { throw new PersistenceError('未能清空本機資料，原有記錄仍保留。', error); }
   }
 }
 
@@ -28,6 +32,11 @@ export class OutreachRepository {
     catch (error) { throw new PersistenceError('本機資料格式不完整，尚未取代或刪除。', error); }
   }
   replaceSnapshot(snapshot: OutreachSnapshot): OutreachSnapshot { return this.persist(snapshot); }
+  /** Delete this workspace from this browser. Only an explicit person action calls this. */
+  clear(): void {
+    if (!this.adapter.remove) throw new PersistenceError('此儲存方式不支援清空。');
+    this.adapter.remove(this.key);
+  }
   saveObservation(input: SaveObservationInput): OutreachSnapshot {
     const snapshot = this.getSnapshot();
     if (!snapshot) throw new PersistenceError('請先匯入合成資料再記錄到訪。');
