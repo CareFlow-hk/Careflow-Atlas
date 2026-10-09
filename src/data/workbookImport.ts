@@ -4,7 +4,7 @@ import { instantSchema, snapshotSchema } from "../domain/schema";
 import { CONTACT_OUTCOMES, COVERAGE_STATUSES, FOLLOW_UP_STATUSES, HOUSING_ASSESSMENTS, type Building, type Floor, type Household, type HouseholdMembership, type HouseholdResidence, type Membership, type Observation, type OutreachSnapshot, type Person, type Unit, type Visit } from "../domain/types";
 
 export type WorkbookIssueSeverity = "error" | "warning";
-export interface WorkbookImportIssue { severity: WorkbookIssueSeverity; code: string; sheet: string; row?: number; field?: string; message: string; }
+export interface WorkbookImportIssue { severity: WorkbookIssueSeverity; code: string; sheet: string; row?: number; field?: string; message: string; /** For us, not for staff: codes, ids, raw values. Shown folded. */ detail?: string; }
 export interface WorkbookImportResult { snapshot?: OutreachSnapshot; issues: WorkbookImportIssue[]; counts: Record<string, number>; }
 type Row = Record<string, unknown>;
 const synthetic = { isSynthetic: true, provisional: true } as const;

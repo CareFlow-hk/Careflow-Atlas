@@ -148,6 +148,6 @@ describe('floors keep no record of their own on import', () => {
     XLSX.utils.sheet_add_aoa(wb.Sheets['紙本回錄'], [paperHeaders.map(h => data[h] ?? '')], { origin: -1 });
     const result = parseWorkflowWorkbook(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }), 'floor.xlsx', '2026-09-11T04:00:00Z')!;
     expect(result.snapshot).toBeUndefined();
-    expect(result.issues).toContainEqual(expect.objectContaining({ severity: 'error', field: '樓層／單位', message: '請填單位；如果是整棟的情況，樓層留空。' }));
+    expect(result.issues).toContainEqual(expect.objectContaining({ severity: 'error', code: 'FLOOR_WITHOUT_UNIT', field: '單位', message: expect.stringMatching(/請補上單位.*整幢的記錄，樓層也要留空/) }));
   });
 });

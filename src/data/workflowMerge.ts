@@ -1,6 +1,7 @@
 import { validateSnapshot } from '../domain/schema';
 import type { Building, Observation, OutreachSnapshot } from '../domain/types';
 import type { WorkbookImportIssue } from './workbookImport';
+import { issue, schemaIssues } from './issueText';
 export interface MergeSummary { added: number; updated: number; duplicates: number; retained: number; }
 const collections = ['buildings', 'floors', 'units', 'people', 'households', 'householdMemberships', 'householdResidences', 'memberships', 'visits', 'observations', 'followUpEvents'] as const;
 const normalize = (v: unknown): unknown => Array.isArray(v) ? v.map(normalize) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).filter(([, value]) => value !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([k, value]) => [k, normalize(value)])) : v;
@@ -26,12 +27,12 @@ export function mergeWorkflow(current: OutreachSnapshot | undefined, incoming: O
       // A file can declare floors for a building that has none here, even when the file predates
       // the building: nothing else may differ, and no local floor can be overwritten.
       if (key === 'buildings' && declaresLayoutOnly(next, rows[index] as Building, candidate as Building)) { rows[index] = candidate; summary.updated++; continue; }
-      issues.push({ severity: 'error', code: 'MERGE_CONFLICT', sheet: key === 'observations' ? '紙本回錄' : key === 'people' ? '個人名冊' : key, field: '編號', message: `${candidate.id} 與本機內容衝突。到訪請新增行；檔案如已過期，請重新匯出後回錄。` });
+      issues.push(conflictIssue(key, candidate, rows[index]));
     }
   }
   if (!issues.length) {
     try { return { snapshot: validateSnapshot(next), summary, issues }; }
-    catch (error) { issues.push({ severity: 'error', code: 'MERGE_VALIDATION', sheet: '關聯資料', message: error instanceof Error ? error.message : '合併後資料關聯不一致。' }); }
+    catch (error) { issues.push(...schemaIssues(error, next, '合併')); }
   }
   return { summary, issues, snapshot: undefined };
 }
@@ -45,4 +46,18 @@ export function paperRecordEqual(a: Observation, b: Observation) {
 function declaresLayoutOnly(current: OutreachSnapshot, local: Building, candidate: Building) {
   const rest = (b: Building) => ({ ...b, layoutDeclared: undefined, floorCount: undefined });
   return !local.layoutDeclared && candidate.layoutDeclared && !current.floors.some(f => f.buildingId === local.id) && same(rest(local), rest(candidate));
+}
+
+/** Same id, different content, and the local copy changed since this file was exported. */
+function conflictIssue(key: string, candidate: { id: string }, local: { id: string }): WorkbookImportIssue {
+  const detail = `MERGE_CONFLICT ${key}/${candidate.id}`;
+  if (key === 'observations') {
+    const o = candidate as Observation;
+    return issue({ code: 'MERGE_CONFLICT', sheet: '紙本回錄', row: o.importSource?.row, field: o.paperRef ? '紙本編號／紙本行號' : '記錄編號', detail,
+      message: o.paperRef ? `紙本「${o.paperRef}」第 ${o.paperLine} 行之前已經錄入過，但這次內容不同。如果要更正，請新增一行並填「更正原記錄編號」；如果是同事用了舊檔，請重新匯出再補錄。` : '這條記錄在工作台上的內容和檔案不同。請重新「匯出目前 Excel」，再把新的內容抄過去。' });
+  }
+  const name = (local as { name?: string; displayName?: string }).name ?? (local as { displayName?: string }).displayName ?? candidate.id;
+  if (key === 'people' || key === 'buildings') return issue({ code: 'MERGE_CONFLICT', sheet: key === 'people' ? '個人名冊' : '大廈總表', field: key === 'people' ? '個人編號' : '大廈編號', detail,
+    message: `「${name}」在你匯出這個檔案之後，工作台上已經被改過，兩邊都改了同一筆。請重新「匯出目前 Excel」，再把你的修改抄到新檔。` });
+  return issue({ code: 'MERGE_CONFLICT', sheet: '關聯封存', detail, message: '這個檔案和工作台上的資料有衝突，可能是用了較舊的匯出檔。請重新「匯出目前 Excel」後再填寫。' });
 }

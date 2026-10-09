@@ -18,3 +18,4 @@
 .map-topbar>div:first-child,.map-view-switch button{font-size:12px}.map-prompt p{font-size:12px}.demo-badge{font-size:11px}.eyebrow{font-size:11px}.start-import p{font-size:14px}.import-hint,.import-steps{font-size:12px}
 @media(max-width:1180px){.has-selection .building-status{flex-wrap:wrap;gap:5px}.has-selection .revisit-count{font-size:11px}}
 @media(max-width:760px){.demo-badge{font-size:8px}.app-header{gap:8px}.brand strong{font-size:18px}.brand{gap:8px}.sidebar-heading.has-records h1{font-size:24px}.sidebar-heading.has-records{padding-bottom:18px}}
+.start-import__secondary{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:42px;margin-top:10px;border:1px solid #c9d6cd;border-radius:8px;background:#fff;color:#2c4a42;font:inherit;font-size:13px;cursor:pointer}.start-import__secondary:hover{background:#f3f7f4}@media(max-width:760px){.start-import>.start-import__secondary{grid-column:1/-1}}
