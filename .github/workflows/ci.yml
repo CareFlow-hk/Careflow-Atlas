@@ -1,0 +1,33 @@
+# Runs on every pull request and on main. A pull request cannot merge until this passes.
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.15.0
+          cache: npm
+      - run: npm ci
+      - name: 型別檢查
+        run: npm run typecheck
+      - name: 代碼規範
+        run: npm run lint
+      - name: 測試
+        run: npm test
+      - name: 帳號服務測試
+        run: npm run test:auth
+      - name: 打包
+        run: npm run build
