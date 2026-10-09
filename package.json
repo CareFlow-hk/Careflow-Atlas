@@ -17,8 +17,10 @@
     "test:auth": "node --test server/*.test.mjs"
   },
   "dependencies": {
+    "@mapbox/vector-tile": "^2.0.5",
     "lucide-react": "^0.468.0",
     "maplibre-gl": "6.4.1",
+    "pbf": "^4.0.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",

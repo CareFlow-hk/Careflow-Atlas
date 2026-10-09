@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Map as LibreMap, Marker, MercatorCoordinate, NavigationControl, ScaleControl, setWorkerUrl, type ExpressionSpecification, type GeoJSONSource, type MapMouseEvent } from 'maplibre-gl';
 import mapWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
-import { Compass, Flag, Layers3, Minus, Plus, Scan, WifiOff } from 'lucide-react';
+import { Compass, Flag, Layers3, Minus, PenLine, Plus, Scan, WifiOff } from 'lucide-react';
+import { FootprintEditor } from './FootprintEditor';
+import { findOsmFootprint } from './osmFootprint';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { FeatureCollection, Polygon } from 'geojson';
 import { buildingFeatures, districtBounds, visibleDistrictLabels, DISTRICT_CAMERA, floorFeatures, floorBase, footprintOf, markerLabel, FLOOR_HEIGHT, type MapBuilding } from './mapModel';
@@ -32,6 +34,8 @@ interface MapSceneProps {
   onOverview: () => void;
   /** Pixels covered by floating panels at the left and right edge; the camera frames around them. */
   insets?: { left: number; right: number };
+  /** Save an outline drawn in the shape editor. Without it the editor is not offered. */
+  onSaveFootprint?: (buildingId: string, ring: number[][]) => void;
 }
 
 export default function MapScene(props: MapSceneProps) {
@@ -53,6 +57,12 @@ export default function MapScene(props: MapSceneProps) {
   const markers = useRef<Marker[]>([]);
   const floorLabelElements = useRef(new Map<string, HTMLButtonElement>());
   const active = props.buildings.find(b => b.id === props.selectedBuildingId);
+  // Shape editing: which building, and the camera to return to afterwards.
+  const [editing, setEditing] = useState<string>();
+  const editingRef = useRef<string | undefined>(undefined);
+  editingRef.current = editing;
+  const beforeEdit = useRef<{ center: [number, number]; zoom: number; pitch: number; bearing: number; maxPitch: number } | undefined>(undefined);
+  const editOrigin = useMemo(() => active ? { lng: active.longitude, lat: active.latitude } : undefined, [active?.longitude, active?.latitude]); // eslint-disable-line react-hooks/exhaustive-deps
   // Observation edits should refresh colours without moving the user's camera.
   const extentKey = JSON.stringify(props.buildings.map(b => [b.id, b.longitude, b.latitude, b.footprint]));
   const recordedUnits = props.buildings.reduce((sum, b) => sum + b.floors.reduce((n, f) => n + f.recorded, 0), 0);
@@ -175,7 +185,7 @@ export default function MapScene(props: MapSceneProps) {
         setReady(true);
       });
       const onClick = (e: MapMouseEvent) => {
-        if (!loaded) return;
+        if (!loaded || editingRef.current) return;
         const hits = map.queryRenderedFeatures(e.point, { layers: ['outreach-floors', 'outreach-selected', 'outreach-buildings'] });
         if (hits[0]?.layer.id === 'outreach-floors') {
           current.current.onSelectFloor(String(hits[0].properties.id));
@@ -188,7 +198,7 @@ export default function MapScene(props: MapSceneProps) {
       };
       map.on('click', onClick);
       map.on('mousemove', e => {
-        if (!loaded) return;
+        if (!loaded || editingRef.current) return;
         const hit = map.queryRenderedFeatures(e.point, { layers: ['outreach-floors', 'outreach-selected', 'outreach-buildings'] })[0];
         map.getCanvas().style.cursor = hit ? 'pointer' : '';
         if (!hit) { setHover(undefined); return; }
@@ -442,6 +452,31 @@ export default function MapScene(props: MapSceneProps) {
     return () => { map.off('move', arrange); map.off('resize', arrange); };
   }, [props.buildings, props.selectedBuildingId, ready]);
 
+  const SHAPE_HIDDEN = ['outreach-floors', 'outreach-selected', 'outreach-selection-outline'];
+  const startEditing = () => {
+    const map = mapRef.current;
+    if (!map || !active) return;
+    const c = map.getCenter();
+    beforeEdit.current = { center: [c.lng, c.lat], zoom: map.getZoom(), pitch: map.getPitch(), bearing: map.getBearing(), maxPitch: map.getMaxPitch() };
+    for (const id of SHAPE_HIDDEN) if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'none');
+    setHover(undefined); setEditing(active.id);
+    // Flat and tilt-locked: dragging handles on a tilted map misplaces them.
+    map.easeTo({ center: [active.longitude, active.latitude], zoom: Math.max(map.getZoom(), 18.6), pitch: 0, duration: motionDuration(spatialMotion.pitch), easing: easeInOutCubic });
+    map.once('moveend', () => { if (editingRef.current) map.setMaxPitch(0); });
+  };
+  const stopEditing = () => {
+    const map = mapRef.current;
+    setEditing(undefined);
+    if (!map) return;
+    for (const id of SHAPE_HIDDEN) if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'visible');
+    const before = beforeEdit.current;
+    beforeEdit.current = undefined;
+    map.setMaxPitch(before?.maxPitch ?? 85);
+    if (before) map.easeTo({ center: before.center, zoom: before.zoom, pitch: before.pitch, bearing: before.bearing, duration: motionDuration(spatialMotion.pitch), easing: easeInOutCubic });
+  };
+  // Leaving the building (or losing it) ends editing without saving.
+  useEffect(() => { if (editing && editing !== props.selectedBuildingId) stopEditing(); }, [props.selectedBuildingId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const toggle3D = () => {
     const map = mapRef.current;
     if (!map) return;
@@ -467,6 +502,7 @@ export default function MapScene(props: MapSceneProps) {
     <div className="map-location"><span>香港 · 中西區 / 外展街區</span><strong>西營盤 <small>Sai Ying Pun</small></strong>
       {props.buildings.length > 0 && <div className="district-map-summary"><b>{props.buildings.length.toString().padStart(2, '0')}</b><span>個業務地點<small>{knownUnits ? `${recordedUnits} / ${knownUnits} 個已知單位有記錄` : '樓層與單位待確認'}</small></span></div>}
     </div>
+    <div className="map-toolstack">
     <div className="map-tools" role="group" aria-label="相機控制" title="右鍵拖曳可自由旋轉及調整傾角">
       {active && active.floors.length > 0 && <button className={`map-tool ${props.expanded ? 'is-active' : ''}`} aria-label={props.expanded ? '合攏樓層' : '展開樓層'} title={props.expanded ? '合攏樓層' : '展開樓層'} aria-pressed={props.expanded} onClick={props.onToggleExpanded} disabled={!ready}><Layers3 size={19} /></button>}
       <button className="map-tool" aria-label={active ? '返回街區總覽' : '框選全部大廈'} title={active ? '返回街區總覽' : '框選全部大廈'} disabled={!ready} onClick={() => { if (active) props.onOverview(); else if (mapRef.current) frameDistrict(mapRef.current); }}><Scan size={19} /></button>
@@ -477,6 +513,16 @@ export default function MapScene(props: MapSceneProps) {
       <button className="map-tool compass" aria-label="地圖朝北" title="回正北方" onClick={() => rotateCamera(0)} disabled={!ready}><Compass size={20} style={{ transform: `rotate(${-bearing}deg)` }} /><span>N</span></button>
       <output className="camera-bearing" aria-label="相機方位角">{(bearing + 360) % 360}°</output>
     </div>
+    {active && props.onSaveFootprint && <div className="map-tools map-tools--shape" role="group" aria-label="大廈形狀">
+      <button className={`map-tool ${editing ? 'is-active' : ''}`} aria-pressed={!!editing} aria-label={editing ? '結束調整形狀' : '調整大廈形狀'} title={editing ? '結束調整形狀（不儲存）' : '調整大廈形狀（2D）'} disabled={!ready} onClick={() => (editing ? stopEditing() : startEditing())}><PenLine size={18} /></button>
+    </div>}
+    </div>
+    {editing && active && editOrigin && mapRef.current && <div className="fp-editor-dock" style={{ left: (props.insets?.left ?? 0) + 16, right: (props.insets?.right ?? 0) + 16 }}>
+      <FootprintEditor key={active.id} map={mapRef.current} name={active.name} origin={editOrigin} ring={footprintOf(active)}
+        onCancel={stopEditing}
+        onSave={ring => { props.onSaveFootprint?.(active.id, ring); stopEditing(); }}
+        onRestoreOsm={async () => { const m = await findOsmFootprint({ lng: active.longitude, lat: active.latitude }); return m.kind === 'none' ? undefined : m.ring; }} />
+    </div>}
     {hover && <div className="map-hover" style={{ left: hover.x, top: hover.y }}><strong>{hover.title}</strong><span>{hover.subtitle}</span></div>}
     {notice && <button className="map-notice" onClick={() => setNotice('')} role="status">{notice}<span>×</span></button>}
     {/* One compact row; what each colour means is in the help panel (and the tooltip). */}

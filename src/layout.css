@@ -34,7 +34,7 @@
     border:1px solid #dbe5e1;border-radius:12px;box-shadow:0 10px 32px #16352d24;overflow:auto}
 
   /* Map chrome moves clear of the floating cards. */
-  .workspace.has-selection .map-tools{right:418px}
+  .workspace.has-selection .map-tools,.workspace.has-selection .map-toolstack{right:418px}.workspace.has-selection .map-toolstack>.map-tools{right:auto}
   .workspace.has-selection .map-legend{left:14px}
   .workspace.has-selection .map-prompt{display:none}
   .workspace.has-selection ~ .toast{left:calc(50% - 200px)}

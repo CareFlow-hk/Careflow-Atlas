@@ -24,8 +24,8 @@ export function mergeWorkflow(current: OutreachSnapshot | undefined, incoming: O
       const original = baseline?.[key]?.find(row => row.id === candidate.id);
       if (original && same(candidate, original)) { summary.retained++; continue; }
       if (['buildings', 'people'].includes(key) && original && same(rows[index], original)) { rows[index] = candidate; summary.updated++; continue; }
-      // A file can declare floors for a building that has none here, even when the file predates
-      // the building: nothing else may differ, and no local floor can be overwritten.
+      // A file can declare floors or an outline for a building that has neither here, even when the
+      // file predates the building: nothing else may differ, and nothing local can be overwritten.
       if (key === 'buildings' && declaresLayoutOnly(next, rows[index] as Building, candidate as Building)) { rows[index] = candidate; summary.updated++; continue; }
       issues.push(conflictIssue(key, candidate, rows[index]));
     }
@@ -44,8 +44,12 @@ export function paperRecordEqual(a: Observation, b: Observation) {
 }
 
 function declaresLayoutOnly(current: OutreachSnapshot, local: Building, candidate: Building) {
-  const rest = (b: Building) => ({ ...b, layoutDeclared: undefined, floorCount: undefined });
-  return !local.layoutDeclared && candidate.layoutDeclared && !current.floors.some(f => f.buildingId === local.id) && same(rest(local), rest(candidate));
+  // Only fills what the local copy lacks: floors it has none of, or an outline it has none of.
+  const addsLayout = !local.layoutDeclared && candidate.layoutDeclared && !current.floors.some(f => f.buildingId === local.id);
+  const addsOutline = !local.footprint && !!candidate.footprint;
+  if (!addsLayout && !addsOutline) return false;
+  const rest = (b: Building) => ({ ...b, ...(addsLayout ? { layoutDeclared: undefined, floorCount: undefined } : {}), ...(addsOutline ? { footprint: undefined, footprintSource: undefined } : {}) });
+  return same(rest(local), rest(candidate));
 }
 
 /** Same id, different content, and the local copy changed since this file was exported. */

@@ -113,7 +113,11 @@ export default function App() {
     const { parseWorkbook } = await import('../data/workbookImport');
     const { parseWorkflowWorkbook } = await import('../data/workflowWorkbook');
     const workflow = parseWorkflowWorkbook(buffer, fileName);
-    const result = workflow ?? parseWorkbook(buffer);
+    const parsed = workflow ?? parseWorkbook(buffer);
+    // New buildings take the OSM outline under their coordinate; shown below for checking.
+    const { attachOsmOutlines } = await import('../data/osmOutlines');
+    const outlined = parsed.snapshot ? await attachOsmOutlines(parsed.snapshot, workspace.snapshot) : undefined;
+    const result = { ...parsed, snapshot: outlined?.snapshot };
     const merged = result.snapshot ? mergeWorkflow(workspace.snapshot, result.snapshot, workflow?.baseline) : undefined;
     importOverride.current = override ?? {};
     const recognition = detectWorkbook(buffer, importOverride.current);
@@ -128,7 +132,7 @@ export default function App() {
       label: `${l.name} · 新建 ${l.floors} 層、${l.units} 個單位`,
       detail: result.snapshot!.floors.filter(f => f.buildingId === l.buildingId).map(f => `${f.label}：${result.snapshot!.units.filter(u => u.floorId === f.id).map(u => u.label).join('、') || '未有單位'}`).join(' ／ '),
     }));
-    setImportReview({ fileName, issues: [...result.issues, ...(merged?.issues ?? [])], counts: result.counts, canReplace: !!merged?.snapshot, changes: merged?.summary, preview, layouts, recognition });
+    setImportReview({ fileName, issues: [...result.issues, ...(merged?.issues ?? [])], counts: result.counts, canReplace: !!merged?.snapshot, changes: merged?.summary, preview, layouts, outlines: outlined?.notes, recognition });
   };
   /** Re-runs recognition only: the person's corrections change the preview, never the data. */
   const remapImport = (change: MappingOverride) => {
@@ -253,7 +257,7 @@ export default function App() {
       </aside>
       <section className="spatial-workspace" aria-label="街區探索">
         <div className="map-topbar"><div><MapPin size={15} /><span>西營盤</span>{selectedBuildingId && <><ChevronRight size={13} /><strong>{snapshot?.buildings.find(b => b.id === selectedBuildingId)?.name}</strong>{selectedFloorId && <><ChevronRight size={13} /><span>{snapshot?.floors.find(f => f.id === selectedFloorId)?.label}</span></>}{selectedUnitId && <><ChevronRight size={13} /><span>{snapshot?.units.find(u => u.id === selectedUnitId)?.label.replace(/^.*? /, '')}</span></>}</>}</div></div>
-        <div className="spatial-content"><Suspense fallback={<div className="map-loading">正在準備地圖…</div>}><MapScene buildings={mapBuildings} insets={mapInsets} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} expanded={expanded} onSelectBuilding={workspace.selectBuilding} onSelectFloor={workspace.selectFloor} onToggleExpanded={workspace.toggleExpanded} onOverview={() => workspace.selectBuilding()} /></Suspense></div>
+        <div className="spatial-content"><Suspense fallback={<div className="map-loading">正在準備地圖…</div>}><MapScene buildings={mapBuildings} insets={mapInsets} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} expanded={expanded} onSelectBuilding={workspace.selectBuilding} onSelectFloor={workspace.selectFloor} onToggleExpanded={workspace.toggleExpanded} onOverview={() => workspace.selectBuilding()} onSaveFootprint={(id, ring) => { try { workspace.setFootprint(id, ring); setToast('已儲存大廈形狀。記錄沒有改變。'); } catch { setToast('形狀未能儲存，請重試。'); } }} /></Suspense></div>
         {!selectedBuildingId && snapshot && !explored && <div className="map-prompt"><span><Building2 size={19} /></span><div><strong>從一幢大廈開始</strong><p>選擇地圖標記，讓每一層的記錄展開。</p></div><ChevronRight size={18} /></div>}
       </section>
       {snapshot && selectedBuildingId && <BuildingDetail snapshot={snapshot} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} selectedUnitId={selectedUnitId} onBack={() => workspace.selectBuilding()} onSelectFloor={workspace.selectFloor} onSelectUnit={workspace.selectUnit} onToggleTag={workspace.setTag} onFollowUpAction={workspace.actOnFollowUp} onStartObservation={startObservation} />}

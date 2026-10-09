@@ -40,11 +40,15 @@ export interface SyntheticRecord { isSynthetic: true; provisional: true; }
 export interface Coordinates { lng: number; lat: number; }
 export interface Building extends SyntheticRecord {
   id: string; name: string; address: string; coordinates: Coordinates; floorCount?: number; footprint?: number[][];
+  /** Where the outline came from, so it can be traced or put back. Absent for the bundled demo. */
+  footprintSource?: FootprintSource;
   /** Units only exist when the demo deliberately declares this layout. */
   layoutDeclared: boolean; initialCoverage?: CoverageStatus;
   /** Manual "needs follow-up" mark for the whole building. Display only. */
   tag?: NodeTag;
 }
+/** `osm`: taken from the basemap's building data; `manual`: drawn or adjusted by a person. */
+export interface FootprintSource { kind: 'osm' | 'manual'; at: string; osmId?: string; match?: 'contains' | 'nearest'; by?: string; }
 export interface Floor extends SyntheticRecord {
   id: string; buildingId: string; level: number; label: string;
   /** Manual "needs follow-up" mark for the whole floor. Display only. */

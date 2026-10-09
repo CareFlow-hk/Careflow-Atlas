@@ -264,3 +264,6 @@ export const recognitionContactValues = vocabulary(CONTACT_OUTCOMES, acceptedCon
 export const recognitionAssessmentValues = vocabulary(HOUSING_ASSESSMENTS, acceptedAssessment);
 export const recognitionSourceValues = vocabulary(SOURCE_TYPES, acceptedSource);
 export const recognitionCategoryValues = [...SUPPORT_CATEGORIES, ...Object.values(supportCategoryLabels)];
+
+/** Shape editor on the map: outline, handles and edge-length labels. */
+export const footprintEditorColors = { outline: '#126455', handle: '#ffffff', text: '#203b36', halo: '#ffffff', hitArea: '#000000' };

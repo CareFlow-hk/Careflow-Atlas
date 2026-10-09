@@ -3,6 +3,7 @@ import { recordFollowUpEvent, tagNode, type FollowUpEventAction, type NodeTag, t
 import { createRecordId } from './recordId';
 import type { CustomOptions } from '../domain/optionPrefs';
 import { LocalStoragePersistenceAdapter, OutreachRepository } from '../data/repository';
+import { outlineCentre } from '../map/footprintGeometry';
 import { OptionPrefsRepository } from '../data/optionPrefsRepository';
 import { mergeWorkflow } from '../data/workflowMerge';
 import { appendPhotoPages, type PhotoPage } from '../photos/model';
@@ -38,6 +39,8 @@ interface WorkspaceState {
   mergeSnapshot: (snapshot: OutreachSnapshot, baseline?: OutreachSnapshot) => void;
   /** Empty this account's workspace in this browser. Options and the account are kept. */
   clearWorkspace: () => void;
+  /** Replace a building's outline drawn on the map. Records stay attached; only the shape and its centre move. */
+  setFootprint: (buildingId: string, ring: number[][]) => void;
   saveObservation: (input: SaveObservationInput) => void;
   savePhotoPages: (pages: PhotoPage[]) => { added: number; duplicates: number };
   /** Set or clear the manual mark on a building or a floor. A display change only. */
@@ -62,6 +65,17 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   importSnapshot: snapshot => {
     const saved = repository.replaceSnapshot(snapshot);
     set({ snapshot: saved, selectedBuildingId: undefined, selectedFloorId: undefined, selectedUnitId: undefined, expanded: false, storageError: undefined });
+  },
+  setFootprint: (buildingId, ring) => {
+    const current = get().snapshot;
+    if (!current) return;
+    const centre = outlineCentre(ring);
+    const operator = get().operator;
+    const next = { ...current, buildings: current.buildings.map(b => b.id !== buildingId ? b : {
+      ...b, footprint: ring, coordinates: { lng: centre.lng, lat: centre.lat },
+      footprintSource: { kind: 'manual' as const, at: new Date().toISOString(), by: operator?.name, osmId: b.footprintSource?.osmId },
+    }) };
+    set({ snapshot: repository.replaceSnapshot(next), storageError: undefined });
   },
   clearWorkspace: () => {
     repository.clear();
