@@ -7,6 +7,7 @@ const actions: Record<string, string> = { login: '登入', login_failed: '登入
 export function AccountPanel({ session, onClose, onSignedOut, advanced }: { session: Session; onClose: () => void; onSignedOut: () => void; /** Workspace settings, folded under 高級設定. */ advanced?: ReactNode }) {
   const [users, setUsers] = useState<Account[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
+  const [changing, setChanging] = useState(false);
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -52,12 +53,15 @@ export function AccountPanel({ session, onClose, onSignedOut, advanced }: { sess
     {message && <p role="status">{message}</p>}
     {link && <section className="account-link"><h2>一次性設定密碼連結</h2><p>1 小時有效，僅顯示這一次。請通過可信渠道私下交付，新的連結會使舊連結失效。</p><input aria-label="一次性連結" readOnly value={link} onFocus={e => e.currentTarget.select()} /><button onClick={() => setLink('')}>隱藏連結</button></section>}
     <div className="account-columns">
-      <section><h2>修改密碼</h2><form onSubmit={password}>
+      {/* Folded until asked for: new-password fields on an ordinary visit invite a password
+          manager to suggest and save a password nobody chose. The account is the username. */}
+      <section><h2>修改密碼</h2>{!changing ? <><p>修改後所有裝置都需要重新登入。</p><button type="button" onClick={() => setChanging(true)}>修改密碼…</button></> : <form onSubmit={password}>
+        <label>帳號<input name="username" type="email" autoComplete="username" readOnly value={session.user.email} /></label>
         <label>目前密碼<input name="oldPassword" type="password" autoComplete="current-password" required maxLength={128} /></label>
         <label>新密碼<input name="password" type="password" autoComplete="new-password" required minLength={15} maxLength={128} /></label>
         <label>確認新密碼<input name="confirm" type="password" autoComplete="new-password" required minLength={15} maxLength={128} /></label>
-        <p>15–128 個字元，可使用長句。修改後所有裝置都需要重新登入。</p><button disabled={busy}>修改並重新登入</button>
-      </form></section>
+        <p>15–128 個字元，可使用長句。修改後所有裝置都需要重新登入。</p><div className="account-actions"><button type="button" onClick={() => setChanging(false)}>取消</button><button disabled={busy}>修改並重新登入</button></div>
+      </form>}</section>
       <section><h2>登入狀態</h2><p>連續 6 小時無操作或登入滿 12 小時後過期。</p>
         <ul>{devices.map(device => <li key={device.id}>{device.current ? '目前登入' : '其他登入'} · 登入於 {new Date(device.created_at).toLocaleString('zh-HK')}</li>)}</ul>
         <button disabled={busy} onClick={() => void perform(async () => { await api('/sessions/revoke-others', 'POST'); await reload(); setMessage('其他裝置已登出。'); })}>登出其他裝置</button>

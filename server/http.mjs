@@ -49,6 +49,7 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
         const result = await auth.login(body.email, body.password, ip);
         res.setHeader('Set-Cookie', cookie(result.token)); return send(res, 200, view(result.row));
       }
+      if (req.method === 'POST' && path === '/api/grant-info') return send(res, 200, auth.grantInfo(body.token, ip));
       if (req.method === 'POST' && path === '/api/set-password') {
         await auth.redeem(body.token, body.password, ip);
         res.setHeader('Set-Cookie', cookie('', 0)); return send(res, 200, { ok: true });

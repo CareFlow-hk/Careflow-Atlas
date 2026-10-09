@@ -215,3 +215,24 @@ test('newer account database schema cannot be silently downgraded', async t => {
   f.auth.run('PRAGMA user_version=2');
   assert.throws(() => openAuth(f.path), /拒絕降級/);
 });
+
+test('a password link names its account so password managers save the right one', async t => {
+  const f = await fixture(t);
+  const invite = f.auth.createUser({ email: 'Member@Example.test', name: '成員', role: 'MEMBER' });
+  const info = await f.request('/api/grant-info', { method: 'POST', body: { token: invite.token } });
+  assert.equal(info.status, 200);
+  assert.deepEqual(info.value, { email: 'member@example.test', name: '成員' });
+  assert.equal((await f.request('/api/grant-info', { method: 'POST', body: { token: 'x'.repeat(43) } })).status, 400);
+  await f.auth.redeem(invite.token, password, 'test');
+  assert.equal((await f.request('/api/grant-info', { method: 'POST', body: { token: invite.token } })).status, 400, 'a used link names nobody');
+});
+
+test('a failed login records which existing account it was for, never the password', async t => {
+  const f = await fixture(t);
+  const member = await f.account('MEMBER');
+  assert.equal((await f.request('/api/login', { method: 'POST', body: { email: member.email, password: 'wrong passphrase 2026' } })).status, 401);
+  assert.equal((await f.request('/api/login', { method: 'POST', body: { email: 'nobody@example.test', password: 'wrong passphrase 2026' } })).status, 401);
+  const failed = f.auth.all("SELECT target FROM audit WHERE action='login_failed' ORDER BY id");
+  assert.deepEqual(failed.map(r => r.target), [member.id, null]);
+  assert.ok(!JSON.stringify(f.auth.all('SELECT * FROM audit')).includes('wrong passphrase'));
+});

@@ -135,10 +135,20 @@ export function openAuth(path, { now = Date.now } = {}) {
     const valid = await verifyPassword(password, user?.password_hash);
     const current = user && userById(user.id);
     if (!valid || !current || current.disabled || !current.password_hash || current.version !== user.version) {
-      audit(null, 'login_failed');
+      // Name the account when it exists, so a failure can be traced; never the password.
+      audit(null, 'login_failed', user?.id ?? null);
       throw new HttpError(401, '電郵或密碼不正確，或帳號不可用。');
     }
     return transaction(() => { audit(user.id, 'login'); return newSession(user.id); });
+  }
+  /** Which account a password link is for, so the page can show it as the username to save. */
+  function grantInfo(token, ip) {
+    clean(); limit(`grant-info:${ip}`, 30);
+    requireValue(typeof token === 'string' && token.length <= 64, 400, '連結無效或已過期。');
+    const row = get('SELECT * FROM grants WHERE hash=? AND expires_at>?', digest(token), now());
+    const user = row && userById(row.user_id);
+    requireValue(user && !user.disabled, 400, '連結無效或已過期。');
+    return { email: user.email, name: user.name };
   }
   async function redeem(token, password, ip) {
     clean(); limit(`redeem:${ip}`, 20);
@@ -184,6 +194,6 @@ export function openAuth(path, { now = Date.now } = {}) {
       return publicUser(userById(id));
     });
   }
-  return { db, run, get, all, clean, audit, limit, transaction, createUser, userById, session, assertSession, login, redeem, changePassword, updateUser, grant,
+  return { db, run, get, all, clean, audit, limit, transaction, createUser, userById, session, assertSession, login, grantInfo, redeem, changePassword, updateUser, grant,
     close: () => db.close() };
 }

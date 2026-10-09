@@ -2,3 +2,4 @@
 
 .authenticated-workspace > .app-shell{height:100%;min-height:560px}
 .cf-clear-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px}.cf-clear-confirm{border:1px solid #e3b4ad;background:#fff6f4;border-radius:8px;padding:12px 14px;margin-top:8px}.cf-clear-confirm p{margin:0 0 4px;color:#7d2a1f;font-weight:600}.account-page button.cf-danger{background:#a33a2c;border-color:#a33a2c;color:#fff}
+.account-actions{display:flex;gap:10px;flex-wrap:wrap}

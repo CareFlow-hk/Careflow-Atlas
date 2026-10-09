@@ -23,6 +23,18 @@ export function SessionGate({ children }: { children: ReactNode }) {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [settings, setSettings] = useState(false);
+  // The account a password link is for: shown read-only and marked as the username, so a
+  // password manager saves this account's password and does not overwrite another one.
+  const [grantAccount, setGrantAccount] = useState<{ email: string; name: string }>();
+  useEffect(() => {
+    setGrantAccount(undefined);
+    if (!grant) return;
+    let live = true;
+    api<{ email: string; name: string }>('/grant-info', 'POST', { token: grant })
+      .then(info => { if (live) setGrantAccount(info); })
+      .catch(e => { if (live) setError(e instanceof Error ? e.message : '連結無效或已過期。'); });
+    return () => { live = false; };
+  }, [grant]);
   const generation = useRef(0);
   const lastActivity = useRef(Date.now());
   useEffect(() => {
@@ -91,6 +103,7 @@ export function SessionGate({ children }: { children: ReactNode }) {
     {error && <p role="alert" className="account-error">{error}</p>}{notice && <p role="status">{notice}</p>}
     <form onSubmit={submit} key={grant ? 'set' : 'login'}>
       {!grant && <label>電郵<input name="email" type="email" autoComplete="username" required maxLength={254} /></label>}
+      {grant && <label>帳號<input name="username" type="email" autoComplete="username" readOnly value={grantAccount?.email ?? ''} placeholder="正在核對連結…" /></label>}
       <label>{grant ? '新密碼' : '密碼'}<input name="password" type="password" autoComplete={grant ? 'new-password' : 'current-password'} required minLength={grant ? 15 : undefined} maxLength={128} /></label>
       {grant && <><label>確認密碼<input name="confirm" type="password" autoComplete="new-password" required minLength={15} maxLength={128} /></label><p>15–128 個字元，可使用長句。</p></>}
       <button disabled={busy}>{busy ? '正在處理…' : grant ? '設定密碼' : '登入'}</button>
