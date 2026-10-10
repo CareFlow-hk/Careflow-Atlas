@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Map as LibreMap, Marker, MercatorCoordinate, NavigationControl, ScaleControl, setWorkerUrl, type ExpressionSpecification, type GeoJSONSource, type MapMouseEvent } from 'maplibre-gl';
 import mapWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
-import { Compass, Flag, Layers3, Minus, PenLine, Plus, Scan, WifiOff } from 'lucide-react';
+import { Compass, Flag, Layers3, MapPinPlus, Minus, PenLine, Plus, Scan, WifiOff } from 'lucide-react';
 import { FootprintEditor } from './FootprintEditor';
+import { AddBuildingPanel } from './AddBuildingPanel';
+import type { NewBuildingInput } from '../data/newBuilding';
 import { findOsmFootprint } from './osmFootprint';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { FeatureCollection, Polygon } from 'geojson';
@@ -36,6 +38,10 @@ interface MapSceneProps {
   insets?: { left: number; right: number };
   /** Save an outline drawn in the shape editor. Without it the editor is not offered. */
   onSaveFootprint?: (buildingId: string, ring: number[][]) => void;
+  /** Add a building clicked on the map. Without it the tool is not offered. */
+  onAddBuilding?: (input: NewBuildingInput) => { error: string; field: string } | undefined;
+  /** Prefilled id for a building added on the map. */
+  newBuildingId?: string;
 }
 
 export default function MapScene(props: MapSceneProps) {
@@ -61,6 +67,10 @@ export default function MapScene(props: MapSceneProps) {
   const [editing, setEditing] = useState<string>();
   const editingRef = useRef<string | undefined>(undefined);
   editingRef.current = editing;
+  // Adding a building: the map is flat while a spot is picked; clicks go to the add panel.
+  const [adding, setAdding] = useState(false);
+  const addingRef = useRef(false);
+  addingRef.current = adding;
   const beforeEdit = useRef<{ center: [number, number]; zoom: number; pitch: number; bearing: number; maxPitch: number } | undefined>(undefined);
   const editOrigin = useMemo(() => active ? { lng: active.longitude, lat: active.latitude } : undefined, [active?.longitude, active?.latitude]); // eslint-disable-line react-hooks/exhaustive-deps
   // Observation edits should refresh colours without moving the user's camera.
@@ -185,7 +195,7 @@ export default function MapScene(props: MapSceneProps) {
         setReady(true);
       });
       const onClick = (e: MapMouseEvent) => {
-        if (!loaded || editingRef.current) return;
+        if (!loaded || editingRef.current || addingRef.current) return;
         const hits = map.queryRenderedFeatures(e.point, { layers: ['outreach-floors', 'outreach-selected', 'outreach-buildings'] });
         if (hits[0]?.layer.id === 'outreach-floors') {
           current.current.onSelectFloor(String(hits[0].properties.id));
@@ -193,12 +203,12 @@ export default function MapScene(props: MapSceneProps) {
         }
         if (hits[0]) { current.current.onSelectBuilding(String(hits[0].properties.id)); return; }
         if (map.getLayer('building') && map.queryRenderedFeatures(e.point, { layers: ['building'] }).length) {
-          setNotice('這幢大廈暫無示範記錄。請選擇有標記的大廈。');
+          setNotice(current.current.onAddBuilding ? '這幢大廈未加入外展名單。可用右邊的「＋」按鈕在地圖上新增。' : '這幢大廈暫無示範記錄。請選擇有標記的大廈。');
         }
       };
       map.on('click', onClick);
       map.on('mousemove', e => {
-        if (!loaded || editingRef.current) return;
+        if (!loaded || editingRef.current || addingRef.current) return;
         const hit = map.queryRenderedFeatures(e.point, { layers: ['outreach-floors', 'outreach-selected', 'outreach-buildings'] })[0];
         map.getCanvas().style.cursor = hit ? 'pointer' : '';
         if (!hit) { setHover(undefined); return; }
@@ -324,8 +334,9 @@ export default function MapScene(props: MapSceneProps) {
           entry.animation.set(lowered, now, duration);
         }
       }
+      // Only clear state that was set: removing a never-painted feature breaks MapLibre's render loop.
       for (const [key, entry] of transitions) if (!present.has(key)) {
-        map.removeFeatureState({ source: entry.source, id: entry.id }, 'cutaway');
+        if (entry.painted !== undefined) map.removeFeatureState({ source: entry.source, id: entry.id }, 'cutaway');
         transitions.delete(key);
       }
       if (!frame) frame = requestAnimationFrame(paint);
@@ -340,7 +351,7 @@ export default function MapScene(props: MapSceneProps) {
       refreshCutaway.current = undefined;
       cancelAnimationFrame(frame);
       map.off('move', syncCamera); map.off('resize', syncCamera);
-      if (mapRef.current === map) for (const entry of transitions.values()) {
+      if (mapRef.current === map) for (const entry of transitions.values()) if (entry.painted !== undefined) {
         map.removeFeatureState({ source: entry.source, id: entry.id }, 'cutaway');
       }
     };
@@ -474,6 +485,31 @@ export default function MapScene(props: MapSceneProps) {
     map.setMaxPitch(before?.maxPitch ?? 85);
     if (before) map.easeTo({ center: before.center, zoom: before.zoom, pitch: before.pitch, bearing: before.bearing, duration: motionDuration(spatialMotion.pitch), easing: easeInOutCubic });
   };
+  const startAdding = () => {
+    const map = mapRef.current;
+    if (!map) return;
+    const c = map.getCenter();
+    beforeEdit.current = { center: [c.lng, c.lat], zoom: map.getZoom(), pitch: map.getPitch(), bearing: map.getBearing(), maxPitch: map.getMaxPitch() };
+    setHover(undefined); setNotice(''); setAdding(true);
+    // Flat, so a click lands on the ground under the building rather than behind a tall one.
+    map.easeTo({ zoom: Math.max(map.getZoom(), 17.6), pitch: 0, duration: motionDuration(spatialMotion.pitch), easing: easeInOutCubic });
+    map.once('moveend', () => { if (addingRef.current) map.setMaxPitch(0); });
+  };
+  const stopAdding = (restoreCamera: boolean) => {
+    const map = mapRef.current;
+    setAdding(false);
+    if (!map) return;
+    const before = beforeEdit.current;
+    beforeEdit.current = undefined;
+    map.setMaxPitch(before?.maxPitch ?? 85);
+    if (restoreCamera && before) map.easeTo({ center: before.center, zoom: before.zoom, pitch: before.pitch, bearing: before.bearing, duration: motionDuration(spatialMotion.pitch), easing: easeInOutCubic });
+  };
+  const existingAt = useMemo(() => (e: MapMouseEvent) => {
+    const id = mapRef.current?.queryRenderedFeatures(e.point, { layers: ['outreach-buildings'] })[0]?.properties.id;
+    return id === undefined ? undefined : current.current.buildings.find(b => b.id === String(id))?.name ?? String(id);
+  }, []);
+  // Opening a building (from the list, say) ends adding without saving.
+  useEffect(() => { if (adding && props.selectedBuildingId) stopAdding(false); }, [props.selectedBuildingId]); // eslint-disable-line react-hooks/exhaustive-deps
   // Leaving the building (or losing it) ends editing without saving.
   useEffect(() => { if (editing && editing !== props.selectedBuildingId) stopEditing(); }, [props.selectedBuildingId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -516,7 +552,15 @@ export default function MapScene(props: MapSceneProps) {
     {active && props.onSaveFootprint && <div className="map-tools map-tools--shape" role="group" aria-label="大廈形狀">
       <button className={`map-tool ${editing ? 'is-active' : ''}`} aria-pressed={!!editing} aria-label={editing ? '結束調整形狀' : '調整大廈形狀'} title={editing ? '結束調整形狀（不儲存）' : '調整大廈形狀（2D）'} disabled={!ready} onClick={() => (editing ? stopEditing() : startEditing())}><PenLine size={18} /></button>
     </div>}
+    {!active && !editing && props.onAddBuilding && <div className="map-tools map-tools--shape" role="group" aria-label="新增大廈">
+      <button className={`map-tool ${adding ? 'is-active' : ''}`} aria-pressed={adding} aria-label={adding ? '取消新增大廈' : '在地圖上新增大廈'} title={adding ? '取消新增大廈' : '在地圖上新增大廈'} disabled={!ready} onClick={() => (adding ? stopAdding(true) : startAdding())}><MapPinPlus size={18} /></button>
+    </div>}
     </div>
+    {adding && mapRef.current && props.onAddBuilding && <div className="fp-editor-dock" style={{ left: (props.insets?.left ?? 0) + 16, right: (props.insets?.right ?? 0) + 16 }}>
+      <AddBuildingPanel map={mapRef.current} suggestedId={props.newBuildingId ?? ''} existingAt={existingAt}
+        onCancel={() => stopAdding(true)}
+        onAdd={input => props.onAddBuilding?.(input)} />
+    </div>}
     {editing && active && editOrigin && mapRef.current && <div className="fp-editor-dock" style={{ left: (props.insets?.left ?? 0) + 16, right: (props.insets?.right ?? 0) + 16 }}>
       <FootprintEditor key={active.id} map={mapRef.current} name={active.name} origin={editOrigin} ring={footprintOf(active)}
         onCancel={stopEditing}

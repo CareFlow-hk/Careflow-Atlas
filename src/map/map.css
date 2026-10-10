@@ -119,3 +119,12 @@
 .fp-editor__actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center}.fp-editor__actions span{flex:1}
 .fp-editor__actions button{display:inline-flex;align-items:center;gap:5px;min-height:36px;padding:0 12px;border-radius:8px;border:1px solid #c9d6cd;background:#fff;color:#2c4a42;font:inherit;cursor:pointer}
 .fp-editor__actions button:disabled{opacity:.45;cursor:default}.fp-editor__actions button.is-primary{background:#126455;border-color:#126455;color:#fff}
+.add-building__close{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border:0;border-radius:6px;background:transparent;color:#5f716d;cursor:pointer}.add-building__close:hover{background:#eef5f1}
+.add-building__grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 10px;margin-top:10px}
+.add-building__grid label{display:flex;flex-direction:column;gap:4px;color:#5f716d;font-size:12px}
+.add-building__grid input,.add-building__grid textarea{font:inherit;font-size:14px;color:#203b36;padding:7px 9px;border:1px solid #c9d6cd;border-radius:7px;background:#fff;min-width:0}
+.add-building__grid textarea{resize:vertical;line-height:1.5}
+.add-building__grid [aria-invalid=true]{border-color:#c0634f;box-shadow:0 0 0 2px #fbe3dd}
+.add-building__layout{grid-column:1/-1}
+.add-building small{color:#5f716d}
+@media (max-width:760px){.add-building__grid{grid-template-columns:1fr}}

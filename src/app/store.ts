@@ -6,6 +6,8 @@ import { LocalStoragePersistenceAdapter, OutreachRepository } from '../data/repo
 import { outlineCentre } from '../map/footprintGeometry';
 import { OptionPrefsRepository } from '../data/optionPrefsRepository';
 import { mergeWorkflow } from '../data/workflowMerge';
+import { addBuilding, type NewBuildingInput } from '../data/newBuilding';
+import { blankSnapshot } from '../data/blankSnapshot';
 import { appendPhotoPages, type PhotoPage } from '../photos/model';
 
 const adapter = new LocalStoragePersistenceAdapter();
@@ -41,6 +43,8 @@ interface WorkspaceState {
   clearWorkspace: () => void;
   /** Replace a building's outline drawn on the map. Records stay attached; only the shape and its centre move. */
   setFootprint: (buildingId: string, ring: number[][]) => void;
+  /** Add a building placed on the map. An empty workspace starts from the blank template. Returns the refusal, if any. */
+  addBuilding: (input: NewBuildingInput) => { error: string; field: string } | undefined;
   saveObservation: (input: SaveObservationInput) => void;
   savePhotoPages: (pages: PhotoPage[]) => { added: number; duplicates: number };
   /** Set or clear the manual mark on a building or a floor. A display change only. */
@@ -76,6 +80,13 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       footprintSource: { kind: 'manual' as const, at: new Date().toISOString(), by: operator?.name, osmId: b.footprintSource?.osmId },
     }) };
     set({ snapshot: repository.replaceSnapshot(next), storageError: undefined });
+  },
+  addBuilding: input => {
+    const result = addBuilding(get().snapshot ?? blankSnapshot(), input);
+    if ('error' in result) return result;
+    set({ snapshot: repository.replaceSnapshot(result.snapshot), storageError: undefined });
+    get().selectBuilding(result.buildingId);
+    return undefined;
   },
   clearWorkspace: () => {
     repository.clear();
