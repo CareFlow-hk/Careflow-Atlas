@@ -42,6 +42,9 @@ export function BuildingDetail(props: BuildingDetailProps) {
   const width = Math.max(0, ...[...groupsByFloor.values()].map(list => list.length));
   const headings = ([...groupsByFloor.values()].find(list => list.length === width) ?? []).map(group => unitColumnLabel(group.unit.label, floorLabelOf(snapshot, group.unit)));
   const noSplit = buildingUnits.filter(unit => unit.noSubdivision).length;
+  // A split unit widens its whole column (one slot per room) instead of squeezing the rooms into one cell.
+  const slots = Array.from({ length: width }, (_, index) => Math.max(1, ...[...groupsByFloor.values()].map(list => list[index]?.rooms.length || 1)));
+  const columns = slots.some(n => n > 1) ? `40px ${slots.map(n => `minmax(${n * 30}px, ${n}fr)`).join(" ")} 40px` : undefined;
   const unitCell = (unit: Unit, room: boolean) => {
     const unitStateValue = unitState(snapshot, building.id, unit.id);
     const clue = clueOf(snapshot, building.id, unit.id);
@@ -93,13 +96,13 @@ export function BuildingDetail(props: BuildingDetailProps) {
         <section className="cf-plate__sec" aria-label="樓層與單位">
           <h3><span className="cf-caps">Elevation · 樓層立面</span><span className="cf-plate__key">↻ 待跟進 · ◇ 疑似 · ◆ 已確認{noSplit > 0 && " · ✓ 無劏房"}</span>
             {onStructureChange && <button type="button" className={`cf-structure-toggle${editing ? " is-active" : ""}`} aria-pressed={editing} onClick={() => { setEditing(!editing); setPicked(new Set()); }}>{editing ? "完成" : "編輯結構"}<small>實驗</small></button>}</h3>
-          {floors.length && width ? <div className="cf-matrix" role="grid" aria-label="樓層與單位狀態" style={{ "--cf-cols": width } as CSSProperties}>
+          {floors.length && width ? <div className="cf-matrix" role="grid" aria-label="樓層與單位狀態" style={{ "--cf-cols": width, gridTemplateColumns: columns } as CSSProperties}>
             <span role="presentation" />
             {headings.map(label => <span key={label} className="cf-matrix__col" role="columnheader">{label}</span>)}
             <span className="cf-matrix__col" role="columnheader">完成</span>
             {floors.map(floor => {
               const groups = groupsByFloor.get(floor.id) ?? [];
-              const list = groups.flatMap(group => [group.unit, ...group.rooms]);
+              const list = groups.flatMap(group => (group.rooms.length ? group.rooms : [group.unit]));
               const scoped = getCoverageSummary(snapshot, building.id, floor.id);
               const tagged = features.nodeTags && isTagged(snapshot, { buildingId: building.id, floorId: floor.id });
               return [
@@ -108,7 +111,7 @@ export function BuildingDetail(props: BuildingDetailProps) {
                   const group = groups[index];
                   if (!group) return <span key={`${floor.id}-${index}`} className="cf-cell is-none" aria-hidden="true" />;
                   if (!group.rooms.length) return unitCell(group.unit, false);
-                  return <span key={group.unit.id} className="cf-cell-split" role="group" aria-label={`${group.unit.label}，分拆為 ${group.rooms.length} 間`}>{unitCell(group.unit, true)}{group.rooms.map(room => unitCell(room, true))}</span>;
+                  return <span key={group.unit.id} className={`cf-cell-split${!editing && selectedUnitId === group.unit.id ? " is-selected" : ""}`} role="group" aria-label={`${group.unit.label}，分拆為 ${group.rooms.length} 間`}>{group.rooms.map(room => unitCell(room, true))}</span>;
                 }),
                 editing && onStructureChange
                   ? <span key={`${floor.id}-edit`} className="cf-matrix__edit"><button type="button" aria-label={`在${floor.label}加一個單位`} title="加一個單位" onClick={() => onStructureChange({ kind: "addUnit", floorId: floor.id })}><Plus size={11} /></button><button type="button" aria-label={`刪除${floor.label}`} title="刪除這一層（只限沒有記錄）" onClick={() => onStructureChange({ kind: "removeFloor", floorId: floor.id })}><Minus size={11} /></button></span>
@@ -123,7 +126,7 @@ export function BuildingDetail(props: BuildingDetailProps) {
           <dl className="cf-plate__facts">
             <dt>最近</dt><dd>{unitLatest ? `${formatDay(unitLatest.occurredAt)}，${unitLatest.optionNotes?.coverage ?? coverageLabels[unitLatest.coverage]}` : "未有記錄"}</dd>
             <dt>住房</dt><dd>{unitAssessment ? assessmentLabels[unitAssessment] : "未有判斷"}</dd>
-            {(selectedUnit.noSubdivision || selectedUnit.parentUnitId || rooms.length > 0) && <><dt>劏房</dt><dd>{selectedUnit.parentUnitId ? `劏房間格，屬 ${buildingUnits.find(unit => unit.id === selectedUnit.parentUnitId)?.label ?? "原單位"}` : rooms.length ? `已分拆為 ${rooms.length} 間：${rooms.map(room => unitColumnLabel(room.label, floorLabelOf(snapshot, room))).join("、")}` : `已確認無劏房（${selectedUnit.noSubdivision!.by ?? "未記名"} · ${formatDay(selectedUnit.noSubdivision!.at)}）`}</dd></>}
+            {(selectedUnit.noSubdivision || selectedUnit.parentUnitId || rooms.length > 0) && <><dt>劏房</dt><dd>{selectedUnit.parentUnitId ? <>劏房間格，屬 <button type="button" className="cf-link" onClick={() => onSelectUnit(selectedUnit.parentUnitId!)}>{buildingUnits.find(unit => unit.id === selectedUnit.parentUnitId)?.label ?? "原單位"}</button>（分拆前的記錄在那裡）</> : rooms.length ? `已分拆為 ${rooms.length} 間：${rooms.map(room => unitColumnLabel(room.label, floorLabelOf(snapshot, room))).join("、")}` : `已確認無劏房（${selectedUnit.noSubdivision!.by ?? "未記名"} · ${formatDay(selectedUnit.noSubdivision!.at)}）`}</dd></>}
             {unitTasks > 0 && <><dt>待跟進</dt><dd>{unitTasks} 項</dd></>}
           </dl>
           <ObservationHistory snapshot={snapshot} subjectId={selectedUnit.id} onFollowUpAction={onFollowUpAction} />
