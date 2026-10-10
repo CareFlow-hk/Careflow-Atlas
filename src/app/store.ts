@@ -8,6 +8,7 @@ import { OptionPrefsRepository } from '../data/optionPrefsRepository';
 import { mergeWorkflow } from '../data/workflowMerge';
 import { addBuilding, type NewBuildingInput } from '../data/newBuilding';
 import { blankSnapshot } from '../data/blankSnapshot';
+import { applyStructureChange, type StructureChange } from '../domain/structure';
 import { appendPhotoPages, type PhotoPage } from '../photos/model';
 
 const adapter = new LocalStoragePersistenceAdapter();
@@ -45,6 +46,8 @@ interface WorkspaceState {
   setFootprint: (buildingId: string, ring: number[][]) => void;
   /** Add a building placed on the map. An empty workspace starts from the blank template. Returns the refusal, if any. */
   addBuilding: (input: NewBuildingInput) => { error: string; field: string } | undefined;
+  /** Experimental: edit floors, units and 劏房 rooms in the UI. Returns what happened, or the refusal. */
+  changeStructure: (change: StructureChange) => { error: string } | { message: string };
   saveObservation: (input: SaveObservationInput) => void;
   savePhotoPages: (pages: PhotoPage[]) => { added: number; duplicates: number };
   /** Set or clear the manual mark on a building or a floor. A display change only. */
@@ -87,6 +90,18 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     set({ snapshot: repository.replaceSnapshot(result.snapshot), storageError: undefined });
     get().selectBuilding(result.buildingId);
     return undefined;
+  },
+  changeStructure: change => {
+    const current = get().snapshot;
+    if (!current) return { error: '請先載入資料。' };
+    const result = applyStructureChange(current, change, { at: new Date().toISOString(), by: get().operator?.name });
+    if ('error' in result) return result;
+    set({ snapshot: repository.replaceSnapshot(result.snapshot), storageError: undefined });
+    // A removed unit or floor cannot stay selected.
+    const { selectedUnitId, selectedFloorId } = get();
+    if (selectedUnitId && !result.snapshot.units.some(u => u.id === selectedUnitId)) set({ selectedUnitId: undefined });
+    if (selectedFloorId && !result.snapshot.floors.some(f => f.id === selectedFloorId)) set({ selectedFloorId: undefined, selectedUnitId: undefined });
+    return { message: result.message };
   },
   clearWorkspace: () => {
     repository.clear();

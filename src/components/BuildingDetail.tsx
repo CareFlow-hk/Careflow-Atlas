@@ -1,15 +1,21 @@
-import { ArrowLeft, Building2, CalendarClock, ClipboardPlus, Flag } from "lucide-react";
-import { useMemo, type CSSProperties } from "react";
+import { ArrowLeft, Building2, CalendarClock, ClipboardPlus, Flag, Minus, Plus } from "lucide-react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { floorUnitGroups } from "../domain/structure";
+import { StructureBar } from "./StructureBar";
+import type { StructureChange } from "../domain/structure";
 import { buildingState, clueOf, currentAssessment, effectiveObservations, followUpEventsFor, getCoverageSummary, getOpenFollowUps, isTagged, latestObservation, unitState, type NodeTag, type OutreachSnapshot, type Unit } from "../domain/types";
 import { assessmentLabels, clueLabels, coverageLabels, nodeTagLabel, stateColors, stateLabels, supportCategoryLabels, uncategorisedFollowUpLabel } from "../domain/presentation";
 import { ObservationHistory } from "./ObservationHistory";
 import { features } from "../app/features";
 import { FollowUpActions, type FollowUpActionHandler } from "./FollowUpActions";
 
-export interface BuildingDetailProps { snapshot: OutreachSnapshot; selectedBuildingId?: string; selectedFloorId?: string; selectedUnitId?: string; onBack?: () => void; onSelectFloor: (floorId: string) => void; onSelectUnit: (unitId: string) => void; onToggleTag: (subject: { buildingId: string; floorId?: string }, tag?: NodeTag) => void; onFollowUpAction?: FollowUpActionHandler; onStartObservation: (subject: { buildingId: string; floorId?: string; unitId?: string; label: string }) => void; }
+export interface BuildingDetailProps { snapshot: OutreachSnapshot; selectedBuildingId?: string; selectedFloorId?: string; selectedUnitId?: string; onBack?: () => void; onSelectFloor: (floorId: string) => void; onSelectUnit: (unitId: string) => void; onToggleTag: (subject: { buildingId: string; floorId?: string }, tag?: NodeTag) => void; onFollowUpAction?: FollowUpActionHandler; onStartObservation: (subject: { buildingId: string; floorId?: string; unitId?: string; label: string }) => void;
+  /** Experimental structure editing. Returns a refusal in staff wording, if any. Without it the editor is not offered. */
+  onStructureChange?: (change: StructureChange) => string | undefined; }
 
 /** "5F B室" / "1樓 A室" → "B室" / "A室": the column heading drops the floor it repeats. */
-const unitColumnLabel = (label: string) => label.replace(/^\S+\s+/, "");
+const unitColumnLabel = (label: string, floorLabel?: string) => floorLabel && label.startsWith(floorLabel) && label.length > floorLabel.length ? label.slice(floorLabel.length).trim() : label.replace(/^\S+\s+/, "");
+const floorLabelOf = (snapshot: OutreachSnapshot, unit: Unit) => snapshot.floors.find(floor => floor.id === unit.floorId)?.label;
 const formatDay = (value: string) => new Intl.DateTimeFormat("zh-HK", { month: "short", day: "numeric" }).format(new Date(value.length === 10 ? `${value}T12:00:00` : value));
 
 /*
@@ -18,7 +24,12 @@ const formatDay = (value: string) => new Intl.DateTimeFormat("zh-HK", { month: "
  * unit's ledger below it.
  */
 export function BuildingDetail(props: BuildingDetailProps) {
-  const { snapshot, selectedBuildingId, selectedFloorId, selectedUnitId, onBack, onSelectFloor, onSelectUnit, onToggleTag, onFollowUpAction, onStartObservation } = props;
+  const { snapshot, selectedBuildingId, selectedFloorId, selectedUnitId, onBack, onSelectFloor, onSelectUnit, onToggleTag, onFollowUpAction, onStartObservation, onStructureChange } = props;
+  // Structure editing: clicks pick units instead of opening them.
+  const [editing, setEditing] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(() => new Set());
+  useEffect(() => { setEditing(false); setPicked(new Set()); }, [selectedBuildingId]);
+  const toggle = (ids: string[]) => setPicked(current => { const next = new Set(current); const all = ids.every(id => next.has(id)); for (const id of ids) if (all) next.delete(id); else next.add(id); return next; });
   const building = snapshot.buildings.find((item) => item.id === selectedBuildingId);
   const floors = useMemo(() => snapshot.floors.filter((item) => item.buildingId === selectedBuildingId).sort((a, b) => b.level - a.level), [snapshot.floors, selectedBuildingId]);
   if (!building) return <aside className="cf-building-panel cf-empty"><Building2 size={28} /><p>從地圖選擇一幢大廈，查看樓層和單位記錄。</p></aside>;
@@ -26,9 +37,24 @@ export function BuildingDetail(props: BuildingDetailProps) {
   const summary = getCoverageSummary(snapshot, building.id);
   const state = buildingState(snapshot, building.id);
   const buildingUnits = snapshot.units.filter(unit => unit.buildingId === building.id);
-  const unitsByFloor = new Map<string, Unit[]>(floors.map(floor => [floor.id, buildingUnits.filter(unit => unit.floorId === floor.id).sort((a, b) => a.label.localeCompare(b.label, "zh-Hant"))]));
-  const width = Math.max(0, ...[...unitsByFloor.values()].map(list => list.length));
-  const headings = ([...unitsByFloor.values()].find(list => list.length === width) ?? []).map(unit => unitColumnLabel(unit.label));
+  // A unit split into 劏房 rooms keeps one column; its rooms share that cell.
+  const groupsByFloor = new Map(floors.map(floor => [floor.id, floorUnitGroups(snapshot, floor.id)]));
+  const width = Math.max(0, ...[...groupsByFloor.values()].map(list => list.length));
+  const headings = ([...groupsByFloor.values()].find(list => list.length === width) ?? []).map(group => unitColumnLabel(group.unit.label, floorLabelOf(snapshot, group.unit)));
+  const noSplit = buildingUnits.filter(unit => unit.noSubdivision).length;
+  const unitCell = (unit: Unit, room: boolean) => {
+    const unitStateValue = unitState(snapshot, building.id, unit.id);
+    const clue = clueOf(snapshot, building.id, unit.id);
+    const tasks = openFollowUps.filter(item => item.unitId === unit.id).length;
+    const active = editing ? picked.has(unit.id) : selectedUnitId === unit.id;
+    const label = `${unit.label} · ${stateLabels[unitStateValue]}${tasks ? ` · ${tasks} 項待跟進` : ""}${clue ? ` · ${clueLabels[clue]}` : ""}${unit.noSubdivision ? " · 已確認無劏房" : ""}`;
+    return <button key={unit.id} role="gridcell" className={`cf-cell is-${unitStateValue.toLowerCase()}${active ? " is-selected" : ""}${room ? " is-room" : ""}`}
+      style={{ "--cf-state": stateColors[unitStateValue] } as CSSProperties} aria-label={label} title={label} aria-pressed={active} onClick={() => (editing ? toggle([unit.id]) : onSelectUnit(unit.id))}>
+      {room && <span className="cf-cell__room">{unitColumnLabel(unit.label, floorLabelOf(snapshot, unit)).replace(/室$/, "")}</span>}
+      {tasks > 0 && <span className="cf-cell__task">↻{tasks > 1 ? tasks : ""}</span>}{clue && <span className={`cf-cell__clue${clue === "VERIFIED" ? " is-verified" : ""}`}>{clue === "VERIFIED" ? "◆" : "◇"}</span>}
+      {unit.noSubdivision && <span className="cf-cell__clear" aria-hidden="true">✓</span>}
+    </button>;
+  };
   const failed = buildingUnits.filter(unit => unitState(snapshot, building.id, unit.id) === "RED").length;
   const selectedUnit = buildingUnits.find(unit => unit.id === selectedUnitId);
   const plate = snapshot.buildings.findIndex(item => item.id === building.id) + 1;
@@ -38,6 +64,7 @@ export function BuildingDetail(props: BuildingDetailProps) {
   const buildingTasks = openFollowUps.filter(task => task.buildingId === building.id && !task.floorId && !task.unitId);
   const unitLatest = selectedUnit ? latestObservation(effectiveObservations(snapshot).filter(item => item.unitId === selectedUnit.id)) : undefined;
   const unitAssessment = selectedUnit ? currentAssessment(snapshot, selectedUnit.id) : undefined;
+  const rooms = selectedUnit ? buildingUnits.filter(unit => unit.parentUnitId === selectedUnit.id) : [];
   const unitTasks = selectedUnit ? openFollowUps.filter(task => task.unitId === selectedUnit.id).length : 0;
   return (
     <aside className="cf-building-panel cf-plate" aria-label={`${building.name} 詳情`}>
@@ -64,39 +91,39 @@ export function BuildingDetail(props: BuildingDetailProps) {
           </li>)}</ul>
         </section>}
         <section className="cf-plate__sec" aria-label="樓層與單位">
-          <h3><span className="cf-caps">Elevation · 樓層立面</span><span className="cf-plate__key">↻ 待跟進 · ◇ 疑似 · ◆ 已確認</span></h3>
+          <h3><span className="cf-caps">Elevation · 樓層立面</span><span className="cf-plate__key">↻ 待跟進 · ◇ 疑似 · ◆ 已確認{noSplit > 0 && " · ✓ 無劏房"}</span>
+            {onStructureChange && <button type="button" className={`cf-structure-toggle${editing ? " is-active" : ""}`} aria-pressed={editing} onClick={() => { setEditing(!editing); setPicked(new Set()); }}>{editing ? "完成" : "編輯結構"}<small>實驗</small></button>}</h3>
           {floors.length && width ? <div className="cf-matrix" role="grid" aria-label="樓層與單位狀態" style={{ "--cf-cols": width } as CSSProperties}>
             <span role="presentation" />
             {headings.map(label => <span key={label} className="cf-matrix__col" role="columnheader">{label}</span>)}
             <span className="cf-matrix__col" role="columnheader">完成</span>
             {floors.map(floor => {
-              const list = unitsByFloor.get(floor.id) ?? [];
+              const groups = groupsByFloor.get(floor.id) ?? [];
+              const list = groups.flatMap(group => [group.unit, ...group.rooms]);
               const scoped = getCoverageSummary(snapshot, building.id, floor.id);
               const tagged = features.nodeTags && isTagged(snapshot, { buildingId: building.id, floorId: floor.id });
               return [
-                <button key={`${floor.id}-label`} className={`cf-matrix__floor${selectedFloorId === floor.id ? " is-active" : ""}`} aria-pressed={selectedFloorId === floor.id} onClick={() => onSelectFloor(floor.id)} title={tagged ? nodeTagLabel : undefined}>{floor.label}{tagged && <Flag size={10} aria-label={nodeTagLabel} />}</button>,
+                <button key={`${floor.id}-label`} className={`cf-matrix__floor${selectedFloorId === floor.id ? " is-active" : ""}`} aria-pressed={selectedFloorId === floor.id} onClick={() => (editing ? toggle(list.map(unit => unit.id)) : onSelectFloor(floor.id))} title={editing ? `選取${floor.label}全部單位` : tagged ? nodeTagLabel : undefined}>{floor.label}{tagged && <Flag size={10} aria-label={nodeTagLabel} />}</button>,
                 ...Array.from({ length: width }, (_, index) => {
-                  const unit = list[index];
-                  if (!unit) return <span key={`${floor.id}-${index}`} className="cf-cell is-none" aria-hidden="true" />;
-                  const unitStateValue = unitState(snapshot, building.id, unit.id);
-                  const clue = clueOf(snapshot, building.id, unit.id);
-                  const tasks = openFollowUps.filter(item => item.unitId === unit.id).length;
-                  const label = `${unit.label} · ${stateLabels[unitStateValue]}${tasks ? ` · ${tasks} 項待跟進` : ""}${clue ? ` · ${clueLabels[clue]}` : ""}`;
-                  return <button key={unit.id} role="gridcell" className={`cf-cell is-${unitStateValue.toLowerCase()}${selectedUnitId === unit.id ? " is-selected" : ""}`}
-                    style={{ "--cf-state": stateColors[unitStateValue] } as CSSProperties} aria-label={label} title={label} aria-pressed={selectedUnitId === unit.id} onClick={() => onSelectUnit(unit.id)}>
-                    {tasks > 0 && <span className="cf-cell__task">↻{tasks > 1 ? tasks : ""}</span>}{clue && <span className={`cf-cell__clue${clue === "VERIFIED" ? " is-verified" : ""}`}>{clue === "VERIFIED" ? "◆" : "◇"}</span>}
-                  </button>;
+                  const group = groups[index];
+                  if (!group) return <span key={`${floor.id}-${index}`} className="cf-cell is-none" aria-hidden="true" />;
+                  if (!group.rooms.length) return unitCell(group.unit, false);
+                  return <span key={group.unit.id} className="cf-cell-split" role="group" aria-label={`${group.unit.label}，分拆為 ${group.rooms.length} 間`}>{unitCell(group.unit, true)}{group.rooms.map(room => unitCell(room, true))}</span>;
                 }),
-                <span key={`${floor.id}-sum`} className="cf-matrix__sum">{scoped.completed}/{list.length}</span>,
+                editing && onStructureChange
+                  ? <span key={`${floor.id}-edit`} className="cf-matrix__edit"><button type="button" aria-label={`在${floor.label}加一個單位`} title="加一個單位" onClick={() => onStructureChange({ kind: "addUnit", floorId: floor.id })}><Plus size={11} /></button><button type="button" aria-label={`刪除${floor.label}`} title="刪除這一層（只限沒有記錄）" onClick={() => onStructureChange({ kind: "removeFloor", floorId: floor.id })}><Minus size={11} /></button></span>
+                  : <span key={`${floor.id}-sum`} className="cf-matrix__sum">{scoped.completed}/{list.length}</span>,
               ];
             })}
-          </div> : <p className="cf-layout-note">尚未有已聲明的樓層或單位佈局，仍可記錄大廈層面的到訪。</p>}
+          </div> : <p className="cf-layout-note">尚未有已聲明的樓層或單位佈局，仍可記錄大廈層面的到訪。{onStructureChange && !editing && " 可按「編輯結構」直接加樓層。"}</p>}
+          {editing && onStructureChange && <StructureBar snapshot={snapshot} buildingId={building.id} picked={[...picked]} onClear={() => setPicked(new Set())} onSelectAll={() => setPicked(new Set(buildingUnits.filter(unit => !unit.noSubdivision && !buildingUnits.some(room => room.parentUnitId === unit.id) && !unit.parentUnitId).map(unit => unit.id)))} onChange={change => { const refused = onStructureChange(change); if (!refused && change.kind !== "addUnit" && change.kind !== "addFloors") setPicked(new Set()); return refused; }} />}
         </section>
         {selectedUnit ? <section className="cf-plate__sec cf-selected-unit" key={selectedUnit.id}>
           <h3><span className="cf-plate__unit">{selectedUnit.label}</span><span className="cf-caps">Ledger</span></h3>
           <dl className="cf-plate__facts">
             <dt>最近</dt><dd>{unitLatest ? `${formatDay(unitLatest.occurredAt)}，${unitLatest.optionNotes?.coverage ?? coverageLabels[unitLatest.coverage]}` : "未有記錄"}</dd>
             <dt>住房</dt><dd>{unitAssessment ? assessmentLabels[unitAssessment] : "未有判斷"}</dd>
+            {(selectedUnit.noSubdivision || selectedUnit.parentUnitId || rooms.length > 0) && <><dt>劏房</dt><dd>{selectedUnit.parentUnitId ? `劏房間格，屬 ${buildingUnits.find(unit => unit.id === selectedUnit.parentUnitId)?.label ?? "原單位"}` : rooms.length ? `已分拆為 ${rooms.length} 間：${rooms.map(room => unitColumnLabel(room.label, floorLabelOf(snapshot, room))).join("、")}` : `已確認無劏房（${selectedUnit.noSubdivision!.by ?? "未記名"} · ${formatDay(selectedUnit.noSubdivision!.at)}）`}</dd></>}
             {unitTasks > 0 && <><dt>待跟進</dt><dd>{unitTasks} 項</dd></>}
           </dl>
           <ObservationHistory snapshot={snapshot} subjectId={selectedUnit.id} onFollowUpAction={onFollowUpAction} />

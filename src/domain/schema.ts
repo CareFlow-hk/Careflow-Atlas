@@ -34,7 +34,7 @@ export const snapshotSchema = z.object({
   schemaVersion: z.literal('0.1-demo'), isSynthetic: z.literal(true), notice: text,
   buildings: z.array(z.object({ ...base, name: id, address: id, coordinates: z.object({ lng: z.number().min(-180).max(180), lat: z.number().min(-85).max(85) }), floorCount: z.number().int().min(1).max(100).optional(), footprint: z.array(z.array(z.number()).length(2)).min(4).max(512).optional(), footprintSource: z.object({ kind: z.enum(['osm', 'manual']), at: z.string().max(40), osmId: z.string().max(80).optional(), match: z.enum(['contains', 'nearest']).optional(), by: z.string().max(200).optional() }).optional(), layoutDeclared: z.boolean(), initialCoverage: z.enum(COVERAGE_STATUSES).optional(), tag: z.enum(NODE_TAGS).optional() })),
   floors: z.array(z.object({ ...base, buildingId: id, level: z.number().int().min(-10).max(100), label: id, tag: z.enum(NODE_TAGS).optional() })),
-  units: z.array(z.object({ ...base, buildingId: id, floorId: id, label: id, initialCoverage: z.enum(COVERAGE_STATUSES).optional() })),
+  units: z.array(z.object({ ...base, buildingId: id, floorId: id, label: id, initialCoverage: z.enum(COVERAGE_STATUSES).optional(), parentUnitId: id.optional(), noSubdivision: z.object({ at: z.string().max(40), by: z.string().max(200).optional() }).optional() })),
   households: z.array(z.object({ ...base, label: text.optional() })), people: z.array(z.object({ ...base, displayName: id, phone: z.string().max(80).optional(), addressNote: text.optional(), contactNote: text.optional() })),
   householdMemberships: z.array(z.object({ ...base, householdId: id, personId: id, relationship: text.optional() })),
   householdResidences: z.array(z.object({ ...base, householdId: id, buildingId: id, unitId: id.optional(), ...dates, locationNote: text.optional() })),
@@ -51,6 +51,7 @@ export const snapshotSchema = z.object({
   const buildings = map(data.buildings), floors = map(data.floors), units = map(data.units), visits = map(data.visits), households = map(data.households), people = map(data.people), observations = map(data.observations);
   data.floors.forEach((f, i) => { if (!buildings.get(f.buildingId)?.layoutDeclared) bad(['floors', i, 'buildingId'], 'Floor requires declared building layout'); });
   data.units.forEach((u, i) => { if (!buildings.has(u.buildingId) || floors.get(u.floorId)?.buildingId !== u.buildingId) bad(['units', i, 'floorId'], 'Floor and building must match'); });
+  data.units.forEach((u, i) => { if (u.parentUnitId && units.get(u.parentUnitId)?.floorId !== u.floorId) bad(['units', i, 'parentUnitId'], 'A subdivided room must sit on its parent unit\'s floor'); });
   data.buildings.forEach((b, i) => {
     if (b.floorCount && data.floors.filter(f => f.buildingId === b.id).length !== b.floorCount) bad(['buildings', i, 'floorCount'], 'Declared floor count must match supplied floors');
     if (b.footprint && (JSON.stringify(b.footprint[0]) !== JSON.stringify(b.footprint.at(-1)) || b.footprint.some(p => Math.abs(p[0]) > 180 || Math.abs(p[1]) > 85))) bad(['buildings', i, 'footprint'], 'Footprint must be a closed longitude/latitude polygon');

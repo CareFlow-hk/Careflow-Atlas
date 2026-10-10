@@ -54,7 +54,13 @@ export interface Floor extends SyntheticRecord {
   /** Manual "needs follow-up" mark for the whole floor. Display only. */
   tag?: NodeTag;
 }
-export interface Unit extends SyntheticRecord { id: string; buildingId: string; floorId: string; label: string; initialCoverage?: CoverageStatus; }
+export interface Unit extends SyntheticRecord {
+  id: string; buildingId: string; floorId: string; label: string; initialCoverage?: CoverageStatus;
+  /** A subdivided room (劏房 A1, A2…) split from this unit on the same floor. Experimental. */
+  parentUnitId?: string;
+  /** Staff confirmed this unit is not subdivided. A structural mark, not a visit record. Experimental. */
+  noSubdivision?: { at: string; by?: string };
+}
 export interface Household extends SyntheticRecord { id: string; label?: string; }
 export interface Person extends SyntheticRecord { id: string; displayName: string; phone?: string; addressNote?: string; contactNote?: string; }
 export interface HouseholdMembership extends SyntheticRecord { id: string; householdId: string; personId: string; relationship?: string; }
