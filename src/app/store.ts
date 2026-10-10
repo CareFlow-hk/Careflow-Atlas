@@ -8,7 +8,7 @@ import { OptionPrefsRepository } from '../data/optionPrefsRepository';
 import { mergeWorkflow } from '../data/workflowMerge';
 import { addBuilding, type NewBuildingInput } from '../data/newBuilding';
 import { blankSnapshot } from '../data/blankSnapshot';
-import { applyStructureChange, type StructureChange } from '../domain/structure';
+import { applyStructureChange, type LocationProposal, type StructureChange } from '../domain/structure';
 import { appendPhotoPages, type PhotoPage } from '../photos/model';
 
 const adapter = new LocalStoragePersistenceAdapter();
@@ -48,6 +48,8 @@ interface WorkspaceState {
   addBuilding: (input: NewBuildingInput) => { error: string; field: string } | undefined;
   /** Experimental: edit floors, units and 劏房 rooms in the UI. Returns what happened, or the refusal. */
   changeStructure: (change: StructureChange) => { error: string } | { message: string };
+  /** Semi-agent: apply a structure proposal accepted in paper intake. Returns the new unit, or the refusal. */
+  applyLocationProposal: (proposal: LocationProposal) => { unitId: string; snapshot: OutreachSnapshot } | { error: string };
   saveObservation: (input: SaveObservationInput) => void;
   savePhotoPages: (pages: PhotoPage[]) => { added: number; duplicates: number };
   /** Set or clear the manual mark on a building or a floor. A display change only. */
@@ -102,6 +104,15 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     if (selectedUnitId && !result.snapshot.units.some(u => u.id === selectedUnitId)) set({ selectedUnitId: undefined });
     if (selectedFloorId && !result.snapshot.floors.some(f => f.id === selectedFloorId)) set({ selectedFloorId: undefined, selectedUnitId: undefined });
     return { message: result.message };
+  },
+  applyLocationProposal: proposal => {
+    const current = get().snapshot;
+    if (!current) return { error: '請先載入資料。' };
+    const result = proposal.apply(current);
+    if ('error' in result) return result;
+    const saved = repository.replaceSnapshot(result.snapshot);
+    set({ snapshot: saved, storageError: undefined });
+    return { unitId: result.unitId, snapshot: saved };
   },
   clearWorkspace: () => {
     repository.clear();

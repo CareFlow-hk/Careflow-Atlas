@@ -161,3 +161,84 @@ export function applyStructureChange(s: OutreachSnapshot, change: StructureChang
     }
   }
 }
+
+/**
+ * Semi-agent: the paper names a floor or unit the building does not have yet.
+ * Read only plain forms ("5樓", "5/F", "B", "B1室"); anything else gets no proposal
+ * (never guess). The proposal lists its steps for a person to accept; nothing is
+ * changed until `apply` is called.
+ */
+export interface LocationProposal { label: string; steps: string[]; apply: (s: OutreachSnapshot) => { snapshot: OutreachSnapshot; unitId: string } | { error: string } }
+const plain = (value?: string | null) => (value ?? '').trim().toUpperCase().replace(/[\s·・]/g, '');
+export function readPaperFloor(text?: string | null): number | undefined {
+  const m = /^(\d{1,3})(?:\/?F|樓|層|字樓)?$/.exec(plain(text));
+  return m ? Number(m[1]) : undefined;
+}
+export function readPaperUnit(text?: string | null, floorText?: string | null): { letter: string; room?: number } | undefined {
+  let value = plain(text);
+  const floor = plain(floorText);
+  if (floor && value.startsWith(floor)) value = value.slice(floor.length);
+  value = value.replace(/^(\d{1,3})(?:\/?F|樓|層)/, '').replace(/(室|房|號)$/, '');
+  const m = /^([A-Z])(\d{1,2})?$/.exec(value);
+  return m ? { letter: m[1], room: m[2] ? Number(m[2]) : undefined } : undefined;
+}
+
+export function proposeLocation(s: OutreachSnapshot, buildingId: string, floorText?: string | null, unitText?: string | null): LocationProposal | undefined {
+  const building = s.buildings.find(b => b.id === buildingId);
+  const level = readPaperFloor(floorText), unit = readPaperUnit(unitText, floorText);
+  if (!building || level === undefined || level < 1 || level > MAX_FLOORS || !unit) return undefined;
+  const floors = floorsOf(s, buildingId);
+  const floor = floors.find(f => f.level === level);
+  const floorLabel = floor?.label ?? floorLabelFor(level, floors[0]?.label);
+  const parentLabel = `${floorLabel} ${unit.letter}室`;
+  const parent = floor && s.units.find(u => u.floorId === floor.id && !u.parentUnitId && (u.label === parentLabel || letterOf(u, floor) === unit.letter));
+  const stem = (parent?.label ?? parentLabel).replace(/室$/, '');
+  const roomLabel = unit.room !== undefined ? `${stem}${unit.room}室` : undefined;
+  const room = parent && roomLabel ? s.units.find(u => u.parentUnitId === parent.id && u.label === roomLabel) : undefined;
+  const steps = [
+    !floor && `新增「${floorLabel}」`,
+    !parent && `在${floorLabel}新增「${parentLabel}」`,
+    roomLabel && !room && `把「${parent?.label ?? parentLabel}」分出劏房「${roomLabel}」`,
+  ].filter((x): x is string => !!x);
+  if (!steps.length) return undefined;
+  return {
+    label: roomLabel ?? parentLabel, steps,
+    apply: current => {
+      const ids = (list: { id: string }[]) => new Set(list.map(x => x.id));
+      let next = current;
+      let target = floorsOf(next, buildingId).find(f => f.level === level);
+      if (!target) {
+        if (floorsOf(next, buildingId).length >= MAX_FLOORS) return { error: `一幢最多 ${MAX_FLOORS} 層。` };
+        const id = freeId(ids(next.floors), n => `${buildingId}-f${n}`);
+        target = { ...flags, id, buildingId, level, label: floorLabel };
+        next = withBuilding(next, buildingId, [...next.floors, target], next.units);
+      }
+      const t = target;
+      let p = next.units.find(u => u.floorId === t.id && !u.parentUnitId && (u.label === parentLabel || letterOf(u, t) === unit.letter));
+      if (!p) {
+        p = { ...flags, id: freeId(ids(next.units), n => `${t.id}-u${n}`), buildingId, floorId: t.id, label: `${t.label} ${unit.letter}室` };
+        next = { ...next, units: [...next.units, p] };
+      }
+      if (unit.room === undefined) return { snapshot: next, unitId: p.id };
+      const parentUnit = p;
+      const label = `${parentUnit.label.replace(/室$/, '')}${unit.room}室`;
+      const existing = next.units.find(u => u.parentUnitId === parentUnit.id && u.label === label);
+      if (existing) return { snapshot: next, unitId: existing.id };
+      const roomUnit: Unit = { ...flags, id: freeId(ids(next.units), k => `${parentUnit.id}-s${k}`), buildingId, floorId: t.id, label, parentUnitId: parentUnit.id };
+      // A unit with a room is no longer "confirmed not subdivided".
+      next = { ...next, units: [...next.units.map(u => u.id === parentUnit.id && u.noSubdivision ? { ...u, noSubdivision: undefined } : u), roomUnit] };
+      return { snapshot: next, unitId: roomUnit.id };
+    },
+  };
+}
+
+/** The unit the paper names, when the building already has it. Same reading rules as `proposeLocation`. */
+export function findPaperLocation(s: OutreachSnapshot, buildingId: string, floorText?: string | null, unitText?: string | null): string | undefined {
+  const level = readPaperFloor(floorText), unit = readPaperUnit(unitText, floorText);
+  if (level === undefined || !unit) return undefined;
+  const floor = floorsOf(s, buildingId).find(f => f.level === level);
+  const parent = floor && s.units.find(u => u.floorId === floor.id && !u.parentUnitId && letterOf(u, floor) === unit.letter);
+  if (!parent || unit.room === undefined) return parent?.id;
+  const label = `${parent.label.replace(/室$/, '')}${unit.room}室`;
+  return s.units.find(u => u.parentUnitId === parent.id && u.label === label)?.id;
+}
