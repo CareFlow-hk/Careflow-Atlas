@@ -2,7 +2,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
-  COVERAGE_GROUPS, CONTACT_GROUPS, acceptedAssessment, acceptedContact, acceptedCoverage, acceptedSource, assessmentOptions, contactOptionGroups, coverageOptionGroups,
+  COVERAGE_GROUPS, CONTACT_GROUPS, acceptedAssessment, acceptedContact, acceptedCoverage, acceptedSource, assessmentOptions, canonicalCoverageOf, contactOptionGroups, coverageGroupOf, coverageOptionGroups,
   recognitionAssessmentValues, recognitionCategoryValues, recognitionContactValues, recognitionCoverageValues,
   recognitionSourceValues, sourceOptions, stateColors, stateLabels, stateLegendNotes, stateSelectedColors,
 } from './presentation';
@@ -105,6 +105,30 @@ describe('one source for every option', () => {
     expect(assessmentOptions.map(option => option.value)).not.toContain('UNKNOWN');
     for (const option of coverageOptionGroups) expect(COVERAGE_STATUSES).toContain(option.canonical);
     for (const option of contactOptionGroups) expect(CONTACT_OUTCOMES).toContain(option.canonical);
+  });
+
+  /*
+   * The entry form opens a 劏房 room with these two already answered. A radio whose
+   * value is not among its choices renders nothing checked — the form would silently
+   * stop being pre-answered, and would still save, so nothing else would catch it.
+   */
+  it('offers the values the entry form pre-selects for a 劏房 room', () => {
+    expect(coverageOptionGroups.find(option => option.label === '已完成探訪')?.canonical).toBe('VISITED_NO_FINDING');
+    expect(assessmentOptions.map(option => option.value)).toContain('STAFF_VERIFIED');
+  });
+
+  /*
+   * A room's form opens on whatever its record already stands at, read back through the
+   * group so a stored PARTIAL or INACCESSIBLE lights up 未能完成探訪 rather than a value
+   * the form does not offer. If this ever stops round-tripping, the form silently opens
+   * on the wrong choice and still saves.
+   */
+  it('maps a stored coverage back to a choice the form actually offers', () => {
+    for (const status of COVERAGE_STATUSES) {
+      const group = coverageGroupOf(status);
+      expect(coverageOptionGroups.find(option => option.group === group)?.covers).toContain(status);
+      expect(coverageOptionGroups.map(option => option.canonical)).toContain(canonicalCoverageOf(group));
+    }
   });
 
   it('keeps every wording a sheet may already contain readable', () => {

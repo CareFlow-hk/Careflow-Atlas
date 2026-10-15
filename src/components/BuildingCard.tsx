@@ -21,7 +21,8 @@ export interface BuildingCardProps {
  */
 export function BuildingCard({ name, address, floorCount, index, state, summary, selected, onSelect }: BuildingCardProps) {
   const tasks = summary.followUps;
-  const described = `${name} · ${address} · ${stateLabels[state]}${summary.total ? ` · ${summary.completed}/${summary.total} 個單位已查看` : ""}${floorCount ? ` · ${floorCount} 層` : ""}${tasks ? ` · ${tasks} 項待跟進` : ""}`;
+  // An address may still be unknown for a building met in the field, which reads as no clause at all.
+  const described = `${name}${address ? ` · ${address}` : ""} · ${stateLabels[state]}${summary.total ? ` · ${summary.completed}/${summary.total} 個單位已查看` : ""}${floorCount ? ` · ${floorCount} 層` : ""}${tasks ? ` · ${tasks} 項待跟進` : ""}`;
   return (
     <button className={`building-row${selected ? " selected" : ""}${tasks ? " has-followup" : ""}`} onClick={onSelect} aria-pressed={selected} aria-label={described} title={described}>
       <span className="building-row__n">{String(index + 1).padStart(2, "0")}</span>

@@ -40,8 +40,6 @@ interface MapSceneProps {
   onSaveFootprint?: (buildingId: string, ring: number[][]) => void;
   /** Add a building clicked on the map. Without it the tool is not offered. */
   onAddBuilding?: (input: NewBuildingInput) => { error: string; field: string } | undefined;
-  /** Prefilled id for a building added on the map. */
-  newBuildingId?: string;
 }
 
 export default function MapScene(props: MapSceneProps) {
@@ -504,6 +502,8 @@ export default function MapScene(props: MapSceneProps) {
     map.setMaxPitch(before?.maxPitch ?? 85);
     if (restoreCamera && before) map.easeTo({ center: before.center, zoom: before.zoom, pitch: before.pitch, bearing: before.bearing, duration: motionDuration(spatialMotion.pitch), easing: easeInOutCubic });
   };
+  // What a new building can be said to be near, as the add panel words its address suggestion.
+  const neighbours = useMemo(() => props.buildings.map(b => ({ name: b.name, lng: b.longitude, lat: b.latitude })), [props.buildings]);
   const existingAt = useMemo(() => (e: MapMouseEvent) => {
     const id = mapRef.current?.queryRenderedFeatures(e.point, { layers: ['outreach-buildings'] })[0]?.properties.id;
     return id === undefined ? undefined : current.current.buildings.find(b => b.id === String(id))?.name ?? String(id);
@@ -553,11 +553,11 @@ export default function MapScene(props: MapSceneProps) {
       <button className={`map-tool ${editing ? 'is-active' : ''}`} aria-pressed={!!editing} aria-label={editing ? '結束調整形狀' : '調整大廈形狀'} title={editing ? '結束調整形狀（不儲存）' : '調整大廈形狀（2D）'} disabled={!ready} onClick={() => (editing ? stopEditing() : startEditing())}><PenLine size={18} /></button>
     </div>}
     {!active && !editing && props.onAddBuilding && <div className="map-tools map-tools--shape" role="group" aria-label="新增大廈">
-      <button className={`map-tool ${adding ? 'is-active' : ''}`} aria-pressed={adding} aria-label={adding ? '取消新增大廈' : '在地圖上新增大廈'} title={adding ? '取消新增大廈' : '在地圖上新增大廈'} disabled={!ready} onClick={() => (adding ? stopAdding(true) : startAdding())}><MapPinPlus size={18} /></button>
+      <button className={`map-tool ${adding ? 'is-active' : ''}`} aria-pressed={adding} aria-label={adding ? '取消新增大廈' : '在地圖上新增大廈'} title={adding ? '取消新增大廈' : '在地圖上新增大廈（左鍵點建築、右鍵點空白位置）'} disabled={!ready} onClick={() => (adding ? stopAdding(true) : startAdding())}><MapPinPlus size={18} /></button>
     </div>}
     </div>
     {adding && mapRef.current && props.onAddBuilding && <div className="fp-editor-dock" style={{ left: (props.insets?.left ?? 0) + 16, right: (props.insets?.right ?? 0) + 16 }}>
-      <AddBuildingPanel map={mapRef.current} suggestedId={props.newBuildingId ?? ''} existingAt={existingAt}
+      <AddBuildingPanel map={mapRef.current} neighbours={neighbours} existingAt={existingAt}
         onCancel={() => stopAdding(true)}
         onAdd={input => props.onAddBuilding?.(input)} />
     </div>}

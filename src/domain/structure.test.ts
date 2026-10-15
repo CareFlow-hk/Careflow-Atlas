@@ -4,12 +4,27 @@ import { addBuilding } from '../data/newBuilding';
 import { blankSnapshot } from '../data/blankSnapshot';
 import { exportWorkflowWorkbook, parseWorkflowWorkbook } from '../data/workflowWorkbook';
 import { validateSnapshot } from './schema';
-import { applyStructureChange, floorUnitGroups, type StructureChange } from './structure';
+import { applyStructureChange, floorUnitGroups, roomCountAction, structureImpact, type StructureChange } from './structure';
 import type { OutreachSnapshot } from './types';
 
 const actor = { at: '2026-10-10T08:00:00.000Z', by: '測試同事' };
 const start = () => { const r = addBuilding(blankSnapshot(), { id: 'SYP-001', name: '新大廈', address: '第三街 1 號', coordinates: { lng: 114.14, lat: 22.2867 } }); if ('error' in r) throw new Error(r.error); return r.snapshot; };
 const apply = (s: OutreachSnapshot, change: StructureChange) => { const r = applyStructureChange(s, change, actor); if ('error' in r) throw new Error(r.error); validateSnapshot(r.snapshot); return r.snapshot; };
+const flags = { isSynthetic: true as const, provisional: true as const };
+/** A unit split in two, with a record on the second room — what merging has to ask about. */
+const withRoomRecord = () => {
+  let s = apply(start(), { kind: 'addFloors', buildingId: 'SYP-001', count: 1, unitsPerFloor: 1 });
+  s = apply(s, { kind: 'split', unitId: s.units[0].id, rooms: 2 });
+  const room = s.units.find(u => u.label === '1 樓 A2室')!;
+  const at = '2026-10-10T09:00:00+08:00';
+  const next: OutreachSnapshot = {
+    ...s,
+    visits: [{ ...flags, id: 'visit-1', occurredAt: at, recordedAt: at, workerName: '測試同事' }],
+    observations: [{ ...flags, id: 'observation-1', visitId: 'visit-1', buildingId: 'SYP-001', floorId: room.floorId, unitId: room.id, occurredAt: at, recordedAt: at, workerName: '測試同事', coverage: 'VISITED_NO_FINDING', evidence: [] }],
+  };
+  validateSnapshot(next);
+  return next;
+};
 
 describe('experimental structure editing', () => {
   it('adds floors with lettered units on an empty building', () => {
@@ -55,10 +70,71 @@ describe('experimental structure editing', () => {
     s = apply(s, { kind: 'split', unitId: s.units[0].id, rooms: 2 });
     expect(s.units[0].noSubdivision).toBeUndefined();
   });
-  it('never removes a floor or unit that has records', () => {
+  it('merges 劏房 back into one unit when the count is set to 1', () => {
+    let s = apply(start(), { kind: 'addFloors', buildingId: 'SYP-001', count: 1, unitsPerFloor: 1 });
+    s = apply(s, { kind: 'split', unitId: s.units[0].id, rooms: 3 });
+    const r = applyStructureChange(s, { kind: 'split', unitId: s.units[0].id, rooms: 1 }, actor);
+    if ('error' in r) throw new Error(r.error);
+    expect(r.message).toContain('已合併');
+    expect(r.snapshot.units).toHaveLength(1);
+    validateSnapshot(r.snapshot);
+    // One room left is also put back together, rather than left with one behind.
+    s = apply(s, { kind: 'split', unitId: s.units[0].id, rooms: 1 });
+    expect(s.units).toHaveLength(1);
+  });
+  it('drops the highest-numbered rooms when the count goes down, keeping the rest', () => {
+    let s = apply(start(), { kind: 'addFloors', buildingId: 'SYP-001', count: 1, unitsPerFloor: 1 });
+    s = apply(s, { kind: 'split', unitId: s.units[0].id, rooms: 3 });
+    s = apply(s, { kind: 'split', unitId: s.units[0].id, rooms: 2 });
+    expect(s.units.filter(u => u.parentUnitId).map(u => u.label)).toEqual(['1 樓 A1室', '1 樓 A2室']);
+  });
+  it('refuses a room count that is not a change, or is out of range', () => {
+    let s = apply(start(), { kind: 'addFloors', buildingId: 'SYP-001', count: 1, unitsPerFloor: 1 });
+    const unitId = s.units[0].id;
+    expect(applyStructureChange(s, { kind: 'split', unitId, rooms: 1 }, actor)).toHaveProperty('error');
+    s = apply(s, { kind: 'split', unitId, rooms: 2 });
+    for (const rooms of [2, 0, 21, 1.5]) expect(applyStructureChange(s, { kind: 'split', unitId, rooms }, actor)).toHaveProperty('error');
+    expect(roomCountAction(1, 2)).toBe('合併');
+    expect(roomCountAction(1, 1)).toBe('合併');
+    expect(roomCountAction(3, 2)).toBe('更新');
+    expect(roomCountAction(2, 0)).toBe('建立');
+    expect(roomCountAction(1, 0)).toBe('建立');
+  });
+  /*
+   * The question the UI is meant to put on screen, and the same one the domain refuses
+   * with — so a delete that would take records can never go through unasked.
+   */
+  it('refuses a removal that would take records with it until it is confirmed', () => {
     const observed = workflowDemo.observations.find(o => o.unitId)!;
-    expect(applyStructureChange(workflowDemo, { kind: 'removeUnits', unitIds: [observed.unitId!] }, actor)).toHaveProperty('error');
+    const refused = applyStructureChange(workflowDemo, { kind: 'removeUnits', unitIds: [observed.unitId!] }, actor);
+    if (!('error' in refused)) throw new Error('有記錄的單位不應直接刪除');
+    expect(refused.error).toContain('請先確認');
+    expect(refused.error.endsWith(structureImpact(workflowDemo, { kind: 'removeUnits', unitIds: [observed.unitId!] })!.confirmation)).toBe(true);
     expect(applyStructureChange(workflowDemo, { kind: 'removeFloor', floorId: observed.floorId! }, actor)).toHaveProperty('error');
+  });
+  it('removes a confirmed unit together with its records, leaving a valid snapshot', () => {
+    const observed = workflowDemo.observations.find(o => o.unitId)!;
+    const { records } = structureImpact(workflowDemo, { kind: 'removeUnits', unitIds: [observed.unitId!] })!;
+    // More than the unit's own record: the count includes what cited it.
+    expect(records).toBeGreaterThan(1);
+    const r = applyStructureChange(workflowDemo, { kind: 'removeUnits', unitIds: [observed.unitId!], confirmed: true }, actor);
+    if ('error' in r) throw new Error(r.error);
+    // Would throw on any record left pointing at a place that is gone.
+    validateSnapshot(r.snapshot);
+    expect(r.message).toContain(`連同 ${records} 筆記錄已一併刪除`);
+    expect(r.snapshot.units.some(u => u.id === observed.unitId)).toBe(false);
+  });
+  it('asks before merging rooms that carry records, and takes them along', () => {
+    const s = withRoomRecord();
+    const unitId = s.units[0].id;
+    const refused = applyStructureChange(s, { kind: 'split', unitId, rooms: 1 }, actor);
+    if (!('error' in refused)) throw new Error('有記錄的劏房合併前應該先問');
+    expect(refused.error).toContain('請先確認');
+    const merged = apply(s, { kind: 'split', unitId, rooms: 1, confirmed: true });
+    expect(merged.units).toHaveLength(1);
+    expect(merged.observations).toEqual([]);
+  });
+  it('removes a unit, its rooms and a floor without records straight away', () => {
     let s = apply(start(), { kind: 'addFloors', buildingId: 'SYP-001', count: 2, unitsPerFloor: 2 });
     s = apply(s, { kind: 'split', unitId: s.units[0].id, rooms: 2 });
     s = apply(s, { kind: 'removeUnits', unitIds: [s.units[0].id] });

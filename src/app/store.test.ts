@@ -17,6 +17,22 @@ describe('building focus', () => {
     useWorkspace.getState().selectBuilding();
     expect(useWorkspace.getState()).toMatchObject({ selectedBuildingId: undefined, expanded: false });
   });
+  /*
+   * Clearing the unit is how the panel's blank areas go back to the building's own ledger
+   * and footer button. The building and floor stay: the person stepped out of one unit,
+   * not out of the building.
+   */
+  it('steps out of a unit without leaving the building', () => {
+    useWorkspace.getState().selectBuilding('bldg-yu-an');
+    useWorkspace.getState().selectUnit('bldg-yu-an-f5-B');
+    useWorkspace.getState().selectUnit(undefined);
+    expect(useWorkspace.getState()).toMatchObject({ selectedBuildingId: 'bldg-yu-an', selectedFloorId: 'bldg-yu-an-f5', selectedUnitId: undefined, expanded: true });
+  });
+  it('leaves the selection alone for a unit that is not there', () => {
+    useWorkspace.getState().selectUnit('bldg-yu-an-f5-B');
+    useWorkspace.getState().selectUnit('bldg-yu-an-f9-Z');
+    expect(useWorkspace.getState().selectedUnitId).toBe('bldg-yu-an-f5-B');
+  });
 });
 
 describe('Excel merge persistence', () => {

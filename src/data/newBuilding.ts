@@ -2,14 +2,15 @@ import type { Building, FootprintSource, OutreachSnapshot } from '../domain/type
 import { isUndeclaredLayout, parseLayoutSummary } from './layoutSummary';
 
 export interface NewBuildingInput {
-  id: string; name: string; address: string;
+  /** Blank takes the next free `SYP-001` style id; only imports and scripts name one. */
+  id?: string; name: string; address: string;
   coordinates: { lng: number; lat: number };
   footprint?: number[][];
   footprintSource?: FootprintSource;
   /** 樓層單位摘要, same wording as the Excel cell. Blank leaves floors undeclared. */
   layout?: string;
 }
-export type NewBuildingResult = { snapshot: OutreachSnapshot; buildingId: string } | { error: string; field: 'id' | 'name' | 'address' | 'layout' };
+export type NewBuildingResult = { snapshot: OutreachSnapshot; buildingId: string } | { error: string; field: 'id' | 'name' | 'layout' };
 
 /** The next unused `SYP-001` style id, the same shape the Excel guide suggests. */
 export function nextBuildingId(snapshot: OutreachSnapshot | undefined, prefix = 'SYP'): string {
@@ -22,16 +23,17 @@ export function nextBuildingId(snapshot: OutreachSnapshot | undefined, prefix = 
 
 /**
  * Add one building drawn on the map. Same rules as a new row in 大廈總表:
- * name, address and a position are required, the id must be free, and a layout is
- * only taken when every line reads. Nothing else in the snapshot changes.
+ * name and a position are required, the address may be left blank until someone
+ * knows it, the id must be free — one nobody named is numbered here, against this
+ * very snapshot — and a layout is only taken when every line reads. Nothing else
+ * in the snapshot changes.
  */
 export function addBuilding(snapshot: OutreachSnapshot, input: NewBuildingInput): NewBuildingResult {
-  const id = input.id.trim(), name = input.name.trim(), address = input.address.trim();
-  if (!id) return { error: '請填大廈編號。', field: 'id' };
+  const id = input.id?.trim() || nextBuildingId(snapshot), name = input.name.trim(), address = input.address.trim();
+  // No "blank id" refusal: a blank one has just been numbered. What a caller did name still has to read.
   if (!/^[\w-]+$/.test(id)) return { error: '大廈編號只可用英文字母、數字、「-」或「_」。', field: 'id' };
   if (snapshot.buildings.some(b => b.id === id)) return { error: `大廈編號「${id}」已經用過，請換一個。`, field: 'id' };
   if (!name) return { error: '請填大廈名稱。', field: 'name' };
-  if (!address) return { error: '請填地址。', field: 'address' };
   const { lng, lat } = input.coordinates;
   if (!Number.isFinite(lng) || !Number.isFinite(lat)) throw new Error('A new building needs a position.');
   const building: Building = {

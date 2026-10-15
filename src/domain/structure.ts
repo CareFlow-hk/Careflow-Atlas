@@ -11,8 +11,17 @@ const flags = { isSynthetic: true, provisional: true } as const;
 const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; // I and O look like 1 and 0 on paper
 export const MAX_FLOORS = 100;
 export const MAX_UNITS_PER_FLOOR = 50;
+/** Most 劏房 rooms one unit may be divided into. One room means "put it back together". */
+export const MAX_ROOMS = 20;
 
 const freeId = (taken: Set<string>, make: (n: number) => string) => { for (let n = 1; ; n++) if (!taken.has(make(n))) return make(n); };
+const byLabel = (a: Unit, b: Unit) => a.label.localeCompare(b.label, 'zh-Hant', { numeric: true });
+const sorted = (list: Unit[]) => [...list].sort(byLabel);
+/**
+ * The rooms a move to `rooms` would drop. Rooms are dropped from the end, except at 1,
+ * which is not "one room left" but "put it back together" — so every room goes.
+ */
+const roomsGoing = (existing: Unit[], rooms: number) => (rooms <= 1 ? existing : existing.slice(rooms));
 const floorsOf = (s: OutreachSnapshot, buildingId: string) => s.floors.filter(f => f.buildingId === buildingId);
 
 /** "12F" → "13F", "3 樓" → "4 樓", "G/F" → falls back to "N 樓". */
@@ -65,13 +74,27 @@ export function addUnit(s: OutreachSnapshot, floorId: string): StructureResult {
   return { snapshot: { ...s, units: [...s.units, { ...flags, id, buildingId: floor.buildingId, floorId, label }] } };
 }
 
-/** "2樓 A室" split in 3 → "2樓 A1室", "2樓 A2室", "2樓 A3室". The unit itself stays, with its records. */
-export function splitUnit(s: OutreachSnapshot, unitId: string, rooms: number): StructureResult {
+/**
+ * Set how many 劏房 rooms a unit is divided into. 1 puts it back together: every room goes
+ * — not all but one — and the unit keeps whatever was recorded before the split. Rooms are
+ * added at the end and dropped from the end, so the rooms that stay keep their numbers.
+ */
+export function setRoomCount(s: OutreachSnapshot, unitId: string, rooms: number, confirmed = false): StructureResult {
   const unit = s.units.find(u => u.id === unitId);
   if (!unit) return { error: '找不到這個單位。' };
   if (unit.parentUnitId) return { error: '劏房間格不能再分拆，請選原本的單位。' };
-  if (!Number.isInteger(rooms) || rooms < 2 || rooms > 20) return { error: '請填 2 至 20 間。' };
-  const existing = s.units.filter(u => u.parentUnitId === unitId);
+  if (!Number.isInteger(rooms) || rooms < 1 || rooms > MAX_ROOMS) return { error: `請填 1 至 ${MAX_ROOMS} 間（填 1 即合併回一個單位）。` };
+  const existing = sorted(s.units.filter(u => u.parentUnitId === unitId));
+  const going = roomsGoing(existing, rooms);
+  if (going.length) {
+    const plan = removalPlan(s, new Set(going.map(u => u.id)), new Set(), going.map(u => u.label).join('、'));
+    if (plan.records && !confirmed) return { error: confirmText(plan.places, plan.records) };
+    return { snapshot: withoutPlaces(s, plan) };
+  }
+  // Nothing to take away: 1 asks for a merge and there is nothing to merge, or the count
+  // is already what it is.
+  if (rooms <= 1) return { error: '這個單位還沒有分拆。' };
+  if (rooms === existing.length) return { error: `已經有 ${existing.length} 間，數目沒有改變。` };
   const stem = unit.label.replace(/室$/, '');
   const ids = new Set(s.units.map(u => u.id)), labels = new Set(existing.map(u => u.label));
   const added: Unit[] = [];
@@ -85,6 +108,15 @@ export function splitUnit(s: OutreachSnapshot, unitId: string, rooms: number): S
   // A split unit cannot also be confirmed free of subdivision.
   const units = s.units.map(u => u.id === unitId && u.noSubdivision ? { ...u, noSubdivision: undefined } : u);
   return { snapshot: { ...s, units: [...units, ...added] } };
+}
+
+/**
+ * What the split form's button says for a count, given how many rooms the unit has now.
+ * Beside `setRoomCount` so 1 meaning "put it back together" is written down once.
+ */
+export function roomCountAction(rooms: number, existing: number): '合併' | '更新' | '建立' {
+  if (rooms === 1 && existing > 0) return '合併';
+  return existing ? '更新' : '建立';
 }
 
 /** Confirm (or withdraw) "no subdivided rooms" on many units at once. Split units are skipped and counted. */
@@ -102,23 +134,95 @@ export function setNoSubdivision(s: OutreachSnapshot, unitIds: string[], confirm
   return { snapshot: changed ? { ...s, units } : s, changed, skipped };
 }
 
-const hasRecords = (s: OutreachSnapshot, test: (ref: { floorId?: string; unitId?: string }) => boolean) =>
-  s.observations.some(test) || s.householdResidences.some(r => test({ unitId: r.unitId }));
+/**
+ * A place that is going, and everything that goes with it.
+ *
+ * An observation names the floor and unit it was made at, and the snapshot is only valid
+ * while those exist — so removing a place removes its records too. Any record citing one of
+ * them goes as well: a correction of it, or the record that closed a follow-up raised there.
+ * Left behind, those would point at a place that is no longer there.
+ */
+interface RemovalPlan { units: Set<string>; floors: Set<string>; observations: Set<string>; residences: number; places: string; records: number }
 
-/** Remove a unit with no records (and its rooms, if none of them has records either). */
-export function removeUnit(s: OutreachSnapshot, unitId: string): StructureResult {
-  const ids = new Set([unitId, ...s.units.filter(u => u.parentUnitId === unitId).map(u => u.id)]);
-  if (hasRecords(s, r => !!r.unitId && ids.has(r.unitId))) return { error: '這個單位（或其劏房）已有記錄，不能刪除。' };
-  return { snapshot: { ...s, units: s.units.filter(u => !ids.has(u.id)) } };
+function removalPlan(s: OutreachSnapshot, units: Set<string>, floors: Set<string>, places: string): RemovalPlan {
+  const observations = new Set(s.observations
+    .filter(o => (o.unitId !== undefined && units.has(o.unitId)) || (o.floorId !== undefined && floors.has(o.floorId)))
+    .map(o => o.id));
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const o of s.observations) {
+      if (observations.has(o.id)) continue;
+      if ((o.correctsObservationId && observations.has(o.correctsObservationId)) || (o.resolvesObservationId && observations.has(o.resolvesObservationId))) { observations.add(o.id); grew = true; }
+    }
+  }
+  const residences = s.householdResidences.filter(r => r.unitId !== undefined && units.has(r.unitId)).length;
+  return { units, floors, observations, residences, places, records: observations.size + residences };
 }
 
-/** Remove a floor with no records anywhere on it. */
-export function removeFloor(s: OutreachSnapshot, floorId: string): StructureResult {
+/** The snapshot without the plan's places and their records. */
+function withoutPlaces(s: OutreachSnapshot, plan: RemovalPlan): OutreachSnapshot {
+  return {
+    ...s,
+    units: s.units.filter(u => !plan.units.has(u.id)),
+    floors: s.floors.filter(f => !plan.floors.has(f.id)),
+    observations: s.observations.filter(o => !plan.observations.has(o.id)),
+    followUpEvents: s.followUpEvents?.filter(e => !plan.observations.has(e.observationId)),
+    householdResidences: s.householdResidences.filter(r => r.unitId === undefined || !plan.units.has(r.unitId)),
+  };
+}
+
+const confirmText = (places: string, records: number) => `「${places}」有 ${records} 筆記錄，刪除會連同這些記錄一起刪除，請先確認。`;
+
+/** The plan a change would need, or nothing when it removes no place at all. */
+function planFor(s: OutreachSnapshot, change: StructureChange): RemovalPlan | undefined {
+  switch (change.kind) {
+    case 'removeFloor': {
+      const floor = s.floors.find(f => f.id === change.floorId);
+      if (!floor) return undefined;
+      return removalPlan(s, new Set(s.units.filter(u => u.floorId === floor.id).map(u => u.id)), new Set([floor.id]), floor.label);
+    }
+    case 'removeUnits': {
+      const going = s.units.filter(u => change.unitIds.includes(u.id) || (u.parentUnitId && change.unitIds.includes(u.parentUnitId)));
+      if (!going.length) return undefined;
+      return removalPlan(s, new Set(going.map(u => u.id)), new Set(), going.map(u => u.label).join('、'));
+    }
+    case 'split': {
+      const existing = sorted(s.units.filter(u => u.parentUnitId === change.unitId));
+      if (!Number.isInteger(change.rooms) || change.rooms < 1 || change.rooms > MAX_ROOMS) return undefined;
+      const going = roomsGoing(existing, change.rooms);
+      if (!going.length) return undefined;
+      return removalPlan(s, new Set(going.map(u => u.id)), new Set(), going.map(u => u.label).join('、'));
+    }
+    default: return undefined;
+  }
+}
+
+/** What a change would destroy, in staff wording, when it would destroy anything. */
+export function structureImpact(s: OutreachSnapshot, change: StructureChange): { label: string; records: number; confirmation: string } | undefined {
+  const plan = planFor(s, change);
+  return plan && plan.records ? { label: plan.places, records: plan.records, confirmation: confirmText(plan.places, plan.records) } : undefined;
+}
+
+/**
+ * Remove a unit and its 劏房 rooms. Anything recorded there goes with them, which the caller
+ * has to have asked about first: without `confirmed` this refuses and says what is at stake.
+ */
+export function removeUnit(s: OutreachSnapshot, unitId: string, confirmed = false): StructureResult {
+  const unit = s.units.find(u => u.id === unitId);
+  if (!unit) return { error: '找不到這個單位。' };
+  const plan = removalPlan(s, new Set([unitId, ...s.units.filter(u => u.parentUnitId === unitId).map(u => u.id)]), new Set(), unit.label);
+  if (plan.records && !confirmed) return { error: confirmText(plan.places, plan.records) };
+  return { snapshot: withoutPlaces(s, plan) };
+}
+
+/** Remove a floor and its units. As with a unit, records need confirming first. */
+export function removeFloor(s: OutreachSnapshot, floorId: string, confirmed = false): StructureResult {
   const floor = s.floors.find(f => f.id === floorId);
   if (!floor) return { error: '找不到這一層。' };
-  const unitIds = new Set(s.units.filter(u => u.floorId === floorId).map(u => u.id));
-  if (hasRecords(s, r => r.floorId === floorId || (!!r.unitId && unitIds.has(r.unitId)))) return { error: `「${floor.label}」已有記錄，不能刪除。` };
-  return { snapshot: withBuilding(s, floor.buildingId, s.floors.filter(f => f.id !== floorId), s.units.filter(u => u.floorId !== floorId)) };
+  const plan = removalPlan(s, new Set(s.units.filter(u => u.floorId === floorId).map(u => u.id)), new Set([floorId]), floor.label);
+  if (plan.records && !confirmed) return { error: confirmText(plan.places, plan.records) };
+  const dropped = withoutPlaces(s, plan);
+  return { snapshot: withBuilding(dropped, floor.buildingId, dropped.floors, dropped.units) };
 }
 
 /** Units of a floor in display order: each unit followed by its rooms. */
@@ -128,31 +232,42 @@ export function floorUnitGroups(s: OutreachSnapshot, floorId: string): { unit: U
   return sort(all.filter(u => !u.parentUnitId)).map(unit => ({ unit, rooms: sort(all.filter(r => r.parentUnitId === unit.id)) }));
 }
 
+/**
+ * `confirmed` says a person has already been told which records would go with the removal.
+ * Without it the change refuses rather than quietly discarding them.
+ */
 export type StructureChange =
   | { kind: 'addFloors'; buildingId: string; count: number; unitsPerFloor: number }
   | { kind: 'addUnit'; floorId: string }
-  | { kind: 'removeFloor'; floorId: string }
-  | { kind: 'removeUnits'; unitIds: string[] }
-  | { kind: 'split'; unitId: string; rooms: number }
+  | { kind: 'removeFloor'; floorId: string; confirmed?: boolean }
+  | { kind: 'removeUnits'; unitIds: string[]; confirmed?: boolean }
+  | { kind: 'split'; unitId: string; rooms: number; confirmed?: boolean }
   | { kind: 'noSubdivision'; unitIds: string[]; confirm: boolean };
 
 /** One entry point for the UI: apply a change and say what happened, in staff wording. */
 export function applyStructureChange(s: OutreachSnapshot, change: StructureChange, actor: StructureActor): { snapshot: OutreachSnapshot; message: string } | { error: string } {
   const done = (r: StructureResult, message: string) => ('error' in r ? r : { snapshot: r.snapshot, message });
+  // What the change destroys, counted before it happens so the message can say it.
+  const impact = structureImpact(s, change);
+  const alsoDeleted = impact ? `，連同 ${impact.records} 筆記錄已一併刪除。` : '';
   switch (change.kind) {
     case 'addFloors': return done(addFloors(s, change.buildingId, change.count, change.unitsPerFloor), `已新增 ${change.count} 層。`);
     case 'addUnit': return done(addUnit(s, change.floorId), '已加一個單位。');
-    case 'removeFloor': return done(removeFloor(s, change.floorId), '已刪除這一層。');
-    case 'split': return done(splitUnit(s, change.unitId, change.rooms), `已分拆為 ${change.rooms} 間劏房。`);
+    case 'removeFloor': return done(removeFloor(s, change.floorId, change.confirmed), `已刪除「${s.floors.find(f => f.id === change.floorId)?.label ?? '這一層'}」${alsoDeleted || '。'}`);
+    case 'split': {
+      const before = s.units.filter(u => u.parentUnitId === change.unitId).length;
+      const message = change.rooms === 1 ? `已合併回一個單位${alsoDeleted || '。'}` : before ? `已改為 ${change.rooms} 間劏房${alsoDeleted || '。'}` : `已分拆為 ${change.rooms} 間劏房。`;
+      return done(setRoomCount(s, change.unitId, change.rooms, change.confirmed), message);
+    }
     case 'removeUnits': {
       let next = s;
       for (const id of change.unitIds) {
         if (!next.units.some(u => u.id === id)) continue; // already gone with its parent
-        const r = removeUnit(next, id);
+        const r = removeUnit(next, id, change.confirmed);
         if ('error' in r) return { error: `${s.units.find(u => u.id === id)?.label ?? id}：${r.error}` };
         next = r.snapshot;
       }
-      return { snapshot: next, message: `已刪除 ${change.unitIds.length} 個單位。` };
+      return { snapshot: next, message: `已刪除 ${change.unitIds.length} 個單位${alsoDeleted || '。'}` };
     }
     case 'noSubdivision': {
       const r = setNoSubdivision(s, change.unitIds, change.confirm, actor);

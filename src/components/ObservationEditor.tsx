@@ -56,6 +56,19 @@ export interface ObservationEditorProps {
   subjectType?: "UNIT" | "BUILDING";
   /** This account's self-defined choices. They are managed under 設定 › 高級設定. */
   optionPrefs?: CustomOptions;
+  /**
+   * Pre-selects 住房判斷 where the subject itself already answers the question — a
+   * 劏房 room exists only because someone split its unit into rooms, so "工作人員已
+   * 確認" restates that split rather than adding to it. Visible and changeable: it is
+   * a starting point on the form, not a value written behind the recorder's back.
+   */
+  defaultAssessment?: HousingAssessment;
+  /**
+   * Pre-selects 覆蓋狀態 for the same reason, and only alongside `defaultAssessment`.
+   * One value per group: 已完成探訪 (`VISITED_NO_FINDING`) stands for the ordinary
+   * outcome, and the recorder picks 未能完成探訪 or 未到訪 if that is what happened.
+   */
+  defaultCoverage?: CoverageStatus;
   onClose: () => void;
   onSubmit: (draft: ObservationDraft) => Promise<void> | void;
 }
@@ -69,8 +82,14 @@ const nowLocal = () => {
  * v1 entry form. Nothing is pre-chosen for coverage: saving without picking one would
  * record a visit outcome nobody stated. Everything optional sits behind 「更多」.
  * Tasks are closed from the task itself (標記完成), not from this form.
+ *
+ * The one exception is a 劏房 room, which opens with `defaultCoverage` and
+ * `defaultAssessment` already answered. That is not a guess about the visit: the room
+ * exists because someone split its unit into rooms, and both fields restate that same
+ * statement. The recorder replaces either with one tap, and ordinary units are
+ * unaffected — they still open with coverage unanswered.
  */
-export function ObservationEditor({ open, targetLabel, subjectId, optionPrefs = {}, onClose, onSubmit }: ObservationEditorProps) {
+export function ObservationEditor({ open, targetLabel, subjectId, optionPrefs = {}, defaultAssessment, defaultCoverage, onClose, onSubmit }: ObservationEditorProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
   const [saving, setSaving] = useState(false);
@@ -91,7 +110,20 @@ export function ObservationEditor({ open, targetLabel, subjectId, optionPrefs = 
     } else if (!open && dialog.open) dialog.close();
   }, [open]);
 
-  useEffect(() => { if (open) { setFields({}); setCategory(""); setError(""); } }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    /*
+     * Seeded, marked touched. Untouched seeds would be treated as automatic
+     * suggestions and wiped by the next coverage change — and `assessment` is exactly
+     * the field `impliedByCoverage` resets to blank, so the housing answer would
+     * vanish the moment someone corrected the coverage.
+     */
+    setFields({
+      ...(defaultCoverage ? { coverage: { value: defaultCoverage, touched: true } } : {}),
+      ...(defaultAssessment ? { assessment: { value: defaultAssessment, touched: true } } : {}),
+    });
+    setCategory(""); setError("");
+  }, [open, defaultCoverage, defaultAssessment]);
 
   const close = () => {
     if (saving) return;

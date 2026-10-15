@@ -29,6 +29,17 @@ describe('adding a building on the map', () => {
     if ('error' in result) throw new Error(result.error);
     expect(result.snapshot.buildings[0]).toMatchObject({ footprint: ring, footprintSource: { kind: 'osm', osmId: '42' } });
   });
+  it('numbers a building whose id nobody named, against the snapshot it is added to', () => {
+    const nameless: Omit<typeof input, 'id'> = { name: input.name, address: input.address, coordinates: input.coordinates };
+    const result = addBuilding(workflowDemo, nameless);
+    if ('error' in result) throw new Error(result.error);
+    // Not SYP-001: the id is taken from this snapshot, not from a number chosen before it.
+    expect(result.buildingId).toBe(nextBuildingId(workflowDemo));
+    expect(result.snapshot.buildings.at(-1)).toMatchObject({ id: result.buildingId, name: '新大廈' });
+    // A blank one counts as unnamed too, and an explicit one is still honoured.
+    expect(addBuilding(workflowDemo, { ...input, id: '  ' })).toMatchObject({ buildingId: result.buildingId });
+    expect(addBuilding(workflowDemo, { ...nameless, id: 'PAPER-07' })).toMatchObject({ buildingId: 'PAPER-07' });
+  });
   it('declares floors from the same wording as the Excel cell', () => {
     const result = addBuilding(blankSnapshot(), { ...input, layout: '1 樓：A室、B室\n2 樓：A室' });
     if ('error' in result) throw new Error(result.error);
@@ -40,9 +51,21 @@ describe('adding a building on the map', () => {
     expect(taken).toMatchObject({ field: 'id' });
     expect(addBuilding(workflowDemo, { ...input, id: 'a b' })).toMatchObject({ field: 'id' });
     expect(addBuilding(workflowDemo, { ...input, name: ' ' })).toMatchObject({ field: 'name' });
-    expect(addBuilding(workflowDemo, { ...input, address: '' })).toMatchObject({ field: 'address' });
     expect(addBuilding(workflowDemo, { ...input, layout: '1 樓 A室' })).toMatchObject({ field: 'layout' });
     expect(addBuilding(workflowDemo, { ...input, layout: '3 樓：A\n2 樓：A' })).toMatchObject({ field: 'layout' });
+  });
+  it('stores a blank address as blank, without inventing one', () => {
+    const result = addBuilding(workflowDemo, { ...input, address: '   ' });
+    if ('error' in result) throw new Error(result.error);
+    expect(result.snapshot.buildings.at(-1)).toMatchObject({ id: 'SYP-001', address: '' });
+    expect(() => validateSnapshot(result.snapshot)).not.toThrow();
+  });
+  it('keeps a building with no address through the Excel export and back', () => {
+    const result = addBuilding(workflowDemo, { ...input, address: '' });
+    if ('error' in result) throw new Error(result.error);
+    const parsed = parseWorkflowWorkbook(exportWorkflowWorkbook(result.snapshot), 'round.xlsx', '2026-10-10T01:00:00Z')!;
+    expect(parsed.issues.filter(i => i.severity === 'error')).toEqual([]);
+    expect(parsed.snapshot!.buildings.find(b => b.id === 'SYP-001')).toMatchObject({ name: '新大廈', address: '' });
   });
   it('travels through the Excel export and back unchanged', () => {
     const result = addBuilding(workflowDemo, { ...input, footprint: ring, footprintSource: { kind: 'osm', at: '2026-10-10T00:00:00Z', osmId: '42', match: 'contains' }, layout: '1 樓：A室' });

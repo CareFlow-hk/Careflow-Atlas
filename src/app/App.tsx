@@ -5,7 +5,7 @@ import { PhotoIntake } from '../photos/PhotoIntake';
 import { Camera } from 'lucide-react';
 import { registerWorkspaceTools } from './webmcp';
 import { createRecordId } from './recordId';
-import { OUTREACH_STATES, buildingState, floorState, getCoverageSummary, isTagged, stateBreakdown, unitState, type OutreachSnapshot } from '../domain/types';
+import { OUTREACH_STATES, buildingState, effectiveObservations, floorState, getCoverageSummary, isTagged, latestObservation, stateBreakdown, unitState, type OutreachSnapshot } from '../domain/types';
 import type { MapBuilding } from '../map/mapModel';
 import { BuildingCard } from '../components/BuildingCard';
 import { BuildingDetail } from '../components/BuildingDetail';
@@ -14,9 +14,8 @@ import { ImportDialog, type ImportReview } from '../components/ImportDialog';
 import { PaperForm } from '../components/PaperForm';
 import { AccountMenu } from '../components/AccountMenu';
 import { features } from './features';
-import { stateColors, stateLabels, stateLegendNotes } from '../domain/presentation';
+import { canonicalCoverageOf, coverageGroupOf, stateColors, stateLabels, stateLegendNotes } from '../domain/presentation';
 import { mergeWorkflow } from '../data/workflowMerge';
-import { nextBuildingId } from '../data/newBuilding';
 import { detectWorkbook, mergeOverride, recognitionBlocker, remapWorkbook, type MappingOverride } from '../imports/detector';
 import '../components/workflow.css';
 import '../styles.css';
@@ -24,6 +23,12 @@ import '../refinement.css';
 import '../layout.css';
 
 const MapScene = lazy(() => import('../map/MapScene'));
+/*
+ * The paper worker this demo writes down. It is deliberately not the signed-in
+ * account: the field worker and the operator are different roles and are never
+ * substituted for one another.
+ */
+const DEMO_WORKER_NAME = '示範工作員';
 interface EditTarget { buildingId: string; floorId?: string; unitId?: string; label: string; eventId: string; visitId: string; }
 
 function download(url: string, name: string) {
@@ -195,7 +200,7 @@ export default function App() {
     workspace.saveObservation({
       id: editTarget.eventId, visitId: editTarget.visitId,
       buildingId: editTarget.buildingId, floorId: editTarget.floorId, unitId: editTarget.unitId,
-      occurredAt: draft.occurredAt, recordedAt: new Date().toISOString(), workerName: '示範工作員',
+      occurredAt: draft.occurredAt, recordedAt: new Date().toISOString(), workerName: DEMO_WORKER_NAME,
       coverage: draft.coverage, assessment: draft.assessment,
       sourceType: draft.sourceType, optionNotes: draft.optionNotes, note: draft.note, evidence: draft.evidence, followUp: draft.followUp,
     });
@@ -203,6 +208,23 @@ export default function App() {
     setToast('已追加本次記錄，之前的觀察仍保留在時間線。');
   };
   const startObservation = (target: Omit<EditTarget, 'eventId' | 'visitId'>) => setEditTarget({ ...target, eventId: createRecordId(), visitId: activeVisitId });
+  /*
+   * A room under a split unit. Being one is the operator's own structural statement,
+   * so the entry form opens with 覆蓋狀態 and 住房判斷 already answered for it.
+   *
+   * 覆蓋狀態 follows what the room already stands at, read off its own last record
+   * rather than remembered in state, so it survives a reload and stays right whichever
+   * path recorded last. A room with nothing on record yet falls back to 已完成探訪, the
+   * ordinary outcome. 住房判斷 has no such history to follow — the room simply being one
+   * is what answers it.
+   *
+   * The stored coverage is mapped back through its group: an imported PARTIAL or
+   * INACCESSIBLE must light up 未能完成探訪, not a choice that is not on the form.
+   */
+  const editUnit = editTarget && snapshot ? snapshot.units.find(unit => unit.id === editTarget.unitId) : undefined;
+  const editUnitRecord = editUnit && snapshot ? latestObservation(effectiveObservations(snapshot).filter(item => item.unitId === editUnit.id)) : undefined;
+  const editIsRoom = !!editUnit?.parentUnitId;
+  const editDefaultCoverage = editIsRoom ? canonicalCoverageOf(coverageGroupOf(editUnitRecord?.coverage ?? 'VISITED_NO_FINDING')) : undefined;
   const exportBlank = async () => {
     try {
       const [{ exportWorkflowWorkbook }, { blankSnapshot }] = await Promise.all([import('../data/workflowWorkbook'), import('../data/blankSnapshot')]);
@@ -258,7 +280,7 @@ export default function App() {
       </aside>
       <section className="spatial-workspace" aria-label="街區探索">
         <div className="map-topbar"><div><MapPin size={15} /><span>西營盤</span>{selectedBuildingId && <><ChevronRight size={13} /><strong>{snapshot?.buildings.find(b => b.id === selectedBuildingId)?.name}</strong>{selectedFloorId && <><ChevronRight size={13} /><span>{snapshot?.floors.find(f => f.id === selectedFloorId)?.label}</span></>}{selectedUnitId && <><ChevronRight size={13} /><span>{snapshot?.units.find(u => u.id === selectedUnitId)?.label.replace(/^.*? /, '')}</span></>}</>}</div></div>
-        <div className="spatial-content"><Suspense fallback={<div className="map-loading">正在準備地圖…</div>}><MapScene buildings={mapBuildings} insets={mapInsets} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} expanded={expanded} onSelectBuilding={workspace.selectBuilding} onSelectFloor={workspace.selectFloor} onToggleExpanded={workspace.toggleExpanded} onOverview={() => workspace.selectBuilding()} onSaveFootprint={(id, ring) => { try { workspace.setFootprint(id, ring); setToast('已儲存大廈形狀。記錄沒有改變。'); } catch { setToast('形狀未能儲存，請重試。'); } }} newBuildingId={nextBuildingId(snapshot)} onAddBuilding={input => { try { const refused = workspace.addBuilding(input); if (!refused) { setToast(`已新增「${input.name.trim()}」。`); setFinderOpen(false); } return refused; } catch { return { error: '未能儲存，請重試。', field: '' }; } }} /></Suspense></div>
+        <div className="spatial-content"><Suspense fallback={<div className="map-loading">正在準備地圖…</div>}><MapScene buildings={mapBuildings} insets={mapInsets} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} expanded={expanded} onSelectBuilding={workspace.selectBuilding} onSelectFloor={workspace.selectFloor} onToggleExpanded={workspace.toggleExpanded} onOverview={() => workspace.selectBuilding()} onSaveFootprint={(id, ring) => { try { workspace.setFootprint(id, ring); setToast('已儲存大廈形狀。記錄沒有改變。'); } catch { setToast('形狀未能儲存，請重試。'); } }} onAddBuilding={input => { try { const refused = workspace.addBuilding(input); if (!refused) { setToast(`已新增「${input.name.trim()}」。`); setFinderOpen(false); } return refused; } catch { return { error: '未能儲存，請重試。', field: '' }; } }} /></Suspense></div>
         {!selectedBuildingId && snapshot && !explored && <div className="map-prompt"><span><Building2 size={19} /></span><div><strong>從一幢大廈開始</strong><p>選擇地圖標記，讓每一層的記錄展開。</p></div><ChevronRight size={18} /></div>}
       </section>
       {snapshot && selectedBuildingId && <BuildingDetail snapshot={snapshot} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} selectedUnitId={selectedUnitId} onBack={() => workspace.selectBuilding()} onSelectFloor={workspace.selectFloor} onSelectUnit={workspace.selectUnit} onToggleTag={workspace.setTag} onFollowUpAction={workspace.actOnFollowUp} onStartObservation={startObservation} onStructureChange={features.structureEditing ? change => { const result = workspace.changeStructure(change); if ('error' in result) return result.error; setToast(result.message); return undefined; } : undefined} />}
@@ -269,6 +291,6 @@ export default function App() {
     <ImportDialog notice={toast.startsWith('Excel 已準備') ? toast : undefined} open={importOpen} review={importReview} loading={importLoading} error={importError} onClose={() => setImportOpen(false)} onFile={loadFile} onLoadDistrict={loadDistrict} onExport={() => void (snapshot ? exportExcel() : exportBlank())} exportLabel={snapshot ? undefined : '下載空白範本'} onPrint={snapshot?.buildings.length ? () => { setImportOpen(false); setPaperOpen(true); } : undefined} onRetry={openImport} onRemap={remapImport} onConfirmReplace={confirmImport} />
     {paperOpen && snapshot && <PaperForm snapshot={snapshot} buildingId={selectedBuildingId} onClose={() => setPaperOpen(false)} />}
     {snapshot && workspace.operator && <PhotoIntake key={workspace.operator.accountId} onApplyProposal={features.structureEditing ? workspace.applyLocationProposal : undefined} open={photoOpen} snapshot={snapshot} operator={workspace.operator} onClose={() => setPhotoOpen(false)} onSave={workspace.savePhotoPages} onView={(buildingId, unitId) => { workspace.selectBuilding(buildingId); if (unitId) workspace.selectUnit(unitId); setFinderOpen(false); }} />}
-    {editTarget && <ObservationEditor open targetLabel={editTarget.label} subjectId={editTarget.unitId ?? editTarget.buildingId} subjectType={editTarget.unitId ? 'UNIT' : 'BUILDING'} optionPrefs={workspace.optionPrefs} onClose={() => setEditTarget(undefined)} onSubmit={saveObservation} />}
+    {editTarget && <ObservationEditor open targetLabel={editTarget.label} subjectId={editTarget.unitId ?? editTarget.buildingId} subjectType={editTarget.unitId ? 'UNIT' : 'BUILDING'} optionPrefs={workspace.optionPrefs} defaultCoverage={editDefaultCoverage} defaultAssessment={editIsRoom ? 'STAFF_VERIFIED' : undefined} onClose={() => setEditTarget(undefined)} onSubmit={saveObservation} />}
   </div>;
 }

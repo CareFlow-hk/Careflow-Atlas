@@ -60,7 +60,8 @@ interface WorkspaceState {
   actOnFollowUp: (observationId: string, action: FollowUpEventAction, reason?: string) => void;
   selectBuilding: (id?: string) => void;
   selectFloor: (id: string) => void;
-  selectUnit: (id: string) => void;
+  /** Undefined clears the unit, leaving the building and floor where they are. */
+  selectUnit: (id?: string) => void;
   toggleExpanded: () => void;
 }
 
@@ -154,6 +155,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   selectBuilding: id => set({ selectedBuildingId: id, selectedFloorId: undefined, selectedUnitId: undefined, expanded: !!id && !!get().snapshot?.floors.some(floor => floor.buildingId === id) }),
   selectFloor: id => set({ selectedFloorId: id, selectedUnitId: undefined, expanded: true }),
   selectUnit: id => {
+    if (!id) { set({ selectedUnitId: undefined }); return; }
     const unit = get().snapshot?.units.find(u => u.id === id);
     if (unit) set({ selectedBuildingId: unit.buildingId, selectedFloorId: unit.floorId, selectedUnitId: id, expanded: true });
   },
