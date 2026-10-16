@@ -50,7 +50,24 @@ const letterOf = (unit: Unit, floor: Floor) => {
   const label = unit.label.replace(/\s+/g, ''), above = floor.label.replace(/\s+/g, '');
   return /^([A-Z])室?$/.exec(above && label.startsWith(above) ? label.slice(above.length) : label)?.[1];
 };
-const unitLabel = (floor: Floor, letter: string) => `${floor.label} ${letter}室`;
+/** What a unit's label puts before 「室」: 「1樓 A」 → 「1樓 」, 「A」 → 「」. */
+const stemOf = (units: Unit[]) => sorted(units).map(u => /^(.*?)([A-Z])室$/.exec(u.label)?.[1]).find((stem): stem is string => stem !== undefined);
+/**
+ * How a new unit on this floor is spelled: the way the units already written there are, so it
+ * reads like the ones beside it rather than like the floor label.
+ *
+ * The district demo writes the floor 「1 樓」 but the units on it 「1樓 A室」, so a name built from
+ * the floor label alone puts 「1 樓 A室」 between them — one floor, two spellings, in the ledger
+ * and the export as much as on screen (review, 2026-10-16). A floor with nothing to copy borrows
+ * the rest of the same building's way of writing, with this floor's own number — never another
+ * building's, whose 「1F A室」 would name a floor this one has not got — failing that, its label.
+ */
+const unitStem = (units: Unit[], floor: Floor) => {
+  const stem = stemOf(units.filter(u => u.floorId === floor.id && !u.parentUnitId))
+    ?? stemOf(units.filter(u => u.buildingId === floor.buildingId));
+  if (stem === undefined) return `${floor.label} `;
+  return /\d/.test(stem) ? stem.replace(/-?\d+/, String(floor.level)) : stem;
+};
 
 function withBuilding(s: OutreachSnapshot, buildingId: string, floors: Floor[], units: Unit[]): OutreachSnapshot {
   const count = floors.filter(f => f.buildingId === buildingId).length;
@@ -72,9 +89,10 @@ export function addFloors(s: OutreachSnapshot, buildingId: string, count: number
     const id = freeId(floorIds, n => `${buildingId}-f${n}`); floorIds.add(id);
     const floor: Floor = { ...flags, id, buildingId, level, label: floorLabelFor(level, top?.label) };
     floors.push(floor);
+    const stem = unitStem(s.units, floor);
     for (let k = 0; k < unitsPerFloor; k++) {
       const uid = freeId(unitIds, n => `${id}-u${n}`); unitIds.add(uid);
-      units.push({ ...flags, id: uid, buildingId, floorId: id, label: unitLabel(floor, LETTERS[k]) });
+      units.push({ ...flags, id: uid, buildingId, floorId: id, label: `${stem}${LETTERS[k]}室` });
     }
   }
   return { snapshot: withBuilding(s, buildingId, floors, units) };
@@ -88,7 +106,8 @@ export function addUnit(s: OutreachSnapshot, floorId: string): StructureResult {
   if (onFloor.length >= MAX_UNITS_PER_FLOOR) return { error: `一層最多 ${MAX_UNITS_PER_FLOOR} 個單位。` };
   const used = new Set(onFloor.map(u => letterOf(u, floor)));
   const letter = [...LETTERS].find(l => !used.has(l));
-  const label = letter ? unitLabel(floor, letter) : `${floor.label} ${onFloor.length + 1}號`;
+  const stem = unitStem(s.units, floor);
+  const label = letter ? `${stem}${letter}室` : `${stem}${onFloor.length + 1}號`;
   const id = freeId(new Set(s.units.map(u => u.id)), n => `${floorId}-u${n}`);
   return { snapshot: { ...s, units: [...s.units, { ...flags, id, buildingId: floor.buildingId, floorId, label }] } };
 }
@@ -494,7 +513,9 @@ export function proposeLocation(s: OutreachSnapshot, buildingId: string, floorTe
   const floors = floorsOf(s, buildingId);
   const floor = floors.find(f => f.level === level);
   const floorLabel = floor?.label ?? floorLabelFor(level, floors[0]?.label);
-  const parentLabel = `${floorLabel} ${unit.letter}室`;
+  // The name the unit would be given is the name the step below promises, so both take the
+  // spelling the floor's units already use rather than the floor label's.
+  const parentLabel = `${unitStem(s.units, floor ?? { ...flags, id: `${buildingId}-f${level}`, buildingId, level, label: floorLabel })}${unit.letter}室`;
   const parent = floor && s.units.find(u => u.floorId === floor.id && !u.parentUnitId && (u.label === parentLabel || letterOf(u, floor) === unit.letter));
   const stem = (parent?.label ?? parentLabel).replace(/室$/, '');
   const roomLabel = unit.room !== undefined ? `${stem}${unit.room}室` : undefined;
@@ -518,9 +539,10 @@ export function proposeLocation(s: OutreachSnapshot, buildingId: string, floorTe
         next = withBuilding(next, buildingId, [...next.floors, target], next.units);
       }
       const t = target;
-      let p = next.units.find(u => u.floorId === t.id && !u.parentUnitId && (u.label === parentLabel || letterOf(u, t) === unit.letter));
+      const parentName = `${unitStem(next.units, t)}${unit.letter}室`;
+      let p = next.units.find(u => u.floorId === t.id && !u.parentUnitId && (u.label === parentName || letterOf(u, t) === unit.letter));
       if (!p) {
-        p = { ...flags, id: freeId(ids(next.units), n => `${t.id}-u${n}`), buildingId, floorId: t.id, label: `${t.label} ${unit.letter}室` };
+        p = { ...flags, id: freeId(ids(next.units), n => `${t.id}-u${n}`), buildingId, floorId: t.id, label: parentName };
         next = { ...next, units: [...next.units, p] };
       }
       if (unit.room === undefined) return { snapshot: next, unitId: p.id };

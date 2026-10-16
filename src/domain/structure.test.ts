@@ -257,6 +257,52 @@ describe('the demo writes a floor and its units with different spacing', () => {
 });
 
 /*
+ * A unit the editor makes itself is spelled the way the units beside it are. Naming it from the
+ * floor label instead put 「1 樓 A室」 on a floor of 「1樓 B室」 — one floor written two ways, in the
+ * ledger and the Excel export as much as on the elevation — and left ＋ unable to put back the
+ * unit it had just taken away (review, 2026-10-16).
+ */
+describe('a new unit is spelled like the units beside it', () => {
+  const labelsOn = (s: OutreachSnapshot, floorId: string) => s.units.filter(u => u.floorId === floorId).map(u => u.label);
+  const demoFloor = districtDemo.floors.find(f => f.id === 'district-01-f1')!;
+
+  it('＋ puts back the very unit it took away, spacing and all', () => {
+    const a = districtDemo.units.find(u => u.id === 'district-01-f1-A')!;
+    // It has records, so the delete is the confirmed one a staff member has already been asked about.
+    const afterDelete = apply(districtDemo, { kind: 'removeUnits', unitIds: [a.id], confirmed: true });
+    expect(labelsOn(afterDelete, demoFloor.id)).toEqual(['1樓 B室', '1樓 C室']);
+    expect(labelsOn(apply(afterDelete, { kind: 'addUnit', floorId: demoFloor.id }), demoFloor.id))
+      .toEqual(['1樓 B室', '1樓 C室', '1樓 A室']);
+  });
+
+  it('gives a new floor the same way of writing as the rest of its own building', () => {
+    const added = apply(districtDemo, { kind: 'addFloors', buildingId: 'district-01', count: 1, unitsPerFloor: 2 });
+    const top = added.floors.filter(f => f.buildingId === 'district-01').at(-1)!;
+    expect(top.label).toBe('11 樓');
+    expect(labelsOn(added, top.id)).toEqual(['11樓 A室', '11樓 B室']);
+    // Another building in the same snapshot writes its units differently; it must not lend its
+    // spelling — 「1F A室」 would name a floor this building has not got.
+    const small = apply(districtDemo, { kind: 'addFloors', buildingId: 'bldg-yu-an', count: 1, unitsPerFloor: 1 });
+    expect(labelsOn(small, small.floors.filter(f => f.buildingId === 'bldg-yu-an').at(-1)!.id)).toEqual(['9F A室']);
+  });
+
+  it('promises the paper row the same name it will make', () => {
+    const proposal = proposeLocation(districtDemo, 'district-01', '1樓', 'D室')!;
+    expect(proposal.steps).toEqual(['在1 樓新增「1樓 D室」']);
+    const made = proposal.apply(districtDemo);
+    if ('error' in made) throw new Error(made.error);
+    expect(made.snapshot.units.find(u => u.id === made.unitId)?.label).toBe('1樓 D室');
+  });
+
+  it('still writes a new building\'s units the way its own floor label reads', () => {
+    const s = apply(start(), { kind: 'addFloors', buildingId: 'SYP-001', count: 1, unitsPerFloor: 2 });
+    expect(labelsOn(s, s.floors[0].id)).toEqual(['1 樓 A室', '1 樓 B室']);
+    expect(labelsOn(apply(s, { kind: 'addUnit', floorId: s.floors[0].id }), s.floors[0].id))
+      .toEqual(['1 樓 A室', '1 樓 B室', '1 樓 C室']);
+  });
+});
+
+/*
  * What a delete says and what it takes. The elevation draws a split unit as its rooms only, so
  * a confirmation that names the unit behind them names something that is not on screen, and a
  * button that takes it takes the whole group at once (review, 2026-10-16).
