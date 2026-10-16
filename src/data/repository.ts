@@ -1,5 +1,6 @@
 import type { OutreachSnapshot, SaveObservationInput } from '../domain/types';
-import { observationSchema, validateSnapshot } from '../domain/schema';
+import { appendObservations } from '../domain/observations';
+import { validateSnapshot } from '../domain/schema';
 import { alignDemoSnapshot } from './demoGeometry';
 
 export class PersistenceError extends Error {
@@ -37,22 +38,19 @@ export class OutreachRepository {
     if (!this.adapter.remove) throw new PersistenceError('此儲存方式不支援清空。');
     this.adapter.remove(this.key);
   }
-  saveObservation(input: SaveObservationInput): OutreachSnapshot {
+  saveObservation(input: SaveObservationInput): OutreachSnapshot { return this.saveObservations([input]); }
+  /**
+   * Append a batch of observations as one change. The batch is prepared in full before
+   * anything is written (see domain/observations.ts), so a batch the snapshot would refuse
+   * leaves the stored data exactly as it was rather than half-applied.
+   */
+  saveObservations(inputs: readonly SaveObservationInput[]): OutreachSnapshot {
     const snapshot = this.getSnapshot();
     if (!snapshot) throw new PersistenceError('請先匯入合成資料再記錄到訪。');
-    const result = observationSchema.safeParse({ ...input, isSynthetic: true, provisional: true });
-    if (!result.success) throw new PersistenceError('記錄格式不完整，請檢查結果、時間及跟進內容。', result.error);
-    const observation = result.data;
-    const existing = snapshot.observations.find(item => item.id === observation.id);
-    if (existing) {
-      if (JSON.stringify(existing) === JSON.stringify(observation)) return snapshot;
-      throw new PersistenceError('這個記錄編號已被其他內容使用，請重新開啟表格。');
-    }
-    const visits = snapshot.visits.some(v => v.id === input.visitId) ? snapshot.visits : [...snapshot.visits, {
-      id: input.visitId, occurredAt: input.occurredAt, recordedAt: input.recordedAt, workerName: input.workerName,
-      isSynthetic: true as const, provisional: true as const,
-    }];
-    return this.persist({ ...snapshot, visits, observations: [...snapshot.observations, observation] });
+    const result = appendObservations(snapshot, inputs);
+    if ('error' in result) throw new PersistenceError(result.error, result.cause);
+    // Nothing added: an entry already stored, sent again. Do not rewrite the same data.
+    return result.snapshot === snapshot ? snapshot : this.persist(result.snapshot);
   }
   private persist(value: OutreachSnapshot): OutreachSnapshot {
     let snapshot: OutreachSnapshot;

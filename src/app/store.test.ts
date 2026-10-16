@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { demoSnapshot } from '../data/demoFixture';
 import { useWorkspace } from './store';
 
@@ -75,6 +75,74 @@ describe('account demo cache isolation', () => {
       setWorkspaceAccount('account-a'); useWorkspace.getState().initialize();
       expect(useWorkspace.getState().snapshot?.buildings.length).toBe(demoSnapshot.buildings.length);
     } finally { setWorkspaceAccount(); vi.unstubAllGlobals(); }
+  });
+});
+
+/*
+ * One result at every unit of a selection. What the batch must not do is claim more than it
+ * did: units that cannot be confirmed free of 劏房 are counted and said out loud rather than
+ * dropped, and nothing is written at all if the records cannot be stored.
+ */
+describe('recording the same result at several units', () => {
+  const units = ['bldg-yu-an-f6-A', 'bldg-yu-an-f6-B'];
+  const inputs = units.map((unitId, index) => ({
+    id: `batch-${index}`, visitId: 'visit-batch', buildingId: 'bldg-yu-an', floorId: 'bldg-yu-an-f6', unitId,
+    occurredAt: '2026-03-01T02:00:00.000Z', recordedAt: '2026-03-01T02:00:00.000Z', workerName: '合成工作員',
+    coverage: 'VISITED_NO_FINDING' as const, assessment: 'STAFF_VERIFIED' as const, evidence: [], note: '合成內容',
+  }));
+  // A batch goes through the same repository the single-record path uses, so the fixture has
+  // to be imported rather than dropped into state: the repository is what holds the file.
+  const stored = (snapshot = demoSnapshot) => {
+    const values = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value) });
+    useWorkspace.getState().importSnapshot(structuredClone(snapshot));
+  };
+  const confirmedFree = (unitId: string) => Boolean(useWorkspace.getState().snapshot!.units.find(unit => unit.id === unitId)?.noSubdivision);
+
+  beforeEach(() => stored());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('writes one record per unit', () => {
+    const result = useWorkspace.getState().recordBatch(inputs, false);
+    expect(result).toEqual({ saved: 2, confirmed: 0, skipped: 0 });
+    const written = useWorkspace.getState().snapshot!.observations.filter(item => item.id.startsWith('batch-'));
+    expect(written.map(item => item.unitId)).toEqual(units);
+  });
+
+  it('does not confirm anything unless it was asked to', () => {
+    useWorkspace.getState().recordBatch(inputs, false);
+    for (const unitId of units) expect(confirmedFree(unitId)).toBe(false);
+  });
+
+  it('confirms every unit in one step when it was asked to', () => {
+    const result = useWorkspace.getState().recordBatch(inputs, true);
+    expect(result).toMatchObject({ saved: 2, confirmed: 2 });
+    for (const unitId of units) expect(confirmedFree(unitId)).toBe(true);
+  });
+
+  /* A unit already split into rooms cannot be declared free of 劏房; it is reported, not dropped. */
+  it('counts the units it could not confirm and still records the rest', () => {
+    const withRooms = structuredClone(demoSnapshot);
+    const parent = withRooms.units.find(unit => unit.id === units[0])!;
+    withRooms.units.push({ ...parent, id: 'room-1', label: 'A1室', parentUnitId: parent.id });
+    stored(withRooms);
+    const result = useWorkspace.getState().recordBatch(inputs, true);
+    expect(result).toMatchObject({ saved: 2, confirmed: 1, skipped: 1 });
+    // The records are written for both units: only the 無劏房 confirmation is refused.
+    expect(useWorkspace.getState().snapshot!.observations.filter(item => item.id.startsWith('batch-'))).toHaveLength(2);
+    expect(confirmedFree(units[0])).toBe(false);
+    expect(confirmedFree(units[1])).toBe(true);
+  });
+
+  it('writes nothing when the records cannot be stored', () => {
+    const before = useWorkspace.getState().snapshot;
+    expect(() => useWorkspace.getState().recordBatch([{ ...inputs[0], coverage: 'NOT_A_COVERAGE' as never }], false)).toThrow();
+    expect(useWorkspace.getState().snapshot).toBe(before);
+  });
+
+  it('says so when there is no data loaded', () => {
+    useWorkspace.setState({ snapshot: undefined });
+    expect(() => useWorkspace.getState().recordBatch(inputs, false)).toThrow('請先載入資料');
   });
 });
 

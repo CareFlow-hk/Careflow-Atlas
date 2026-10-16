@@ -4,7 +4,7 @@ import { addBuilding } from '../data/newBuilding';
 import { blankSnapshot } from '../data/blankSnapshot';
 import { exportWorkflowWorkbook, parseWorkflowWorkbook } from '../data/workflowWorkbook';
 import { validateSnapshot } from './schema';
-import { applyStructureChange, floorUnitGroups, roomCountAction, structureImpact, type StructureChange } from './structure';
+import { applyStructureChange, deleteGate, floorUnitGroups, roomCountAction, structureImpact, type StructureChange } from './structure';
 import type { OutreachSnapshot } from './types';
 
 const actor = { at: '2026-10-10T08:00:00.000Z', by: '測試同事' };
@@ -149,5 +149,30 @@ describe('experimental structure editing', () => {
     const parsed = parseWorkflowWorkbook(exportWorkflowWorkbook(s), 'round.xlsx', '2026-10-10T09:00:00Z')!;
     expect(parsed.issues.filter(i => i.severity === 'error')).toEqual([]);
     expect(parsed.snapshot!.units).toEqual(s.units);
+  });
+});
+
+/*
+ * The backup gate in front of a delete. Appending is the rule for records and deleting them
+ * is the exception, so the confirmation must not open on anything short of a download that
+ * actually happened — an intention, a failure, or a browser that refused must all leave it
+ * shut (review, 2026-10-15).
+ */
+describe('the delete gate waits on a backup that really happened', () => {
+  it('stays shut until a backup has been taken, and says what it is waiting for', () => {
+    const waiting = deleteGate('IDLE');
+    expect(waiting.allowed).toBe(false);
+    expect(waiting.note).toContain('先下載當前 Excel 備份');
+    expect(deleteGate('WORKING').allowed).toBe(false);
+  });
+
+  it('opens only for a download the browser took', () => {
+    expect(deleteGate('DONE').allowed).toBe(true);
+  });
+
+  it('stays shut when the download failed, rather than deleting without a way back', () => {
+    const failed = deleteGate('FAILED');
+    expect(failed.allowed).toBe(false);
+    expect(failed.note).toContain('未刪除任何記錄');
   });
 });

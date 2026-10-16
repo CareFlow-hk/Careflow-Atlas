@@ -287,6 +287,17 @@ describe('clue markers', () => {
     expect(clueOf(scene, 'b1', 'u1')).toBe('SUSPECTED');
   });
 
+  it('carries a confirmation forward the same way, so a later blank answer never rubs it out', () => {
+    const scene = snapshot([
+      unitRecord('o1', 'u1', 'VISITED_NO_FINDING', { assessment: 'STAFF_VERIFIED' }),
+      observation('o2', { unitId: 'u1', floorId: 'f1', occurredAt: at(5), recordedAt: at(5), coverage: 'VISITED_NO_FINDING', assessment: 'NOT_UPDATED' }),
+      // A visit that recorded no housing answer at all says the same nothing.
+      observation('o3', { unitId: 'u1', floorId: 'f1', occurredAt: at(6), recordedAt: at(6), coverage: 'VISITED_NO_FINDING' }),
+    ]);
+    expect(currentAssessment(scene, 'u1')).toBe('STAFF_VERIFIED');
+    expect(clueOf(scene, 'b1', 'u1')).toBe('VERIFIED');
+  });
+
   it('lets a stated conclusion replace an earlier suspicion', () => {
     const scene = snapshot([
       unitRecord('o1', 'u1', 'VISITED_NO_FINDING', { assessment: 'SUSPECTED' }),

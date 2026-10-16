@@ -2,13 +2,13 @@ import { create } from 'zustand';
 import { recordFollowUpEvent, tagNode, type FollowUpEventAction, type NodeTag, type Operator, type OutreachSnapshot, type SaveObservationInput } from '../domain/types';
 import { createRecordId } from './recordId';
 import type { CustomOptions } from '../domain/optionPrefs';
-import { LocalStoragePersistenceAdapter, OutreachRepository } from '../data/repository';
+import { LocalStoragePersistenceAdapter, OutreachRepository, PersistenceError } from '../data/repository';
 import { outlineCentre } from '../map/footprintGeometry';
 import { OptionPrefsRepository } from '../data/optionPrefsRepository';
 import { mergeWorkflow } from '../data/workflowMerge';
 import { addBuilding, type NewBuildingInput } from '../data/newBuilding';
 import { blankSnapshot } from '../data/blankSnapshot';
-import { applyStructureChange, type LocationProposal, type StructureChange } from '../domain/structure';
+import { applyStructureChange, setNoSubdivision, type LocationProposal, type StructureChange } from '../domain/structure';
 import { appendPhotoPages, type PhotoPage } from '../photos/model';
 
 const adapter = new LocalStoragePersistenceAdapter();
@@ -51,6 +51,8 @@ interface WorkspaceState {
   /** Semi-agent: apply a structure proposal accepted in paper intake. Returns the new unit, or the refusal. */
   applyLocationProposal: (proposal: LocationProposal) => { unitId: string; snapshot: OutreachSnapshot } | { error: string };
   saveObservation: (input: SaveObservationInput) => void;
+  /** The same result recorded at every unit of a selection, optionally confirming them free of 劏房 in the same write. */
+  recordBatch: (inputs: readonly SaveObservationInput[], confirmNoSubdivision: boolean) => { saved: number; confirmed: number; skipped: number };
   savePhotoPages: (pages: PhotoPage[]) => { added: number; duplicates: number };
   /** Set or clear the manual mark on a building or a floor. A display change only. */
   setTag: (subject: { buildingId: string; floorId?: string }, tag?: NodeTag) => void;
@@ -128,6 +130,19 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   saveObservation: input => {
     const saved = repository.saveObservation(input);
     set({ snapshot: saved, storageError: undefined });
+  },
+  recordBatch: (inputs, confirmNoSubdivision) => {
+    const current = get().snapshot;
+    if (!current) throw new PersistenceError('請先載入資料。');
+    // The observations land first and in one write; only then is 無劏房 confirmed on the
+    // same units, with the same actor the rest of the structure editor records.
+    const written = repository.saveObservations(inputs);
+    const unitIds = inputs.map(input => input.unitId).filter((id): id is string => !!id);
+    const confirmed = confirmNoSubdivision
+      ? setNoSubdivision(written, unitIds, true, { at: new Date().toISOString(), by: get().operator?.name })
+      : { snapshot: written, changed: 0, skipped: 0 };
+    set({ snapshot: confirmed.changed ? repository.replaceSnapshot(confirmed.snapshot) : written, storageError: undefined });
+    return { saved: inputs.length, confirmed: confirmed.changed, skipped: confirmed.skipped };
   },
   setTag: (subject, tag) => {
     const current = get().snapshot;

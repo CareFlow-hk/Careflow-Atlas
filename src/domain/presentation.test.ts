@@ -61,9 +61,11 @@ describe('one source for every label', () => {
    */
   const labelOnly = [
     '需留意', '尚待了解', '曾嘗試', '部分完成', '已訪，無記錄發現', '已訪，有記錄',
-    '未嘗試接觸', '住戶婉拒', '接觸結果未明', '今次未更新住房判斷', '住房情況未能確定',
-    '疑似劏房，尚待核實', '今次未見相關跡象', '工作人員已確認', '工作人員觀察', '其他來源',
-    '疑似劏房線索', '已確認劏房', '有記錄發現',
+    '未嘗試接觸', '住戶婉拒', '接觸結果未明', '住房情況未能確定', '無更新', '未見相關跡象',
+    '疑似劏房', '工作人員觀察', '其他來源', '有記錄發現',
+    // The entry screen wrote these until 2026-10-15. They now live in retiredLabels inside
+    // presentation.ts, and listing them here still stops another file retyping one.
+    '今次未更新住房判斷', '今次未見相關跡象', '疑似劏房，尚待核實', '工作人員已確認',
     ...Object.values(stateLegendNotes),
   ];
   it('keeps every status sentence inside presentation.ts', () => {
@@ -142,6 +144,19 @@ describe('one source for every option', () => {
     expect(acceptedAssessment['今次未更新']).toBe('NOT_UPDATED');
     expect(acceptedAssessment['由工作人員確認']).toBe('STAFF_VERIFIED');
     expect(acceptedSource['來源未明']).toBe('UNKNOWN');
+  });
+
+  /*
+   * Putting the housing answer into one set of words (2026-10-15) changed what the entry
+   * screen writes. The cell and the ledger are display only, but a 紙本回錄 sheet or a
+   * workbook saved before that date carries the old spellings, and reading one back must
+   * still land on the same stored answer rather than on nothing.
+   */
+  it('keeps the housing wordings an earlier screen wrote readable', () => {
+    expect(acceptedAssessment['今次未更新住房判斷']).toBe('NOT_UPDATED');
+    expect(acceptedAssessment['今次未見相關跡象']).toBe('NO_INDICATION');
+    expect(acceptedAssessment['疑似劏房，尚待核實']).toBe('SUSPECTED');
+    expect(acceptedAssessment['工作人員已確認']).toBe('STAFF_VERIFIED');
   });
 
   it('recognises the same wordings the detector is offered', () => {

@@ -203,6 +203,31 @@ export function structureImpact(s: OutreachSnapshot, change: StructureChange): {
   return plan && plan.records ? { label: plan.places, records: plan.records, confirmation: confirmText(plan.places, plan.records) } : undefined;
 }
 
+/* ------------------------------------------------------------------------- *
+ * The copy a delete waits on.
+ *
+ * Records are only ever appended; a structure change that carries records away is the one
+ * exception, and the workbook staff take first is what makes that exception recoverable.
+ * So the delete does not go ahead on the strength of an intention to back up — it waits for
+ * a download that actually happened, and a download the browser refused blocks it outright.
+ * Nothing but a successful attempt opens the gate (review, 2026-10-15).
+ * ------------------------------------------------------------------------- */
+
+/** Where the copy stands: not asked for yet, being prepared, taken, or refused by the browser. */
+export type BackupAttempt = 'IDLE' | 'WORKING' | 'DONE' | 'FAILED';
+
+/** What the confirmation offers, and what it says while it waits. */
+export interface BackupGate { allowed: boolean; note: string }
+
+export function deleteGate(attempt: BackupAttempt): BackupGate {
+  switch (attempt) {
+    case 'DONE': return { allowed: true, note: '備份已下載，可以刪除。' };
+    case 'WORKING': return { allowed: false, note: '正在準備備份…' };
+    case 'FAILED': return { allowed: false, note: '備份下載失敗，未刪除任何記錄。請重試，或取消。' };
+    default: return { allowed: false, note: '這是「只追加」的例外：先下載當前 Excel 備份，才可以連記錄一併刪除。' };
+  }
+}
+
 /**
  * Remove a unit and its 劏房 rooms. Anything recorded there goes with them, which the caller
  * has to have asked about first: without `confirmed` this refuses and says what is at stake.

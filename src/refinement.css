@@ -238,7 +238,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .has-selection .cf-building-panel { overflow: visible; height: auto; }
   .cf-building-content { overflow: visible; padding-inline: 20px; }
   .cf-building-header { padding-inline: 20px; }
-  .cf-record-action { position: sticky; bottom: 0; z-index: 5; padding: 10px 20px max(12px, env(safe-area-inset-bottom)); }
+  .cf-record-action, .cf-pick { position: sticky; bottom: 0; z-index: 5; padding: 10px 20px max(12px, env(safe-area-inset-bottom)); }
   .cf-building-panel { animation-name: reveal-up; }
   .workspace.list-mode.has-selection .cf-building-panel { padding-top: 0; }
   .cf-editor, .cf-import { padding: 20px; }

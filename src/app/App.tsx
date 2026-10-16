@@ -5,7 +5,7 @@ import { PhotoIntake } from '../photos/PhotoIntake';
 import { Camera } from 'lucide-react';
 import { registerWorkspaceTools } from './webmcp';
 import { createRecordId } from './recordId';
-import { OUTREACH_STATES, buildingState, effectiveObservations, floorState, getCoverageSummary, isTagged, latestObservation, stateBreakdown, unitState, type OutreachSnapshot } from '../domain/types';
+import { OUTREACH_STATES, buildingState, floorState, getCoverageSummary, isTagged, stateBreakdown, unitState, type OutreachSnapshot } from '../domain/types';
 import type { MapBuilding } from '../map/mapModel';
 import { BuildingCard } from '../components/BuildingCard';
 import { BuildingDetail } from '../components/BuildingDetail';
@@ -14,7 +14,8 @@ import { ImportDialog, type ImportReview } from '../components/ImportDialog';
 import { PaperForm } from '../components/PaperForm';
 import { AccountMenu } from '../components/AccountMenu';
 import { features } from './features';
-import { canonicalCoverageOf, coverageGroupOf, stateColors, stateLabels, stateLegendNotes } from '../domain/presentation';
+import { stateColors, stateLabels, stateLegendNotes } from '../domain/presentation';
+import { roomFormDefaults } from '../components/observationDefaults';
 import { mergeWorkflow } from '../data/workflowMerge';
 import { detectWorkbook, mergeOverride, recognitionBlocker, remapWorkbook, type MappingOverride } from '../imports/detector';
 import '../components/workflow.css';
@@ -29,7 +30,13 @@ const MapScene = lazy(() => import('../map/MapScene'));
  * substituted for one another.
  */
 const DEMO_WORKER_NAME = '示範工作員';
-interface EditTarget { buildingId: string; floorId?: string; unitId?: string; label: string; eventId: string; visitId: string; }
+interface EditTarget {
+  buildingId: string; floorId?: string; unitId?: string; label: string; visitId: string;
+  /** One id per record the dialog will write: one for a single place, one per unit for a batch. */
+  eventIds: string[];
+  /** The picked units, when one result is being recorded at several of them at once. */
+  unitIds?: string[];
+}
 
 function download(url: string, name: string) {
   const a = document.createElement('a'); a.href = url; a.download = name;
@@ -197,34 +204,45 @@ export default function App() {
   };
   const saveObservation = async (draft: ObservationDraft) => {
     if (!editTarget) return;
-    workspace.saveObservation({
-      id: editTarget.eventId, visitId: editTarget.visitId,
-      buildingId: editTarget.buildingId, floorId: editTarget.floorId, unitId: editTarget.unitId,
+    const common = {
+      visitId: editTarget.visitId, buildingId: editTarget.buildingId,
       occurredAt: draft.occurredAt, recordedAt: new Date().toISOString(), workerName: DEMO_WORKER_NAME,
       coverage: draft.coverage, assessment: draft.assessment,
       sourceType: draft.sourceType, optionNotes: draft.optionNotes, note: draft.note, evidence: draft.evidence, followUp: draft.followUp,
-    });
+    };
+    /*
+     * One result at every picked unit. Each unit gets its own record id and its own floor,
+     * and the whole set is written in one step: the units that cannot be confirmed free of
+     * 劏房 are counted and left out rather than silently dropped.
+     */
+    if (editTarget.unitIds?.length) {
+      const inputs = editTarget.unitIds.map((unitId, index) => ({
+        ...common, id: editTarget.eventIds[index],
+        floorId: snapshot?.units.find(unit => unit.id === unitId)?.floorId, unitId,
+      }));
+      const result = workspace.recordBatch(inputs, Boolean(draft.confirmNoSubdivision));
+      setEditTarget(undefined);
+      setToast(result.skipped
+        ? `已為 ${result.saved} 個單位各寫入一筆記錄；${result.skipped} 個已分拆的單位不能確認無劏房，未有改動。`
+        : `已為 ${result.saved} 個單位各寫入一筆記錄${result.confirmed ? `，並確認其中 ${result.confirmed} 個無劏房` : ''}。`);
+      return;
+    }
+    workspace.saveObservation({ ...common, id: editTarget.eventIds[0], floorId: editTarget.floorId, unitId: editTarget.unitId });
     setEditTarget(undefined);
     setToast('已追加本次記錄，之前的觀察仍保留在時間線。');
   };
-  const startObservation = (target: Omit<EditTarget, 'eventId' | 'visitId'>) => setEditTarget({ ...target, eventId: createRecordId(), visitId: activeVisitId });
+  /* A batch carries one id per picked unit, so every record it writes is its own record. */
+  const startObservation = (target: Omit<EditTarget, 'eventIds' | 'visitId'>) => setEditTarget({
+    ...target, visitId: activeVisitId,
+    eventIds: Array.from({ length: target.unitIds?.length || 1 }, () => createRecordId()),
+  });
   /*
-   * A room under a split unit. Being one is the operator's own structural statement,
-   * so the entry form opens with 覆蓋狀態 and 住房判斷 already answered for it.
-   *
-   * 覆蓋狀態 follows what the room already stands at, read off its own last record
-   * rather than remembered in state, so it survives a reload and stays right whichever
-   * path recorded last. A room with nothing on record yet falls back to 已完成探訪, the
-   * ordinary outcome. 住房判斷 has no such history to follow — the room simply being one
-   * is what answers it.
-   *
-   * The stored coverage is mapped back through its group: an imported PARTIAL or
-   * INACCESSIBLE must light up 未能完成探訪, not a choice that is not on the form.
+   * What an entry form opens with for the place it is about. A 劏房 room is answered for and
+   * follows the last record that speaks for it; an ordinary unit opens unanswered. The rule
+   * and its reasoning live in `roomFormDefaults`, beside the coverage mapping it uses.
    */
   const editUnit = editTarget && snapshot ? snapshot.units.find(unit => unit.id === editTarget.unitId) : undefined;
-  const editUnitRecord = editUnit && snapshot ? latestObservation(effectiveObservations(snapshot).filter(item => item.unitId === editUnit.id)) : undefined;
-  const editIsRoom = !!editUnit?.parentUnitId;
-  const editDefaultCoverage = editIsRoom ? canonicalCoverageOf(coverageGroupOf(editUnitRecord?.coverage ?? 'VISITED_NO_FINDING')) : undefined;
+  const editDefaults = snapshot ? roomFormDefaults(snapshot, editUnit) : {};
   const exportBlank = async () => {
     try {
       const [{ exportWorkflowWorkbook }, { blankSnapshot }] = await Promise.all([import('../data/workflowWorkbook'), import('../data/blankSnapshot')]);
@@ -233,14 +251,25 @@ export default function App() {
       setTimeout(() => URL.revokeObjectURL(url), 10000); setToast('Excel 已準備：空白範本已交由瀏覽器下載。');
     } catch { setImportError('空白範本下載失敗，請重試。'); }
   };
-  const exportExcel = async () => {
-    if (!snapshot) return;
+  /*
+   * The current workbook, handed to the browser. It answers whether the file was actually
+   * taken rather than only reporting it: deleting records waits on this answer, and a
+   * download that failed must not read as a backup that exists.
+   */
+  const downloadWorkbook = async (): Promise<boolean> => {
+    if (!snapshot) return false;
     try {
       const { exportWorkflowWorkbook } = await import('../data/workflowWorkbook');
       const url = URL.createObjectURL(new Blob([exportWorkflowWorkbook(snapshot)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
       download(url, 'CareFlow_紙本回錄工作簿.xlsx');
-      setTimeout(() => URL.revokeObjectURL(url), 10000); setToast('Excel 已準備，已交由瀏覽器下載。');
-    } catch { setImportError('Excel 匯出失敗，請重試。'); }
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      return true;
+    } catch { return false; }
+  };
+  const exportExcel = async () => {
+    if (!snapshot) return;
+    if (await downloadWorkbook()) setToast('Excel 已準備，已交由瀏覽器下載。');
+    else setImportError('Excel 匯出失敗，請重試。');
   };
 
   return <div className="app-shell">
@@ -283,7 +312,7 @@ export default function App() {
         <div className="spatial-content"><Suspense fallback={<div className="map-loading">正在準備地圖…</div>}><MapScene buildings={mapBuildings} insets={mapInsets} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} expanded={expanded} onSelectBuilding={workspace.selectBuilding} onSelectFloor={workspace.selectFloor} onToggleExpanded={workspace.toggleExpanded} onOverview={() => workspace.selectBuilding()} onSaveFootprint={(id, ring) => { try { workspace.setFootprint(id, ring); setToast('已儲存大廈形狀。記錄沒有改變。'); } catch { setToast('形狀未能儲存，請重試。'); } }} onAddBuilding={input => { try { const refused = workspace.addBuilding(input); if (!refused) { setToast(`已新增「${input.name.trim()}」。`); setFinderOpen(false); } return refused; } catch { return { error: '未能儲存，請重試。', field: '' }; } }} /></Suspense></div>
         {!selectedBuildingId && snapshot && !explored && <div className="map-prompt"><span><Building2 size={19} /></span><div><strong>從一幢大廈開始</strong><p>選擇地圖標記，讓每一層的記錄展開。</p></div><ChevronRight size={18} /></div>}
       </section>
-      {snapshot && selectedBuildingId && <BuildingDetail snapshot={snapshot} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} selectedUnitId={selectedUnitId} onBack={() => workspace.selectBuilding()} onSelectFloor={workspace.selectFloor} onSelectUnit={workspace.selectUnit} onToggleTag={workspace.setTag} onFollowUpAction={workspace.actOnFollowUp} onStartObservation={startObservation} onStructureChange={features.structureEditing ? change => { const result = workspace.changeStructure(change); if ('error' in result) return result.error; setToast(result.message); return undefined; } : undefined} />}
+      {snapshot && selectedBuildingId && <BuildingDetail snapshot={snapshot} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} selectedUnitId={selectedUnitId} onBack={() => workspace.selectBuilding()} onSelectFloor={workspace.selectFloor} onSelectUnit={workspace.selectUnit} onToggleTag={workspace.setTag} onFollowUpAction={workspace.actOnFollowUp} onStartObservation={startObservation} onStructureChange={features.structureEditing ? change => { const result = workspace.changeStructure(change); if ('error' in result) return result.error; setToast(result.message); return undefined; } : undefined} onBackup={downloadWorkbook} />}
     </main>
     {workspace.storageError && <div className="storage-banner" role="alert">{workspace.storageError}</div>}
     {toast && <div className="toast" key={toast} role="status"><Check size={17} /><span>{toast}</span><button aria-label="關閉提示" onClick={() => setToast('')}><X size={16} /></button></div>}
@@ -291,6 +320,6 @@ export default function App() {
     <ImportDialog notice={toast.startsWith('Excel 已準備') ? toast : undefined} open={importOpen} review={importReview} loading={importLoading} error={importError} onClose={() => setImportOpen(false)} onFile={loadFile} onLoadDistrict={loadDistrict} onExport={() => void (snapshot ? exportExcel() : exportBlank())} exportLabel={snapshot ? undefined : '下載空白範本'} onPrint={snapshot?.buildings.length ? () => { setImportOpen(false); setPaperOpen(true); } : undefined} onRetry={openImport} onRemap={remapImport} onConfirmReplace={confirmImport} />
     {paperOpen && snapshot && <PaperForm snapshot={snapshot} buildingId={selectedBuildingId} onClose={() => setPaperOpen(false)} />}
     {snapshot && workspace.operator && <PhotoIntake key={workspace.operator.accountId} onApplyProposal={features.structureEditing ? workspace.applyLocationProposal : undefined} open={photoOpen} snapshot={snapshot} operator={workspace.operator} onClose={() => setPhotoOpen(false)} onSave={workspace.savePhotoPages} onView={(buildingId, unitId) => { workspace.selectBuilding(buildingId); if (unitId) workspace.selectUnit(unitId); setFinderOpen(false); }} />}
-    {editTarget && <ObservationEditor open targetLabel={editTarget.label} subjectId={editTarget.unitId ?? editTarget.buildingId} subjectType={editTarget.unitId ? 'UNIT' : 'BUILDING'} optionPrefs={workspace.optionPrefs} defaultCoverage={editDefaultCoverage} defaultAssessment={editIsRoom ? 'STAFF_VERIFIED' : undefined} onClose={() => setEditTarget(undefined)} onSubmit={saveObservation} />}
+    {editTarget && <ObservationEditor open targetLabel={editTarget.label} subjectId={editTarget.unitIds ? undefined : editTarget.unitId ?? editTarget.buildingId} subjectType={editTarget.unitId ? 'UNIT' : 'BUILDING'} batch={editTarget.unitIds ? { units: editTarget.unitIds.length } : undefined} optionPrefs={workspace.optionPrefs} defaultCoverage={editDefaults.coverage} defaultAssessment={editDefaults.assessment} onClose={() => setEditTarget(undefined)} onSubmit={saveObservation} />}
   </div>;
 }
