@@ -5,6 +5,19 @@ export function nextSelection(current: readonly string[], unitId: string, additi
 }
 
 /**
+ * The picked set without the ids that no longer name a unit.
+ *
+ * The structure can change under a selection — a unit split, a floor deleted, a batch delete
+ * that took half of what was picked — and an id left behind still counts towards 已選 N 個單位
+ * while naming nothing that can be acted on. The same array is returned when nothing was
+ * dropped, so a caller holding it in state does not re-render for nothing.
+ */
+export function pruneSelection(current: string[], existing: Iterable<string>): string[] {
+  const live = new Set(existing);
+  return current.some(id => !live.has(id)) ? current.filter(id => live.has(id)) : current;
+}
+
+/**
  * What a key means while a set is picked, or nothing at all.
  *
  * Esc is a key people also press to get out of things, so it does not reach the set while a

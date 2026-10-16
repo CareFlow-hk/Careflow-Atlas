@@ -1,6 +1,6 @@
 import { ArrowLeft, Building2, CalendarClock, ClipboardPlus, Flag, Minus, Plus, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from "react";
-import { floorColumnCount, floorHeadings, floorUnitColumns, structureImpact, unitColumnLabel } from "../domain/structure";
+import { floorColumnCount, floorHeadings, floorUnitColumns, lastDrawnUnit, structureImpact, unitColumnLabel } from "../domain/structure";
 import { DeleteConfirm } from "./DeleteConfirm";
 import { StructureBar } from "./StructureBar";
 import { RoomList } from "./RoomSplitPanel";
@@ -9,7 +9,7 @@ import { buildingState, clueOf, currentAssessment, followUpEventsFor, getCoverag
 import { assessmentLabels, clueLabels, clueMarks, coverageLabels, nodeTagLabel, stateColors, stateLabels, supportCategoryLabels, uncategorisedFollowUpLabel } from "../domain/presentation";
 import { ObservationHistory } from "./ObservationHistory";
 import { UnitPickerBar } from "./UnitPickerBar";
-import { nextSelection } from "./unitSelection";
+import { nextSelection, pruneSelection } from "./unitSelection";
 import { features } from "../app/features";
 import { FollowUpActions, type FollowUpActionHandler } from "./FollowUpActions";
 
@@ -50,6 +50,13 @@ export function BuildingDetail(props: BuildingDetailProps) {
      once per render: the bar shows the count before the click, not only in the question after. */
   const pickedImpact = useMemo(() => (chosen.length > 1 ? structureImpact(snapshot, { kind: "removeUnits", unitIds: chosen }) : undefined), [snapshot, chosen]);
   useEffect(() => { setEditing(false); setSplitTarget(undefined); setPending(undefined); setChosen([]); }, [selectedBuildingId]);
+  /*
+   * The structure can change under a selection: ＋／－, ✕ on a floor, or a split all rewrite the
+   * units while the pick is still held. An id that no longer names anything would go on counting
+   * towards 已選 N 個單位 and towards the records the bar warns about, while naming nothing that
+   * can be acted on — so the pick is read against the units there are, after every change.
+   */
+  useEffect(() => { setChosen(previous => pruneSelection(previous, snapshot.units.map(unit => unit.id))); }, [snapshot.units]);
   const building = snapshot.buildings.find((item) => item.id === selectedBuildingId);
   const floors = useMemo(() => snapshot.floors.filter((item) => item.buildingId === selectedBuildingId).sort((a, b) => b.level - a.level), [snapshot.floors, selectedBuildingId]);
   if (!building) return <aside className="cf-building-panel cf-empty"><Building2 size={28} /><p>從地圖選擇一幢大廈，查看樓層和單位記錄。</p></aside>;
@@ -234,7 +241,7 @@ export function BuildingDetail(props: BuildingDetailProps) {
               const present = cells.filter((cell): cell is { unit: Unit; rooms: Unit[] } => cell !== undefined);
               const list = present.flatMap(group => (group.rooms.length ? group.rooms : [group.unit]));
               const scoped = getCoverageSummary(snapshot, building.id, floor.id);
-              const lastUnit = present.at(-1)?.unit;
+              const lastUnit = lastDrawnUnit(cells);
               const tagged = features.nodeTags && isTagged(snapshot, { buildingId: building.id, floorId: floor.id });
               return [
                 <button key={`${floor.id}-label`} className={`cf-matrix__floor${selectedFloorId === floor.id ? " is-active" : ""}`} aria-pressed={selectedFloorId === floor.id} onClick={() => onSelectFloor(floor.id)} title={tagged ? nodeTagLabel : undefined}>{floor.label}{tagged && <Flag size={10} aria-label={nodeTagLabel} />}</button>,
@@ -248,9 +255,11 @@ export function BuildingDetail(props: BuildingDetailProps) {
                 editing && onStructureChange
                   /*
                    * ＋／－ add and drop one unit — the two ends of the same row, so － takes the
-                   * unit in the last column, which is the one ＋ has just been putting there.
-                   * Deleting the floor itself is a different act with a different reach, so it
-                   * gets its own mark at the end rather than sharing the minus.
+                   * last cell on screen, which is the one ＋ has just been putting there. On a
+                   * floor whose last group has been split into 劏房 that is the last room, not the
+                   * unit behind it: the unit is not drawn, and taking it would take every room
+                   * with it. Deleting the floor itself is a different act with a different reach,
+                   * so it gets its own mark at the end rather than sharing the minus.
                    */
                   ? <span key={`${floor.id}-edit`} className="cf-matrix__edit"><button type="button" aria-label={`在${floor.label}加一個單位`} title="加一個單位" onClick={() => runChange({ kind: "addUnit", floorId: floor.id })}><Plus size={11} /></button><button type="button" disabled={!lastUnit} aria-label={lastUnit ? `移除${lastUnit.label}` : `${floor.label}沒有單位可移除`} title={lastUnit ? `移除最後一個單位（${lastUnit.label}）` : "這一層沒有單位"} onClick={() => lastUnit && runChange({ kind: "removeUnits", unitIds: [lastUnit.id] })}><Minus size={11} /></button><button type="button" className="is-danger" aria-label={`刪除${floor.label}`} title="刪除整層（有記錄會先問）" onClick={() => runChange({ kind: "removeFloor", floorId: floor.id })}><X size={11} /></button></span>
                   : <span key={`${floor.id}-sum`} className="cf-matrix__sum">{scoped.completed}/{list.length}</span>,

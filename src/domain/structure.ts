@@ -96,7 +96,7 @@ export function setRoomCount(s: OutreachSnapshot, unitId: string, rooms: number,
   const going = roomsGoing(existing, rooms);
   if (going.length) {
     const plan = removalPlan(s, new Set(going.map(u => u.id)), new Set(), going.map(u => u.label).join('、'));
-    if (plan.records && !confirmed) return { error: confirmText(plan.places, plan.records) };
+    if (plan.records && !confirmed) return { error: confirmText(plan) };
     return { snapshot: withoutPlaces(s, plan) };
   }
   // Nothing to take away: 1 asks for a merge and there is nothing to merge, or the count
@@ -150,9 +150,24 @@ export function setNoSubdivision(s: OutreachSnapshot, unitIds: string[], confirm
  * them goes as well: a correction of it, or the record that closed a follow-up raised there.
  * Left behind, those would point at a place that is no longer there.
  */
-interface RemovalPlan { units: Set<string>; floors: Set<string>; observations: Set<string>; residences: number; places: string; records: number }
+interface RemovalPlan {
+  units: Set<string>; floors: Set<string>; observations: Set<string>; residences: number; places: string; records: number;
+  /**
+   * The part of the plan the elevation does not draw, and its own share of the records. A unit
+   * split into 劏房 rooms is not on the elevation — only its rooms are — so a delete that takes
+   * the unit takes something nobody can see. It is said on its own rather than mixed into the
+   * count, which would read as records on the rooms that are on screen.
+   */
+  hidden?: { places: string; records: number };
+}
 
-function removalPlan(s: OutreachSnapshot, units: Set<string>, floors: Set<string>, places: string): RemovalPlan {
+const labelsOf = (s: OutreachSnapshot, ids: Set<string>) => s.units.filter(u => ids.has(u.id)).map(u => u.label).join('、');
+/** The records left directly at these units, which is what a confirmation has to name. */
+const recordsAt = (s: OutreachSnapshot, ids: Set<string>) =>
+  s.observations.filter(o => o.unitId !== undefined && ids.has(o.unitId)).length
+  + s.householdResidences.filter(r => r.unitId !== undefined && ids.has(r.unitId)).length;
+
+function removalPlan(s: OutreachSnapshot, units: Set<string>, floors: Set<string>, places: string, hidden = new Set<string>()): RemovalPlan {
   const observations = new Set(s.observations
     .filter(o => (o.unitId !== undefined && units.has(o.unitId)) || (o.floorId !== undefined && floors.has(o.floorId)))
     .map(o => o.id));
@@ -164,7 +179,10 @@ function removalPlan(s: OutreachSnapshot, units: Set<string>, floors: Set<string
     }
   }
   const residences = s.householdResidences.filter(r => r.unitId !== undefined && units.has(r.unitId)).length;
-  return { units, floors, observations, residences, places, records: observations.size + residences };
+  return {
+    units, floors, observations, residences, places, records: observations.size + residences,
+    hidden: hidden.size ? { places: labelsOf(s, hidden), records: recordsAt(s, hidden) } : undefined,
+  };
 }
 
 /** The snapshot without the plan's places and their records. */
@@ -179,7 +197,20 @@ function withoutPlaces(s: OutreachSnapshot, plan: RemovalPlan): OutreachSnapshot
   };
 }
 
-const confirmText = (places: string, records: number) => `「${places}」有 ${records} 筆記錄，刪除會連同這些記錄一起刪除，請先確認。`;
+/**
+ * What the confirmation says. It names the drawn places with their own records, and a unit the
+ * elevation does not draw — a split one — separately, with its own count: the two are not the
+ * same thing, and adding them together reads as records on cells that have none. A unit that is
+ * not going is not mentioned at all, so its records are never counted in.
+ */
+const confirmText = (plan: RemovalPlan) => {
+  const closing = '刪除會連同這些記錄一起刪除，請先確認。';
+  const records = (places: string, count: number) => count ? `「${places}」有 ${count} 筆記錄` : `「${places}」沒有記錄`;
+  if (!plan.hidden) return `${records(plan.places, plan.records)}，${closing}`;
+  // Both sides are named even at zero, so the rooms going are on screen at the moment of the
+  // decision rather than only the unit behind them.
+  return `${records(plan.places, plan.records - plan.hidden.records)}；立面上沒有的${records(plan.hidden.places, plan.hidden.records)}，${closing}`;
+};
 
 /** The plan a change would need, or nothing when it removes no place at all. */
 function planFor(s: OutreachSnapshot, change: StructureChange): RemovalPlan | undefined {
@@ -192,7 +223,11 @@ function planFor(s: OutreachSnapshot, change: StructureChange): RemovalPlan | un
     case 'removeUnits': {
       const going = s.units.filter(u => change.unitIds.includes(u.id) || (u.parentUnitId && change.unitIds.includes(u.parentUnitId)));
       if (!going.length) return undefined;
-      return removalPlan(s, new Set(going.map(u => u.id)), new Set(), going.map(u => u.label).join('、'));
+      const ids = new Set(going.map(u => u.id));
+      // A unit with 劏房 rooms is not drawn: its rooms are, in its column. Taking it takes
+      // something that is not on screen, which the confirmation has to say in its own words.
+      const hidden = new Set(going.filter(u => s.units.some(r => r.parentUnitId === u.id)).map(u => u.id));
+      return removalPlan(s, ids, new Set(), labelsOf(s, new Set([...ids].filter(id => !hidden.has(id)))), hidden);
     }
     case 'split': {
       const existing = sorted(s.units.filter(u => u.parentUnitId === change.unitId));
@@ -208,7 +243,7 @@ function planFor(s: OutreachSnapshot, change: StructureChange): RemovalPlan | un
 /** What a change would destroy, in staff wording, when it would destroy anything. */
 export function structureImpact(s: OutreachSnapshot, change: StructureChange): { label: string; records: number; confirmation: string } | undefined {
   const plan = planFor(s, change);
-  return plan && plan.records ? { label: plan.places, records: plan.records, confirmation: confirmText(plan.places, plan.records) } : undefined;
+  return plan && plan.records ? { label: plan.places, records: plan.records, confirmation: confirmText(plan) } : undefined;
 }
 
 /* ------------------------------------------------------------------------- *
@@ -241,10 +276,12 @@ export function deleteGate(attempt: BackupAttempt): BackupGate {
  * has to have asked about first: without `confirmed` this refuses and says what is at stake.
  */
 export function removeUnit(s: OutreachSnapshot, unitId: string, confirmed = false): StructureResult {
-  const unit = s.units.find(u => u.id === unitId);
-  if (!unit) return { error: '找不到這個單位。' };
-  const plan = removalPlan(s, new Set([unitId, ...s.units.filter(u => u.parentUnitId === unitId).map(u => u.id)]), new Set(), unit.label);
-  if (plan.records && !confirmed) return { error: confirmText(plan.places, plan.records) };
+  if (!s.units.some(u => u.id === unitId)) return { error: '找不到這個單位。' };
+  // Through `planFor`, so a single unit and a picked set take exactly the same things and the
+  // same words describe both — including which of them the elevation does not draw.
+  const plan = planFor(s, { kind: 'removeUnits', unitIds: [unitId] });
+  if (!plan) return { error: '找不到這個單位。' };
+  if (plan.records && !confirmed) return { error: confirmText(plan) };
   return { snapshot: withoutPlaces(s, plan) };
 }
 
@@ -253,7 +290,7 @@ export function removeFloor(s: OutreachSnapshot, floorId: string, confirmed = fa
   const floor = s.floors.find(f => f.id === floorId);
   if (!floor) return { error: '找不到這一層。' };
   const plan = removalPlan(s, new Set(s.units.filter(u => u.floorId === floorId).map(u => u.id)), new Set([floorId]), floor.label);
-  if (plan.records && !confirmed) return { error: confirmText(plan.places, plan.records) };
+  if (plan.records && !confirmed) return { error: confirmText(plan) };
   const dropped = withoutPlaces(s, plan);
   return { snapshot: withBuilding(dropped, floor.buildingId, dropped.floors, dropped.units) };
 }
@@ -325,6 +362,20 @@ export function floorUnitColumns(s: OutreachSnapshot, floorId: string, width: nu
 }
 
 /**
+ * The place a floor's 「－」 takes away: the last cell the elevation actually draws.
+ *
+ * Not "the unit in the last column" — a unit that has been split into 劏房 rooms is not drawn,
+ * only its rooms are, so that would be the invisible parent and one press would take the whole
+ * group and the records under the original unit with it. What sits beside ＋ answers for what
+ * ＋ can put there, which is one drawn cell (review, 2026-10-16).
+ */
+export function lastDrawnUnit(cells: ({ unit: Unit; rooms: Unit[] } | undefined)[]): Unit | undefined {
+  const group = cells.filter((cell): cell is { unit: Unit; rooms: Unit[] } => cell !== undefined).at(-1);
+  if (!group) return undefined;
+  return group.rooms.length ? group.rooms.at(-1) : group.unit;
+}
+
+/**
  * The heading over each column of the elevation, named by what the column holds.
  *
  * A column is named by the letter of the unit sitting in it, so a floor missing B keeps C's
@@ -383,13 +434,18 @@ export function applyStructureChange(s: OutreachSnapshot, change: StructureChang
     }
     case 'removeUnits': {
       let next = s;
+      let removed = 0;
       for (const id of change.unitIds) {
         if (!next.units.some(u => u.id === id)) continue; // already gone with its parent
         const r = removeUnit(next, id, change.confirmed);
         if ('error' in r) return { error: `${s.units.find(u => u.id === id)?.label ?? id}：${r.error}` };
+        // Counted off the snapshot, not off what was asked for: an id that named nothing takes
+        // nothing, and a split unit takes its rooms with it. Saying the number asked for would
+        // report units that are still there (review, 2026-10-16).
+        removed += next.units.length - r.snapshot.units.length;
         next = r.snapshot;
       }
-      return { snapshot: next, message: `已刪除 ${change.unitIds.length} 個單位${alsoDeleted || '。'}` };
+      return { snapshot: next, message: `已刪除 ${removed} 個單位${alsoDeleted || '。'}` };
     }
     case 'noSubdivision': {
       const r = setNoSubdivision(s, change.unitIds, change.confirm, actor);

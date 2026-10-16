@@ -4,7 +4,7 @@ import { addBuilding } from '../data/newBuilding';
 import { blankSnapshot } from '../data/blankSnapshot';
 import { exportWorkflowWorkbook, parseWorkflowWorkbook } from '../data/workflowWorkbook';
 import { validateSnapshot } from './schema';
-import { applyStructureChange, deleteGate, floorColumnCount, floorHeadings, floorUnitColumns, floorUnitGroups, roomCountAction, structureImpact, type StructureChange } from './structure';
+import { applyStructureChange, deleteGate, floorColumnCount, floorHeadings, floorUnitColumns, floorUnitGroups, lastDrawnUnit, roomCountAction, structureImpact, type StructureChange } from './structure';
 import type { OutreachSnapshot } from './types';
 
 const actor = { at: '2026-10-10T08:00:00.000Z', by: '測試同事' };
@@ -214,6 +214,53 @@ describe('the elevation names each column after what is in it', () => {
     // The unit that replaces C is not lettered, so it fills A's empty column rather than C's.
     // A is gone, so the units left on the floor are B and C: C becomes the shop.
     expect(cellsOf(relabel(afterDelete, [undefined, '1號舖']))).toEqual(['1 樓 1號舖', '1 樓 B室', '(空)']);
+  });
+});
+
+/*
+ * What a delete says and what it takes. The elevation draws a split unit as its rooms only, so
+ * a confirmation that names the unit behind them names something that is not on screen, and a
+ * button that takes it takes the whole group at once (review, 2026-10-16).
+ */
+describe('a delete names the places that are on screen', () => {
+  const questionFor = (s: OutreachSnapshot, unitId: string) => structureImpact(s, { kind: 'removeUnits', unitIds: [unitId] })?.confirmation;
+  const labelsOnFloor = (s: OutreachSnapshot) => s.units.map(u => u.label);
+
+  it('takes the last room of a split group, not the unit behind it', () => {
+    const s = withRoomRecord();
+    const cells = floorUnitColumns(s, s.floors[0].id, floorColumnCount(s, s.floors[0].id));
+    const target = lastDrawnUnit(cells)!;
+    expect(target.label).toBe('1 樓 A2室');
+    expect(questionFor(s, target.id)).toBe('「1 樓 A2室」有 1 筆記錄，刪除會連同這些記錄一起刪除，請先確認。');
+    // The unit and its other room stay: one press takes one cell off the elevation.
+    expect(apply(s, { kind: 'removeUnits', unitIds: [target.id], confirmed: true }).units.map(u => u.label)).toEqual(['1 樓 A室', '1 樓 A1室']);
+  });
+
+  it('says a unit behind the rooms is going, and counts only what is at each place', () => {
+    const s = withRoomRecord();
+    const parent = s.units.find(u => u.label === '1 樓 A室')!;
+    // The one record sits on A2室, so the rooms are named with it and the unit behind is not
+    // counted in — it has nothing of its own.
+    expect(questionFor(s, parent.id)).toBe('「1 樓 A1室、1 樓 A2室」有 1 筆記錄；立面上沒有的「1 樓 A室」沒有記錄，刪除會連同這些記錄一起刪除，請先確認。');
+  });
+
+  it('names a unit with records of its own even when its rooms have none', () => {
+    let s = apply(start(), { kind: 'addFloors', buildingId: 'SYP-001', count: 1, unitsPerFloor: 1 });
+    const parent = s.units[0];
+    const at = '2026-10-10T09:00:00+08:00';
+    s = { ...s, visits: [{ ...flags, id: 'visit-1', occurredAt: at, recordedAt: at, workerName: '測試同事' }], observations: [1, 2].map(n => ({ ...flags, id: `observation-${n}`, visitId: 'visit-1', buildingId: 'SYP-001', floorId: parent.floorId, unitId: parent.id, occurredAt: at, recordedAt: at, workerName: '測試同事', coverage: 'VISITED_NO_FINDING' as const, evidence: [] })) };
+    s = apply(s, { kind: 'split', unitId: parent.id, rooms: 2 });
+    expect(questionFor(s, parent.id)).toBe('「1 樓 A1室、1 樓 A2室」沒有記錄；立面上沒有的「1 樓 A室」有 2 筆記錄，刪除會連同這些記錄一起刪除，請先確認。');
+  });
+
+  it('counts what went, not what was asked for', () => {
+    const s = withRoomRecord();
+    const parent = s.units.find(u => u.label === '1 樓 A室')!;
+    // An id that names nothing takes nothing; the unit takes its two rooms with it.
+    const r = applyStructureChange(s, { kind: 'removeUnits', unitIds: [parent.id, 'gone-already'], confirmed: true }, actor);
+    if ('error' in r) throw new Error(r.error);
+    expect(labelsOnFloor(r.snapshot)).toEqual([]);
+    expect(r.message).toContain('已刪除 3 個單位');
   });
 });
 
