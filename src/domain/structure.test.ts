@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { districtDemo } from '../data/districtDemo';
 import { workflowDemo } from '../data/workflowDemo';
 import { addBuilding } from '../data/newBuilding';
 import { blankSnapshot } from '../data/blankSnapshot';
 import { exportWorkflowWorkbook, parseWorkflowWorkbook } from '../data/workflowWorkbook';
 import { validateSnapshot } from './schema';
-import { applyStructureChange, deleteGate, floorColumnCount, floorHeadings, floorUnitColumns, floorUnitGroups, lastDrawnUnit, roomCountAction, structureImpact, type StructureChange } from './structure';
+import { applyStructureChange, deleteGate, findPaperLocation, floorColumnCount, floorHeadings, floorUnitColumns, floorUnitGroups, lastDrawnUnit, proposeLocation, roomCountAction, structureImpact, unitColumn, UNIT_LETTERS, type StructureChange } from './structure';
 import type { OutreachSnapshot } from './types';
 
 const actor = { at: '2026-10-10T08:00:00.000Z', by: '測試同事' };
@@ -214,6 +215,44 @@ describe('the elevation names each column after what is in it', () => {
     // The unit that replaces C is not lettered, so it fills A's empty column rather than C's.
     // A is gone, so the units left on the floor are B and C: C becomes the shop.
     expect(cellsOf(relabel(afterDelete, [undefined, '1號舖']))).toEqual(['1 樓 1號舖', '1 樓 B室', '(空)']);
+  });
+});
+
+/*
+ * The district demo spells the floor 「1 樓」 with a space and the unit on it 「1樓 A室」 without
+ * one. Reading a unit's letter meant deleting the floor label by exact text, so those units kept
+ * their floor in the name, were taken for free-form names, and were laid out in gap columns —
+ * deleting A slid B and C left instead of leaving A's column empty. It is the same read that
+ * decides which existing unit a paper row names, and whether ＋ reuses the gap or appends
+ * (review, 2026-10-16).
+ */
+describe('the demo writes a floor and its units with different spacing', () => {
+  const floor = districtDemo.floors.find(f => f.id === 'district-01-f10')!;
+  const width = (s: OutreachSnapshot) => floorColumnCount(s, floor.id);
+  /** Each column by the letter it holds; `?` marks a unit no column could name by letter. */
+  const columns = (s: OutreachSnapshot) => floorUnitColumns(s, floor.id, width(s)).map(cell => {
+    if (!cell) return '(空)';
+    const at = unitColumn(cell.unit, floor);
+    return at === undefined ? `?${cell.unit.label}` : UNIT_LETTERS[at];
+  });
+
+  it('keeps B and C in their columns when A is deleted, and ＋ puts A back', () => {
+    expect(columns(districtDemo)).toEqual(['A', 'B', 'C']);
+    const a = districtDemo.units.find(u => u.id === 'district-01-f10-A')!;
+    const afterDelete = apply(districtDemo, { kind: 'removeUnits', unitIds: [a.id] });
+    expect(columns(afterDelete)).toEqual(['(空)', 'B', 'C']);
+    const refilled = apply(afterDelete, { kind: 'addUnit', floorId: floor.id });
+    expect(columns(refilled)).toEqual(['A', 'B', 'C']);
+    const floors = refilled.floors.filter(f => f.buildingId === floor.buildingId);
+    expect(floorHeadings(refilled, floors, width(refilled))).toEqual(['A', 'B', 'C']);
+  });
+
+  it('reads a paper 「1樓 B室」 as the unit that is already on the floor', () => {
+    expect(findPaperLocation(districtDemo, 'district-01', '1樓', 'B室')).toBe('district-01-f1-B');
+    // Floor and unit both exist, so there is nothing to propose — and nothing to add twice.
+    expect(proposeLocation(districtDemo, 'district-01', '1樓', 'B室')).toBeUndefined();
+    expect(proposeLocation(districtDemo, 'district-01', '1樓', 'B2室')?.steps)
+      .toEqual(['把「1樓 B室」分出劏房「1樓 B2室」']);
   });
 });
 

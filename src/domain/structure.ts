@@ -37,8 +37,19 @@ export function floorLabelFor(level: number, like?: string): string {
   if (like && /\d+/.test(like)) return like.replace(/-?\d+/, String(level));
   return `${level} 樓`;
 }
-/** Letter part of "2樓 B室" → "B"; units the person named freely return undefined. */
-const letterOf = (unit: Unit, floor: Floor) => /^\s*([A-Z])室?\s*$/.exec(unit.label.replace(floor.label, ''))?.[1];
+/**
+ * Letter part of "2樓 B室" → "B"; units the person named freely return undefined.
+ *
+ * Spacing is not part of a name: the district demo writes the floor 「1 樓」 and the unit on it
+ * 「1樓 A室」, so matching the floor by its exact text left the floor in the unit's name, the
+ * letter unreadable, and the unit taken for one named freely — laid out in a gap column, with
+ * ＋ appending a new unit instead of filling the empty one, and a paper row unable to name it
+ * (review, 2026-10-16).
+ */
+const letterOf = (unit: Unit, floor: Floor) => {
+  const label = unit.label.replace(/\s+/g, ''), above = floor.label.replace(/\s+/g, '');
+  return /^([A-Z])室?$/.exec(above && label.startsWith(above) ? label.slice(above.length) : label)?.[1];
+};
 const unitLabel = (floor: Floor, letter: string) => `${floor.label} ${letter}室`;
 
 function withBuilding(s: OutreachSnapshot, buildingId: string, floors: Floor[], units: Unit[]): OutreachSnapshot {
