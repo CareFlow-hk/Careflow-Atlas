@@ -1,6 +1,6 @@
 import { ArrowLeft, Building2, CalendarClock, ClipboardPlus, Flag, Minus, Plus, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from "react";
-import { floorColumnCount, floorUnitColumns, structureImpact, UNIT_LETTERS } from "../domain/structure";
+import { floorColumnCount, floorHeadings, floorUnitColumns, structureImpact, unitColumnLabel } from "../domain/structure";
 import { DeleteConfirm } from "./DeleteConfirm";
 import { StructureBar } from "./StructureBar";
 import { RoomList } from "./RoomSplitPanel";
@@ -19,8 +19,6 @@ export interface BuildingDetailProps { snapshot: OutreachSnapshot; selectedBuild
   /** The current workbook, offered to the browser when staff delete records. Answers whether it was taken. */
   onBackup?: () => Promise<boolean>; }
 
-/** "5F B室" / "1樓 A室" → "B室" / "A室": the column heading drops the floor it repeats. */
-const unitColumnLabel = (label: string, floorLabel?: string) => floorLabel && label.startsWith(floorLabel) && label.length > floorLabel.length ? label.slice(floorLabel.length).trim() : label.replace(/^\S+\s+/, "");
 const floorLabelOf = (snapshot: OutreachSnapshot, unit: Unit) => snapshot.floors.find(floor => floor.id === unit.floorId)?.label;
 const formatDay = (value: string) => new Intl.DateTimeFormat("zh-HK", { month: "short", day: "numeric" }).format(new Date(value.length === 10 ? `${value}T12:00:00` : value));
 
@@ -116,15 +114,12 @@ export function BuildingDetail(props: BuildingDetailProps) {
    * The floors laid out as fixed letter columns — A is column 0, B column 1, and so on — so a
    * deleted unit leaves its column empty and the units around it keep their positions. The
    * columns are the building's letters; a unit whose label is not a plain letter follows the
-   * letters, in label order, only on its own floor.
+   * letters, in label order, only on its own floor. The headings are read off what each column
+   * actually holds, so a building with numbered units says 1室 rather than A.
    */
   const columnCount = Math.max(0, ...floors.map(floor => floorColumnCount(snapshot, floor.id)));
   const cellsByFloor = new Map(floors.map(floor => [floor.id, floorUnitColumns(snapshot, floor.id, columnCount)]));
-  const headings = Array.from({ length: columnCount }, (_, i) => {
-    if (i < UNIT_LETTERS.length) return UNIT_LETTERS[i];
-    for (const floor of floors) { const cell = cellsByFloor.get(floor.id)?.[i]; if (cell) return unitColumnLabel(cell.unit.label, floor.label); }
-    return "";
-  });
+  const headings = floorHeadings(snapshot, floors, columnCount);
   /** Whether there are blocks at all: with none, nothing can be picked and no key is owed. */
   const hasMatrix = floors.length > 0 && columnCount > 0;
   /** "2樓 C1室" → "C1" for a room row: the floor the column repeats and 室 are understood. */

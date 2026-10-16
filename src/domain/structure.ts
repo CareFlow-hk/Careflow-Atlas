@@ -11,6 +11,12 @@ const flags = { isSynthetic: true, provisional: true } as const;
 const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; // I and O look like 1 and 0 on paper
 /** The unit letters in column order, shared with the elevation's column headings. */
 export const UNIT_LETTERS = LETTERS;
+/**
+ * "2樓 C1室" → "C1室": the floor the column already repeats is dropped, so a heading or a
+ * ledger row says the unit and not the floor it is on. A label the floor is not part of
+ * loses only its leading word instead.
+ */
+export const unitColumnLabel = (label: string, floorLabel?: string) => floorLabel && label.startsWith(floorLabel) && label.length > floorLabel.length ? label.slice(floorLabel.length).trim() : label.replace(/^\S+\s+/, "");
 export const MAX_FLOORS = 100;
 export const MAX_UNITS_PER_FLOOR = 50;
 /** Most 劏房 rooms one unit may be divided into. One room means "put it back together". */
@@ -295,6 +301,36 @@ export function floorUnitColumns(s: OutreachSnapshot, floorId: string, width: nu
     if (next < width) { cells[next] = group; next++; }
   }
   return cells;
+}
+
+/**
+ * The heading over each column of the elevation, named by what the column holds.
+ *
+ * A column is named by the letter of the unit sitting in it, so a floor missing B keeps C's
+ * column under C. A building whose units are not lettered — 「1室、2室、3室」, or a floor with a
+ * 1號舖 on it — has no letter for that column, so it is named by the unit that is there.
+ * Printing A over a column of 1室 would name a unit the building has not got; plenty of Hong
+ * Kong buildings number their units rather than letter them. `width` headings are returned so
+ * every floor of the building shares the same grid.
+ */
+export function floorHeadings(s: OutreachSnapshot, floors: Floor[], width: number): string[] {
+  const grid = floors.map(floor => ({ floor, cells: floorUnitColumns(s, floor.id, width) }));
+  const headings: string[] = [];
+  for (let column = 0; column < width; column++) {
+    let named: string | undefined;
+    let letter: string | undefined;
+    for (const { floor, cells } of grid) {
+      const cell = cells[column];
+      if (!cell) continue;
+      const at = unitColumn(cell.unit, floor);
+      // Any floor lettered in this column names it for all of them: the columns exist so a
+      // letter keeps its place, and a column is only letter-less when nothing lettered is in it.
+      if (at !== undefined) { letter = UNIT_LETTERS[at]; break; }
+      named ??= unitColumnLabel(cell.unit.label, floor.label);
+    }
+    headings.push(letter ?? named ?? '');
+  }
+  return headings;
 }
 
 /**

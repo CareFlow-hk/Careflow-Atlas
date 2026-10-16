@@ -618,6 +618,16 @@ describe('the building panel', () => {
     expect(html).toContain('聯絡中心護士');
   });
 
+  it('names the elevation columns after the units the building actually has', () => {
+    const numbered = {
+      ...scene([]),
+      units: [{ ...flags, id: 'u1', buildingId: 'b1', floorId: 'f1', label: '1室' }, { ...flags, id: 'u2', buildingId: 'b1', floorId: 'f1', label: '2室' }],
+    };
+    const headers = (html: string) => [...matrixMarkup(html).matchAll(/role="columnheader"[^>]*>([^<]*)</g)].map(match => match[1]);
+    // The figures column is the panel's own, not a unit column.
+    expect(headers(renderDetail(numbered))).toEqual(['1室', '2室', '完成']);
+  });
+
   it('hides the manual mark in v1 and never lets a stored one change a status', () => {
     const plain = scene([observation({ id: 'o1', coverage: 'VISITED_NO_FINDING' })]);
     const tagged = tagNode(plain, { buildingId: 'b1', floorId: 'f1' }, 'FOLLOW_UP');

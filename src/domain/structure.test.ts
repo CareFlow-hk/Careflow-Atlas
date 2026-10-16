@@ -4,7 +4,7 @@ import { addBuilding } from '../data/newBuilding';
 import { blankSnapshot } from '../data/blankSnapshot';
 import { exportWorkflowWorkbook, parseWorkflowWorkbook } from '../data/workflowWorkbook';
 import { validateSnapshot } from './schema';
-import { applyStructureChange, deleteGate, floorUnitColumns, floorUnitGroups, roomCountAction, structureImpact, type StructureChange } from './structure';
+import { applyStructureChange, deleteGate, floorColumnCount, floorHeadings, floorUnitColumns, floorUnitGroups, roomCountAction, structureImpact, type StructureChange } from './structure';
 import type { OutreachSnapshot } from './types';
 
 const actor = { at: '2026-10-10T08:00:00.000Z', by: '測試同事' };
@@ -160,6 +160,37 @@ describe('experimental structure editing', () => {
     const parsed = parseWorkflowWorkbook(exportWorkflowWorkbook(s), 'round.xlsx', '2026-10-10T09:00:00Z')!;
     expect(parsed.issues.filter(i => i.severity === 'error')).toEqual([]);
     expect(parsed.snapshot!.units).toEqual(s.units);
+  });
+});
+
+/*
+ * The headings over the elevation's columns. A column is drawn so a letter keeps its place,
+ * but the heading must name what is actually in it: plenty of Hong Kong buildings number
+ * their units, and printing A over a column of 1室 names a unit nobody has (review, 2026-10-16).
+ */
+describe('the elevation names each column after what is in it', () => {
+  /** Staff-typed labels for one floor's units, in the order the fixture made them. */
+  const relabel = (s: OutreachSnapshot, names: string[]) => {
+    const onFloor = s.units.filter(u => u.floorId === s.floors[0].id);
+    const next = { ...s, units: s.units.map(u => { const at = onFloor.indexOf(u); return at < 0 || at >= names.length ? u : { ...u, label: `${s.floors[0].label} ${names[at]}` }; }) };
+    validateSnapshot(next);
+    return next;
+  };
+  const threeUnits = () => apply(start(), { kind: 'addFloors', buildingId: 'SYP-001', count: 1, unitsPerFloor: 3 });
+  const headingsOf = (s: OutreachSnapshot) => floorHeadings(s, s.floors, floorColumnCount(s, s.floors[0].id));
+
+  it('says 1室、2室、3室 for a building whose units are numbered, not A、B、C', () => {
+    const s = relabel(threeUnits(), ['1室', '2室', '3室']);
+    expect(floorUnitColumns(s, s.floors[0].id, 3).map(cell => cell?.unit.label)).toEqual(['1 樓 1室', '1 樓 2室', '1 樓 3室']);
+    expect(headingsOf(s)).toEqual(['1室', '2室', '3室']);
+  });
+  it('still says A、B、C for a building whose units are lettered', () => {
+    expect(headingsOf(threeUnits())).toEqual(['A', 'B', 'C']);
+  });
+  it('leaves a deleted letter\'s column blank rather than renaming the ones after it', () => {
+    const s = threeUnits();
+    const b = s.units.find(u => u.label === '1 樓 B室')!;
+    expect(headingsOf(apply(s, { kind: 'removeUnits', unitIds: [b.id] }))).toEqual(['A', '', 'C']);
   });
 });
 
