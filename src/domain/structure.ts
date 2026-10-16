@@ -9,6 +9,8 @@ export type StructureResult = { snapshot: OutreachSnapshot } | { error: string }
 export interface StructureActor { at: string; by?: string }
 const flags = { isSynthetic: true, provisional: true } as const;
 const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; // I and O look like 1 and 0 on paper
+/** The unit letters in column order, shared with the elevation's column headings. */
+export const UNIT_LETTERS = LETTERS;
 export const MAX_FLOORS = 100;
 export const MAX_UNITS_PER_FLOOR = 50;
 /** Most 劏房 rooms one unit may be divided into. One room means "put it back together". */
@@ -255,6 +257,44 @@ export function floorUnitGroups(s: OutreachSnapshot, floorId: string): { unit: U
   const all = s.units.filter(u => u.floorId === floorId);
   const sort = (list: Unit[]) => list.sort((a, b) => a.label.localeCompare(b.label, 'zh-Hant', { numeric: true }));
   return sort(all.filter(u => !u.parentUnitId)).map(unit => ({ unit, rooms: sort(all.filter(r => r.parentUnitId === unit.id)) }));
+}
+
+/**
+ * The column a unit sits in: the index of its letter among the unit letters, or undefined when
+ * its label is not a plain letter (a "N號" fallback, or a name staff typed freely). I and O are
+ * never unit letters, so a label that spells one is also treated as free-form.
+ */
+export function unitColumn(unit: Unit, floor: Floor): number | undefined {
+  const letter = letterOf(unit, floor);
+  return letter && LETTERS.includes(letter) ? LETTERS.indexOf(letter) : undefined;
+}
+
+/** How many columns a floor needs: its widest letter plus any non-letter units, zero when empty. */
+export function floorColumnCount(s: OutreachSnapshot, floorId: string): number {
+  const floor = s.floors.find(f => f.id === floorId);
+  const groups = floorUnitGroups(s, floorId);
+  const maxLetter = floor ? Math.max(-1, ...groups.map(g => unitColumn(g.unit, floor) ?? -1)) : -1;
+  const extras = groups.filter(g => !floor || unitColumn(g.unit, floor) === undefined).length;
+  return maxLetter + 1 + extras;
+}
+
+/**
+ * A floor's units placed in fixed letter columns: A is column 0, B column 1, and so on, with a
+ * deleted letter left empty so the units around it keep their positions instead of sliding into
+ * it. Units whose label is not a plain letter follow the letters, in label order. `width`
+ * columns are returned so every floor of the building shares the same grid.
+ */
+export function floorUnitColumns(s: OutreachSnapshot, floorId: string, width: number): ({ unit: Unit; rooms: Unit[] } | undefined)[] {
+  const floor = s.floors.find(f => f.id === floorId);
+  const cells = new Array<{ unit: Unit; rooms: Unit[] } | undefined>(width).fill(undefined);
+  let next = 0;
+  for (const group of floorUnitGroups(s, floorId)) {
+    const column = floor ? unitColumn(group.unit, floor) : undefined;
+    if (column !== undefined && column < width) { cells[column] = group; next = Math.max(next, column + 1); continue; }
+    while (next < width && cells[next]) next++;
+    if (next < width) { cells[next] = group; next++; }
+  }
+  return cells;
 }
 
 /**

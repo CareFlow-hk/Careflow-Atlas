@@ -4,7 +4,7 @@ import { addBuilding } from '../data/newBuilding';
 import { blankSnapshot } from '../data/blankSnapshot';
 import { exportWorkflowWorkbook, parseWorkflowWorkbook } from '../data/workflowWorkbook';
 import { validateSnapshot } from './schema';
-import { applyStructureChange, deleteGate, floorUnitGroups, roomCountAction, structureImpact, type StructureChange } from './structure';
+import { applyStructureChange, deleteGate, floorUnitColumns, floorUnitGroups, roomCountAction, structureImpact, type StructureChange } from './structure';
 import type { OutreachSnapshot } from './types';
 
 const actor = { at: '2026-10-10T08:00:00.000Z', by: '測試同事' };
@@ -43,6 +43,17 @@ describe('experimental structure editing', () => {
     let s = apply(start(), { kind: 'addFloors', buildingId: 'SYP-001', count: 1, unitsPerFloor: 2 });
     s = apply(s, { kind: 'addUnit', floorId: s.floors[0].id });
     expect(s.units.map(u => u.label)).toEqual(['1 樓 A室', '1 樓 B室', '1 樓 C室']);
+  });
+  it('keeps the other units in place after a delete, and reuses the gap when adding', () => {
+    let s = apply(start(), { kind: 'addFloors', buildingId: 'SYP-001', count: 1, unitsPerFloor: 4 });
+    const floorId = s.floors[0].id;
+    const a = s.units.find(u => u.label === '1 樓 A室')!;
+    s = apply(s, { kind: 'removeUnits', unitIds: [a.id] });
+    // B, C, D stay in their own columns; A's column is left empty rather than being closed up.
+    expect(floorUnitColumns(s, floorId, 4).map(cell => cell?.unit.label)).toEqual([undefined, '1 樓 B室', '1 樓 C室', '1 樓 D室']);
+    // Adding again fills the leftmost gap (A) before anything new is appended to the right.
+    s = apply(s, { kind: 'addUnit', floorId });
+    expect(floorUnitColumns(s, floorId, 4).map(cell => cell?.unit.label)).toEqual(['1 樓 A室', '1 樓 B室', '1 樓 C室', '1 樓 D室']);
   });
   it('splits a unit into 劏房 rooms that share its column', () => {
     let s = apply(start(), { kind: 'addFloors', buildingId: 'SYP-001', count: 1, unitsPerFloor: 2 });

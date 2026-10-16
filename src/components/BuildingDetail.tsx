@@ -1,6 +1,6 @@
 import { ArrowLeft, Building2, CalendarClock, ClipboardPlus, Flag, Minus, Plus, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from "react";
-import { floorUnitGroups, structureImpact } from "../domain/structure";
+import { floorColumnCount, floorUnitColumns, structureImpact, UNIT_LETTERS } from "../domain/structure";
 import { DeleteConfirm } from "./DeleteConfirm";
 import { StructureBar } from "./StructureBar";
 import { RoomList } from "./RoomSplitPanel";
@@ -112,11 +112,21 @@ export function BuildingDetail(props: BuildingDetailProps) {
    * The room names are not printed on the slices; the ledger below names them, and each
    * slice still carries its own name in `aria-label`/`title`.
    */
-  const groupsByFloor = new Map(floors.map(floor => [floor.id, floorUnitGroups(snapshot, floor.id)]));
-  const width = Math.max(0, ...[...groupsByFloor.values()].map(list => list.length));
-  const headings = ([...groupsByFloor.values()].find(list => list.length === width) ?? []).map(group => unitColumnLabel(group.unit.label, floorLabelOf(snapshot, group.unit)));
+  /*
+   * The floors laid out as fixed letter columns — A is column 0, B column 1, and so on — so a
+   * deleted unit leaves its column empty and the units around it keep their positions. The
+   * columns are the building's letters; a unit whose label is not a plain letter follows the
+   * letters, in label order, only on its own floor.
+   */
+  const columnCount = Math.max(0, ...floors.map(floor => floorColumnCount(snapshot, floor.id)));
+  const cellsByFloor = new Map(floors.map(floor => [floor.id, floorUnitColumns(snapshot, floor.id, columnCount)]));
+  const headings = Array.from({ length: columnCount }, (_, i) => {
+    if (i < UNIT_LETTERS.length) return UNIT_LETTERS[i];
+    for (const floor of floors) { const cell = cellsByFloor.get(floor.id)?.[i]; if (cell) return unitColumnLabel(cell.unit.label, floor.label); }
+    return "";
+  });
   /** Whether there are blocks at all: with none, nothing can be picked and no key is owed. */
-  const hasMatrix = floors.length > 0 && width > 0;
+  const hasMatrix = floors.length > 0 && columnCount > 0;
   /** "2樓 C1室" → "C1" for a room row: the floor the column repeats and 室 are understood. */
   const roomLabel = (unit: Unit) => unitColumnLabel(unit.label, floorLabelOf(snapshot, unit)).replace(/室$/, "");
   /*
@@ -220,20 +230,21 @@ export function BuildingDetail(props: BuildingDetailProps) {
             {onStructureChange && <button type="button" className={`cf-structure-toggle${editing ? " is-active" : ""}`} aria-pressed={editing} onClick={() => { setEditing(!editing); setSplitTarget(undefined); setPending(undefined); }}>{editing ? "完成" : "編輯結構"}<small>實驗</small></button>}</h3>
           <p className="cf-plate__key">{`↻ 待跟進 · ${clueMarks.SUSPECTED} ${assessmentLabels.SUSPECTED} · ${clueMarks.VERIFIED} ${assessmentLabels.STAFF_VERIFIED}`}</p>
           <p className="cf-plate__key">{`無符號＝${assessmentLabels.NO_INDICATION}／${assessmentLabels.NOT_UPDATED}`}</p>
-          {hasMatrix ? <div className="cf-matrix" role="grid" aria-label="樓層與單位狀態" style={{ "--cf-cols": width } as CSSProperties}>
+          {hasMatrix ? <div className="cf-matrix" role="grid" aria-label="樓層與單位狀態" style={{ "--cf-cols": columnCount } as CSSProperties}>
             <span role="presentation" />
-            {headings.map(label => <span key={label} className="cf-matrix__col" role="columnheader">{label}</span>)}
+            {headings.map((label, i) => <span key={`${label}-${i}`} className="cf-matrix__col" role="columnheader">{label}</span>)}
             <span className="cf-matrix__col" role="columnheader">完成</span>
             {floors.map(floor => {
-              const groups = groupsByFloor.get(floor.id) ?? [];
-              const list = groups.flatMap(group => (group.rooms.length ? group.rooms : [group.unit]));
+              const cells = cellsByFloor.get(floor.id) ?? [];
+              const present = cells.filter((cell): cell is { unit: Unit; rooms: Unit[] } => cell !== undefined);
+              const list = present.flatMap(group => (group.rooms.length ? group.rooms : [group.unit]));
               const scoped = getCoverageSummary(snapshot, building.id, floor.id);
-              const lastUnit = groups.at(-1)?.unit;
+              const lastUnit = present.at(-1)?.unit;
               const tagged = features.nodeTags && isTagged(snapshot, { buildingId: building.id, floorId: floor.id });
               return [
                 <button key={`${floor.id}-label`} className={`cf-matrix__floor${selectedFloorId === floor.id ? " is-active" : ""}`} aria-pressed={selectedFloorId === floor.id} onClick={() => onSelectFloor(floor.id)} title={tagged ? nodeTagLabel : undefined}>{floor.label}{tagged && <Flag size={10} aria-label={nodeTagLabel} />}</button>,
-                ...Array.from({ length: width }, (_, index) => {
-                  const group = groups[index];
+                ...Array.from({ length: columnCount }, (_, index) => {
+                  const group = cells[index];
                   if (!group) return <span key={`${floor.id}-${index}`} className="cf-cell is-none" aria-hidden="true" />;
                   if (!group.rooms.length) return unitCell(group.unit, false);
                   const parentClue = clueOf(snapshot, building.id, group.unit.id);
