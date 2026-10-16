@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/scripts/prompt-log.mjs\"", "timeout": 10 }
+        ]
+      }
+    ]
+  }
+}
