@@ -169,10 +169,10 @@ describe('experimental structure editing', () => {
  * their units, and printing A over a column of 1室 names a unit nobody has (review, 2026-10-16).
  */
 describe('the elevation names each column after what is in it', () => {
-  /** Staff-typed labels for one floor's units, in the order the fixture made them. */
-  const relabel = (s: OutreachSnapshot, names: string[]) => {
+  /** Staff-typed labels for one floor's units, in the order the fixture made them; undefined keeps one. */
+  const relabel = (s: OutreachSnapshot, names: (string | undefined)[]) => {
     const onFloor = s.units.filter(u => u.floorId === s.floors[0].id);
-    const next = { ...s, units: s.units.map(u => { const at = onFloor.indexOf(u); return at < 0 || at >= names.length ? u : { ...u, label: `${s.floors[0].label} ${names[at]}` }; }) };
+    const next = { ...s, units: s.units.map(u => { const at = onFloor.indexOf(u); const name = names[at]; return !name ? u : { ...u, label: `${s.floors[0].label} ${name}` }; }) };
     validateSnapshot(next);
     return next;
   };
@@ -191,6 +191,29 @@ describe('the elevation names each column after what is in it', () => {
     const s = threeUnits();
     const b = s.units.find(u => u.label === '1 樓 B室')!;
     expect(headingsOf(apply(s, { kind: 'removeUnits', unitIds: [b.id] }))).toEqual(['A', '', 'C']);
+  });
+
+  /*
+   * 「1號舖」 sorts before 「A室」, so a single pass over the floor put the shop in column 0 and
+   * then let A take that column away from it. The unit stayed in the snapshot with its records
+   * and disappeared from the elevation: nobody could click it, and its records were unreachable.
+   */
+  const cellsOf = (s: OutreachSnapshot) => floorUnitColumns(s, s.floors[0].id, floorColumnCount(s, s.floors[0].id)).map(cell => cell?.unit.label ?? '(空)');
+
+  it('keeps a numbered floor in its own columns', () => {
+    expect(cellsOf(relabel(threeUnits(), ['1室', '2室', '3室']))).toEqual(['1 樓 1室', '1 樓 2室', '1 樓 3室']);
+  });
+  it('does not let a letter overwrite a unit that is not lettered', () => {
+    const s = relabel(apply(start(), { kind: 'addFloors', buildingId: 'SYP-001', count: 1, unitsPerFloor: 3 }), ['A室', 'B室', '1號舖']);
+    expect(cellsOf(s)).toEqual(['1 樓 A室', '1 樓 B室', '1 樓 1號舖']);
+  });
+  it('puts a non-letter unit in the leftmost free column after a letter is deleted', () => {
+    const s = threeUnits();
+    const a = s.units.find(u => u.label === '1 樓 A室')!;
+    const afterDelete = apply(s, { kind: 'removeUnits', unitIds: [a.id] });
+    // The unit that replaces C is not lettered, so it fills A's empty column rather than C's.
+    // A is gone, so the units left on the floor are B and C: C becomes the shop.
+    expect(cellsOf(relabel(afterDelete, [undefined, '1號舖']))).toEqual(['1 樓 1號舖', '1 樓 B室', '(空)']);
   });
 });
 

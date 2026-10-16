@@ -275,30 +275,51 @@ export function unitColumn(unit: Unit, floor: Floor): number | undefined {
   return letter && LETTERS.includes(letter) ? LETTERS.indexOf(letter) : undefined;
 }
 
-/** How many columns a floor needs: its widest letter plus any non-letter units, zero when empty. */
+/**
+ * How many columns a floor needs: enough for every one of its units to have a column of its
+ * own, zero when it has none. That is its widest lettered column, plus one for each unit that
+ * cannot sit in a lettered one — a "N號" fallback, a name staff typed freely, or a second unit
+ * sharing an already-taken letter.
+ */
 export function floorColumnCount(s: OutreachSnapshot, floorId: string): number {
   const floor = s.floors.find(f => f.id === floorId);
-  const groups = floorUnitGroups(s, floorId);
-  const maxLetter = floor ? Math.max(-1, ...groups.map(g => unitColumn(g.unit, floor) ?? -1)) : -1;
-  const extras = groups.filter(g => !floor || unitColumn(g.unit, floor) === undefined).length;
-  return maxLetter + 1 + extras;
+  const taken = new Set<number>();
+  let extras = 0;
+  for (const group of floorUnitGroups(s, floorId)) {
+    const column = floor ? unitColumn(group.unit, floor) : undefined;
+    if (column !== undefined && !taken.has(column)) taken.add(column);
+    else extras++;
+  }
+  return (taken.size ? Math.max(...taken) + 1 : 0) + extras;
 }
 
 /**
  * A floor's units placed in fixed letter columns: A is column 0, B column 1, and so on, with a
  * deleted letter left empty so the units around it keep their positions instead of sliding into
- * it. Units whose label is not a plain letter follow the letters, in label order. `width`
- * columns are returned so every floor of the building shares the same grid.
+ * it. Units whose label is not a plain letter take the leftmost column still free, in label
+ * order — the same gap the ＋ button fills. `width` columns are returned so every floor of the
+ * building shares the same grid.
+ *
+ * The letters go down first and the rest afterwards, because a letter belongs in its own column
+ * and must never be written over: 「1號舖」 sorts before 「A室」, and a single pass would put it in
+ * column 0 and then let A take that column away from it — the unit would still be in the
+ * snapshot, with its records, but nothing on the elevation would reach it (review, 2026-10-16).
  */
 export function floorUnitColumns(s: OutreachSnapshot, floorId: string, width: number): ({ unit: Unit; rooms: Unit[] } | undefined)[] {
   const floor = s.floors.find(f => f.id === floorId);
   const cells = new Array<{ unit: Unit; rooms: Unit[] } | undefined>(width).fill(undefined);
-  let next = 0;
+  const rest: { unit: Unit; rooms: Unit[] }[] = [];
   for (const group of floorUnitGroups(s, floorId)) {
     const column = floor ? unitColumn(group.unit, floor) : undefined;
-    if (column !== undefined && column < width) { cells[column] = group; next = Math.max(next, column + 1); continue; }
+    if (column !== undefined && column < width && !cells[column]) { cells[column] = group; continue; }
+    rest.push(group);
+  }
+  let next = 0;
+  for (const group of rest) {
     while (next < width && cells[next]) next++;
-    if (next < width) { cells[next] = group; next++; }
+    if (next >= width) break;
+    cells[next] = group;
+    next++;
   }
   return cells;
 }
