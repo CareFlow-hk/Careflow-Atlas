@@ -7,7 +7,8 @@
 每一条发给 AI 的 prompt 都要原文记进 `log/`，详细规则见 CLAUDE.md 第 9 节：
 
 - 一天一个文件：`log/YYYY-MM-DD.md`，日期按香港时间（`TZ=Asia/Hong_Kong date '+%Y-%m-%d %H:%M:%S'`）。
-- 每收到一条 prompt（包括中途追加的消息），动手之前先追加一段：
+- 用 Claude Code 时由仓库的 hook（`.claude/settings.json` → `scripts/prompt-log.mjs`）自动记录，不要再手动记。
+- 用 Codex 等其他工具时，每收到一条 prompt（包括中途追加的消息），动手之前先手动追加一段：
 
   ```markdown
   ## 20:47:04 · 小刘 · Codex
