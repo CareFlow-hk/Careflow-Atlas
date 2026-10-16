@@ -112,3 +112,23 @@ npm run dev         # vite --host 127.0.0.1
 - 一个 PR 只做一件事；按 `.github/pull_request_template.md` 填写。审核重点不是代码作者，而是：作者亲手跑过的流程，以及作者发现并纠正了 AI 的哪些错误。
 - 不要替作者编写「我亲手跑过的流程」或「我发现 AI 做错的地方」：这两节必须来自作者本人的实际操作。
 - 以后也适用的纠正，写进本文件第 3 或第 7 节，不只留在 PR 里。
+- **PR 标题、描述、review 回复和 commit 说明一律用简体中文**，不要用繁体。界面文案（给 NGO 同事看的按钮、提示、Excel 表头）仍按现有的繁体，不受这条影响。
+
+## 9. Prompt 日志（2026-10-15 起，必须遵守）
+
+每一条发给 AI 的 prompt 都要原文记进 `log/`，让审核的人看得到「是谁、什么时候、让 AI 做了什么」。
+
+- **一天一个文件**：`log/YYYY-MM-DD.md`，日期按香港时间（`TZ=Asia/Hong_Kong date '+%Y-%m-%d %H:%M:%S'`）。当天文件不存在就新建，存在就往末尾追加。
+- **Claude Code 由 hook 自动记录**：仓库的 `.claude/settings.json` 在每次提交 prompt 时运行 `scripts/prompt-log.mjs`，把原文追加进当天文件（作者取 `git config user.name`，可用环境变量 `PROMPT_LOG_AUTHOR` 改）。**AI 不要再手动记一次**，否则会重复。hook 会自动遮蔽常见的密钥和一次性链接，但不保证全部认得出：**不要把密码、key 贴进 prompt**。
+- **没有 hook 的工具（Codex 等）要手动记**：每收到一条 prompt，包括对话中途追加的消息，动手之前先追加。格式：
+
+  ```markdown
+  ## 20:47:04 · Oscar · Claude Code
+
+  > prompt 原文（多行就每行都加 `> `）
+  ```
+
+  `·` 后面依次是：提出 prompt 的人、使用的工具（Claude Code、Codex 等）。
+- **原文照录**：不改写、不摘要、不翻译、不删减。唯一例外是遮蔽：密码、API key、token、一次性设置密码链接、真实个人资料，一律改成 `[已遮蔽：密码]` 这类标记。仓库是公开的，`log/` 也会公开。
+- 日志随同一次改动一起 commit（hook 写的也一样，`git status` 会看到 `log/` 有改动）；只记 prompt 本身，不记 AI 的回复。
+- 只追加，不改写、不删除旧记录。记错了就在后面补一条更正。
