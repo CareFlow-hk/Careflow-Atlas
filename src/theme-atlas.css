@@ -304,6 +304,11 @@ body{background:var(--atlas-paper)}
 .app-shell .cf-structure__row button:disabled{opacity:.45;cursor:default}
 .app-shell .cf-structure__row button.is-primary{background:var(--atlas-ink);border-color:var(--atlas-ink);color:var(--atlas-card)}
 .app-shell .cf-structure__hint{margin:0;color:var(--atlas-mute);line-height:1.5}
+/* Deleting the one unit the editor has open sits under the split form, kept apart from the
+   add/split controls so a destructive act is not mistaken for one of them. */
+.app-shell .cf-structure__delete{display:flex}
+.app-shell .cf-structure__delete button{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border:1px solid #d8a79c;border-radius:6px;background:#fff;color:#8b3e32;font:inherit;font-size:12.5px;cursor:pointer}
+.app-shell .cf-structure__delete button:hover{background:#fff0ed}
 .app-shell .cf-structure__problem{margin:0;padding:5px 8px;border-radius:5px;background:#fff0ed;color:#8b3e32}
 /* Only a delete that would take records with it reaches this, so the count is on screen
    at the moment staff decide. */

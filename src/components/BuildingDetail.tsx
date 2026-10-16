@@ -82,19 +82,24 @@ export function BuildingDetail(props: BuildingDetailProps) {
     onSelectUnit(undefined);
   };
   /*
-   * Deleting a picked set goes the same way as any other structure change: straight through
-   * when nothing is recorded there, and held back by the count when something is. The set is
-   * dropped once the units are gone — the ids it holds no longer name anything.
+   * Deleting units goes the same way as any other structure change: straight through when
+   * nothing is recorded there, and held back by the count when something is. The picked set
+   * or the unit the structure editor has open is dropped once it is gone — the ids it holds
+   * no longer name anything.
    */
-  const deletePicked = () => {
+  const removeUnits = (unitIds: string[]) => {
     if (!onStructureChange) return;
-    const change: StructureChange = { kind: "removeUnits", unitIds: chosen };
+    const change: StructureChange = { kind: "removeUnits", unitIds };
     const impact = structureImpact(snapshot, change);
     if (impact) { pendingSeq.current += 1; setPending({ id: pendingSeq.current, change, question: impact.confirmation }); return; }
     onStructureChange(change);
     setChosen([]);
+    setSplitTarget(undefined);
     onSelectUnit(undefined);
   };
+  const deletePicked = () => removeUnits(chosen);
+  /* The one unit the structure editor has open, deleted from its own button under the split form. */
+  const deleteUnit = (unitId: string) => removeUnits([unitId]);
   const openFollowUps = getOpenFollowUps(snapshot);
   const summary = getCoverageSummary(snapshot, building.id);
   const state = buildingState(snapshot, building.id);
@@ -251,7 +256,7 @@ export function BuildingDetail(props: BuildingDetailProps) {
               appears once the thing it explains has already been done. Hidden while the
               structure editor is open: there a click sets a 劏房 count instead of picking. */}
           {hasMatrix && !editing && <p className="cf-plate__hint">按住 Ctrl／Command 點色塊，可以一次記錄多個單位。</p>}
-          {editing && onStructureChange && <StructureBar snapshot={snapshot} buildingId={building.id} splitUnitId={splitTarget} onCloseSplit={() => setSplitTarget(undefined)} onChange={runChange} />}
+          {editing && onStructureChange && <StructureBar snapshot={snapshot} buildingId={building.id} splitUnitId={splitTarget} onCloseSplit={() => setSplitTarget(undefined)} onChange={runChange} onDeleteUnit={deleteUnit} />}
           {/* Only ever shown for a delete that would take records with it, so the count is on
               screen at the moment staff decide — not after the fact. It sits outside the
               structure editor because a picked set can be deleted without opening it. */}
