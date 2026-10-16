@@ -34,35 +34,29 @@ describe('picking units off the elevation', () => {
 });
 
 /*
- * Esc and Delete are keys people also press to get out of a dialog and to rub out what they
- * typed, so while a set is picked they still have to mean what they usually mean wherever
- * the cursor actually is.
+ * Esc is a key people also press to get out of a dialog, so while a set is picked it still
+ * has to mean what it usually means wherever the cursor actually is.
  */
 describe('the keys that act on a picked set', () => {
   const away = { inField: false, dialogOpen: false };
 
-  it('clears the set on Esc and deletes it on Delete', () => {
+  it('clears the set on Esc', () => {
     expect(pickerKeyAction('Escape', away)).toBe('CLEAR');
-    expect(pickerKeyAction('Delete', away)).toBe('DELETE');
-    expect(pickerKeyAction('Backspace', away)).toBe('DELETE');
   });
 
-  it('leaves every other key alone', () => {
-    for (const key of ['Enter', 'a', 'ArrowDown', 'Control']) expect(pickerKeyAction(key, away)).toBeUndefined();
+  it('leaves every other key alone, Delete included', () => {
+    for (const key of ['Enter', 'a', 'ArrowDown', 'Control', 'Delete', 'Backspace']) expect(pickerKeyAction(key, away)).toBeUndefined();
   });
 
-  /* Deleting a unit from a keypress while the cursor is in the 記錄內容 box would be a trap. */
+  /* Clearing the set from a keypress while the cursor is in the 記錄內容 box would be a trap. */
   it('does nothing while a field has the cursor', () => {
     const inField = { inField: true, dialogOpen: false };
-    expect(pickerKeyAction('Delete', inField)).toBeUndefined();
-    expect(pickerKeyAction('Backspace', inField)).toBeUndefined();
     expect(pickerKeyAction('Escape', inField)).toBeUndefined();
   });
 
-  /* While the entry dialog is open, Esc closes it and Delete belongs to the text in it. */
+  /* While the entry dialog is open, Esc closes it, not the selection. */
   it('does nothing while a dialog is open', () => {
     const dialog = { inField: false, dialogOpen: true };
     expect(pickerKeyAction('Escape', dialog)).toBeUndefined();
-    expect(pickerKeyAction('Delete', dialog)).toBeUndefined();
   });
 });

@@ -23,24 +23,23 @@ export interface UnitPickerBarProps {
 export function UnitPickerBar({ count, recordCount, onClear, onDelete, onRecord }: UnitPickerBarProps) {
   const [helpOpen, setHelpOpen] = useState(false);
   /*
-   * Esc and Delete act on the picked set while there is one. Both are keys people press to
-   * get out of things, so neither fires while a field has the cursor or while a dialog is
-   * open — there, Esc belongs to the dialog and Delete to the text.
+   * Esc clears the picked set while there is one. It is a key people also press to get out
+   * of things, so it does not fire while a field has the cursor or a dialog is open — there,
+   * Esc belongs to the dialog.
    */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      const action = pickerKeyAction(event.key, {
+      const clear = pickerKeyAction(event.key, {
         inField: Boolean((event.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable='true']")),
         dialogOpen: Boolean(document.querySelector("dialog[open]")),
       });
-      if (!action || (action === "DELETE" && !onDelete)) return;
+      if (!clear) return;
       event.preventDefault();
-      if (action === "CLEAR") onClear();
-      else onDelete?.();
+      onClear();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onClear, onDelete]);
+  }, [onClear]);
   return (
     <div className="cf-pick" role="group" aria-label={`已選 ${count} 個單位`}>
       <p className="cf-pick__head">
@@ -49,7 +48,7 @@ export function UnitPickerBar({ count, recordCount, onClear, onDelete, onRecord 
         <button type="button" className="cf-pick__clear" onClick={onClear}><X size={13} />清除選取</button>
       </p>
       <p className="cf-pick__more" id="cf-pick-help" hidden={!helpOpen}>
-        按住 Ctrl／Command 點色塊，可以逐個加入或移出選取；直接點色塊就還原成只選一個。按 Esc 清除選取{onDelete ? "，按 Delete 刪除" : ""}。
+        按住 Ctrl／Command 點色塊，可以逐個加入或移出選取；直接點色塊就還原成只選一個。按 Esc 清除選取。
         劏房房間要逐格點；已經分拆的單位不能確認無劏房，會被略過。
       </p>
       <div className="cf-pick__acts">

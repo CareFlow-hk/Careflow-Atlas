@@ -64,10 +64,9 @@ describe('the bar that acts on a picked set', () => {
   });
 
   /* Recording a set does not depend on structure editing; deleting a set does. */
-  it('offers no delete where units cannot be removed, and does not promise one', () => {
+  it('offers no delete where units cannot be removed', () => {
     const markup = renderToStaticMarkup(<UnitPickerBar count={3} recordCount={2} onClear={noop} onRecord={noop} />);
     expect(markup).not.toContain('刪除選取的');
-    expect(markup).not.toContain('按 Delete');
     expect(markup).toContain('記錄 3 個單位');
   });
 });
