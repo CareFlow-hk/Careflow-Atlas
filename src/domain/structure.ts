@@ -32,10 +32,30 @@ const sorted = (list: Unit[]) => [...list].sort(byLabel);
 const roomsGoing = (existing: Unit[], rooms: number) => (rooms <= 1 ? existing : existing.slice(rooms));
 const floorsOf = (s: OutreachSnapshot, buildingId: string) => s.floors.filter(f => f.buildingId === buildingId);
 
-/** "12F" → "13F", "3 樓" → "4 樓", "G/F" → falls back to "N 樓". */
-export function floorLabelFor(level: number, like?: string): string {
-  if (like && /\d+/.test(like)) return like.replace(/-?\d+/, String(level));
-  return `${level} 樓`;
+/** A floor called `number`, written like `like`: (13, "12F") → "13F", (4, "3 樓") → "4 樓", no pattern → "N 樓". */
+export function floorLabelFor(number: number, like?: string): string {
+  if (like && /\d+/.test(like)) return like.replace(/-?\d+/, String(number));
+  return `${number} 樓`;
+}
+/** The number a floor's name carries: 「12F」→ 12, 「3 樓」→ 3, 「地下」→ undefined. */
+export const floorNumber = (label: string) => { const m = /\d+/.exec(label); return m ? Number(m[0]) : undefined; };
+/**
+ * Floor names and levels are different counts. Levels run 1, 2, 3… from the bottom; a building
+ * whose bottom floor is 「地下」 calls level 2 「1樓」. So a new floor's name follows the highest
+ * numbered floor's name, not its level — naming by level turned 地下／1樓／2樓 + 1 into 「4樓」.
+ * The offset is that floor's number minus its level; with no numbered floor yet, every floor
+ * there is taken as sitting below 「1樓」 (an empty building starts at 1, a lone 地下 is followed by 1).
+ */
+function floorNaming(floors: Floor[]) {
+  const numbered = floors.filter(f => floorNumber(f.label) !== undefined).sort((a, b) => b.level - a.level)[0];
+  return numbered
+    ? { offset: floorNumber(numbered.label)! - numbered.level, like: numbered.label }
+    : { offset: -floors.length, like: undefined };
+}
+/** The one floor whose name carries `number`; none when no floor or more than one does (never guess). */
+function floorByNumber(floors: Floor[], number: number) {
+  const matches = floors.filter(f => floorNumber(f.label) === number);
+  return matches.length === 1 ? matches[0] : undefined;
 }
 /**
  * Letter part of "2樓 B室" → "B"; units the person named freely return undefined.
@@ -65,8 +85,11 @@ const stemOf = (units: Unit[]) => sorted(units).map(u => /^(.*?)([A-Z])室$/.exe
 const unitStem = (units: Unit[], floor: Floor) => {
   const stem = stemOf(units.filter(u => u.floorId === floor.id && !u.parentUnitId))
     ?? stemOf(units.filter(u => u.buildingId === floor.buildingId));
-  if (stem === undefined) return `${floor.label} `;
-  return /\d/.test(stem) ? stem.replace(/-?\d+/, String(floor.level)) : stem;
+  if (stem === undefined || !/\d/.test(stem)) return stem ?? `${floor.label} `;
+  // A borrowed 「2樓 」 takes this floor's own number from its name; a floor with no number
+  // in its name (「地下」) cannot be spelled from a numbered pattern, so it uses its label.
+  const number = floorNumber(floor.label);
+  return number === undefined ? `${floor.label} ` : stem.replace(/-?\d+/, String(number));
 };
 
 function withBuilding(s: OutreachSnapshot, buildingId: string, floors: Floor[], units: Unit[]): OutreachSnapshot {
@@ -82,12 +105,13 @@ export function addFloors(s: OutreachSnapshot, buildingId: string, count: number
   const existing = floorsOf(s, buildingId);
   if (existing.length + count > MAX_FLOORS) return { error: `一幢最多 ${MAX_FLOORS} 層。` };
   const top = existing.reduce<Floor | undefined>((a, f) => (!a || f.level > a.level ? f : a), undefined);
+  const naming = floorNaming(existing);
   const floorIds = new Set(s.floors.map(f => f.id)), unitIds = new Set(s.units.map(u => u.id));
   const floors = [...s.floors], units = [...s.units];
   for (let i = 1; i <= count; i++) {
     const level = (top?.level ?? 0) + i;
     const id = freeId(floorIds, n => `${buildingId}-f${n}`); floorIds.add(id);
-    const floor: Floor = { ...flags, id, buildingId, level, label: floorLabelFor(level, top?.label) };
+    const floor: Floor = { ...flags, id, buildingId, level, label: floorLabelFor(level + naming.offset, naming.like) };
     floors.push(floor);
     const stem = unitStem(s.units, floor);
     for (let k = 0; k < unitsPerFloor; k++) {
@@ -508,11 +532,17 @@ export function readPaperUnit(text?: string | null, floorText?: string | null): 
 
 export function proposeLocation(s: OutreachSnapshot, buildingId: string, floorText?: string | null, unitText?: string | null): LocationProposal | undefined {
   const building = s.buildings.find(b => b.id === buildingId);
-  const level = readPaperFloor(floorText), unit = readPaperUnit(unitText, floorText);
-  if (!building || level === undefined || level < 1 || level > MAX_FLOORS || !unit) return undefined;
+  const number = readPaperFloor(floorText), unit = readPaperUnit(unitText, floorText);
+  if (!building || number === undefined || number < 1 || number > MAX_FLOORS || !unit) return undefined;
   const floors = floorsOf(s, buildingId);
-  const floor = floors.find(f => f.level === level);
-  const floorLabel = floor?.label ?? floorLabelFor(level, floors[0]?.label);
+  // The paper's 「1樓」 is the floor named 1樓, which sits at level 2 above a 地下.
+  const floor = floorByNumber(floors, number);
+  const naming = floorNaming(floors);
+  const level = floor?.level ?? number - naming.offset;
+  // A new floor must land on a free level; a number already used by two floors, or a level
+  // held by an unnumbered floor, is not something to guess about.
+  if (!floor && (level < 1 || floors.some(f => f.level === level || floorNumber(f.label) === number))) return undefined;
+  const floorLabel = floor?.label ?? floorLabelFor(number, naming.like);
   // The name the unit would be given is the name the step below promises, so both take the
   // spelling the floor's units already use rather than the floor label's.
   const parentLabel = `${unitStem(s.units, floor ?? { ...flags, id: `${buildingId}-f${level}`, buildingId, level, label: floorLabel })}${unit.letter}室`;
@@ -531,7 +561,7 @@ export function proposeLocation(s: OutreachSnapshot, buildingId: string, floorTe
     apply: current => {
       const ids = (list: { id: string }[]) => new Set(list.map(x => x.id));
       let next = current;
-      let target = floorsOf(next, buildingId).find(f => f.level === level);
+      let target = floor ? floorsOf(next, buildingId).find(f => f.id === floor.id) : floorByNumber(floorsOf(next, buildingId), number);
       if (!target) {
         if (floorsOf(next, buildingId).length >= MAX_FLOORS) return { error: `一幢最多 ${MAX_FLOORS} 層。` };
         const id = freeId(ids(next.floors), n => `${buildingId}-f${n}`);
@@ -560,9 +590,9 @@ export function proposeLocation(s: OutreachSnapshot, buildingId: string, floorTe
 
 /** The unit the paper names, when the building already has it. Same reading rules as `proposeLocation`. */
 export function findPaperLocation(s: OutreachSnapshot, buildingId: string, floorText?: string | null, unitText?: string | null): string | undefined {
-  const level = readPaperFloor(floorText), unit = readPaperUnit(unitText, floorText);
-  if (level === undefined || !unit) return undefined;
-  const floor = floorsOf(s, buildingId).find(f => f.level === level);
+  const number = readPaperFloor(floorText), unit = readPaperUnit(unitText, floorText);
+  if (number === undefined || !unit) return undefined;
+  const floor = floorByNumber(floorsOf(s, buildingId), number);
   const parent = floor && s.units.find(u => u.floorId === floor.id && !u.parentUnitId && letterOf(u, floor) === unit.letter);
   if (!parent || unit.room === undefined) return parent?.id;
   const label = `${parent.label.replace(/室$/, '')}${unit.room}室`;
