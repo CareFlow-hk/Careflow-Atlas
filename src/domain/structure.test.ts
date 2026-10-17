@@ -373,3 +373,43 @@ describe('the delete gate waits on a backup that really happened', () => {
     expect(failed.note).toContain('未刪除任何記錄');
   });
 });
+
+describe('a building whose bottom floor is 地下', () => {
+  const at = { at: '2026-10-17T04:00:00Z' };
+  const hk = () => {
+    const r = addBuilding(blankSnapshot(), { name: '地下樓', address: '', coordinates: { lng: 114.14, lat: 22.28 }, layout: '地下：地下 A室\n1樓：1樓 A室、1樓 B室\n2樓：2樓 A室' });
+    if ('error' in r) throw new Error(r.error);
+    return { s: r.snapshot, id: r.buildingId };
+  };
+  const ok = (r: ReturnType<typeof applyStructureChange>) => { if ('error' in r) throw new Error(r.error); validateSnapshot(r.snapshot); return r.snapshot; };
+  const labelsOn = (s: OutreachSnapshot, floorLabel: string) => s.units.filter(u => u.floorId === s.floors.find(f => f.label === floorLabel)!.id).map(u => u.label);
+
+  it('names a new floor after the top one by number, not by level', () => {
+    const { s, id } = hk();
+    const next = ok(applyStructureChange(s, { kind: 'addFloors', buildingId: id, count: 2, unitsPerFloor: 1 }, at));
+    expect(next.floors.map(f => f.label)).toEqual(['地下', '1樓', '2樓', '3樓', '4樓']);
+    expect(labelsOn(next, '3樓')).toEqual(['3樓 A室']);
+  });
+  it('spells a unit on an emptied 1樓 as 1樓, not after its level', () => {
+    const { s } = hk();
+    const emptied = ok(applyStructureChange(s, { kind: 'removeUnits', unitIds: s.units.filter(u => u.label.startsWith('1樓')).map(u => u.id), confirmed: true }, at));
+    const floorId = emptied.floors.find(f => f.label === '1樓')!.id;
+    expect(labelsOn(ok(applyStructureChange(emptied, { kind: 'addUnit', floorId }, at)), '1樓')).toEqual(['1樓 A室']);
+  });
+  it('starts a building that only has 地下 at 1 樓', () => {
+    const r = addBuilding(blankSnapshot(), { name: '平房', address: '', coordinates: { lng: 114.14, lat: 22.28 }, layout: '地下：A室' });
+    if ('error' in r) throw new Error(r.error);
+    expect(ok(applyStructureChange(r.snapshot, { kind: 'addFloors', buildingId: r.buildingId, count: 1, unitsPerFloor: 0 }, at)).floors.map(f => f.label)).toEqual(['地下', '1 樓']);
+  });
+  it('reads a paper 「1樓」 as the floor named 1樓, not the one at level 1', () => {
+    const { s, id } = hk();
+    expect(findPaperLocation(s, id, '1樓', 'B')).toBe(s.units.find(u => u.label === '1樓 B室')!.id);
+    const room = proposeLocation(s, id, '1/F', 'B1')!;
+    expect(room.steps).toEqual(['把「1樓 B室」分出劏房「1樓 B1室」']);
+    const missing = proposeLocation(s, id, '3樓', 'A')!;
+    expect(missing.steps).toEqual(['新增「3樓」', '在3樓新增「3樓 A室」']);
+    const r = missing.apply(s);
+    if ('error' in r) throw new Error(r.error);
+    expect(r.snapshot.floors.find(f => f.label === '3樓')).toMatchObject({ level: 4 });
+  });
+});
