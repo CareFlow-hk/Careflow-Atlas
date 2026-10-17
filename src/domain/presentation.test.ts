@@ -2,7 +2,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
-  COVERAGE_GROUPS, CONTACT_GROUPS, acceptedAssessment, acceptedContact, acceptedCoverage, acceptedSource, assessmentOptions, contactOptionGroups, coverageOptionGroups,
+  COVERAGE_GROUPS, CONTACT_GROUPS, acceptedAssessment, acceptedContact, acceptedCoverage, acceptedSource, assessmentOptions, canonicalCoverageOf, contactOptionGroups, coverageGroupOf, coverageOptionGroups,
   recognitionAssessmentValues, recognitionCategoryValues, recognitionContactValues, recognitionCoverageValues,
   recognitionSourceValues, sourceOptions, stateColors, stateLabels, stateLegendNotes, stateSelectedColors,
 } from './presentation';
@@ -61,9 +61,11 @@ describe('one source for every label', () => {
    */
   const labelOnly = [
     '需留意', '尚待了解', '曾嘗試', '部分完成', '已訪，無記錄發現', '已訪，有記錄',
-    '未嘗試接觸', '住戶婉拒', '接觸結果未明', '今次未更新住房判斷', '住房情況未能確定',
-    '疑似劏房，尚待核實', '今次未見相關跡象', '工作人員已確認', '工作人員觀察', '其他來源',
-    '疑似劏房線索', '已確認劏房', '有記錄發現',
+    '未嘗試接觸', '住戶婉拒', '接觸結果未明', '住房情況未能確定', '無更新', '未見相關跡象',
+    '疑似劏房', '工作人員觀察', '其他來源', '有記錄發現',
+    // The entry screen wrote these until 2026-10-15. They now live in retiredLabels inside
+    // presentation.ts, and listing them here still stops another file retyping one.
+    '今次未更新住房判斷', '今次未見相關跡象', '疑似劏房，尚待核實', '工作人員已確認',
     ...Object.values(stateLegendNotes),
   ];
   it('keeps every status sentence inside presentation.ts', () => {
@@ -107,6 +109,30 @@ describe('one source for every option', () => {
     for (const option of contactOptionGroups) expect(CONTACT_OUTCOMES).toContain(option.canonical);
   });
 
+  /*
+   * The entry form opens a 劏房 room with these two already answered. A radio whose
+   * value is not among its choices renders nothing checked — the form would silently
+   * stop being pre-answered, and would still save, so nothing else would catch it.
+   */
+  it('offers the values the entry form pre-selects for a 劏房 room', () => {
+    expect(coverageOptionGroups.find(option => option.label === '已完成探訪')?.canonical).toBe('VISITED_NO_FINDING');
+    expect(assessmentOptions.map(option => option.value)).toContain('STAFF_VERIFIED');
+  });
+
+  /*
+   * A room's form opens on whatever its record already stands at, read back through the
+   * group so a stored PARTIAL or INACCESSIBLE lights up 未能完成探訪 rather than a value
+   * the form does not offer. If this ever stops round-tripping, the form silently opens
+   * on the wrong choice and still saves.
+   */
+  it('maps a stored coverage back to a choice the form actually offers', () => {
+    for (const status of COVERAGE_STATUSES) {
+      const group = coverageGroupOf(status);
+      expect(coverageOptionGroups.find(option => option.group === group)?.covers).toContain(status);
+      expect(coverageOptionGroups.map(option => option.canonical)).toContain(canonicalCoverageOf(group));
+    }
+  });
+
   it('keeps every wording a sheet may already contain readable', () => {
     expect(acceptedCoverage['部分完成']).toBe('PARTIAL');
     expect(acceptedCoverage['未到訪']).toBe('UNVISITED');
@@ -118,6 +144,19 @@ describe('one source for every option', () => {
     expect(acceptedAssessment['今次未更新']).toBe('NOT_UPDATED');
     expect(acceptedAssessment['由工作人員確認']).toBe('STAFF_VERIFIED');
     expect(acceptedSource['來源未明']).toBe('UNKNOWN');
+  });
+
+  /*
+   * Putting the housing answer into one set of words (2026-10-15) changed what the entry
+   * screen writes. The cell and the ledger are display only, but a 紙本回錄 sheet or a
+   * workbook saved before that date carries the old spellings, and reading one back must
+   * still land on the same stored answer rather than on nothing.
+   */
+  it('keeps the housing wordings an earlier screen wrote readable', () => {
+    expect(acceptedAssessment['今次未更新住房判斷']).toBe('NOT_UPDATED');
+    expect(acceptedAssessment['今次未見相關跡象']).toBe('NO_INDICATION');
+    expect(acceptedAssessment['疑似劏房，尚待核實']).toBe('SUSPECTED');
+    expect(acceptedAssessment['工作人員已確認']).toBe('STAFF_VERIFIED');
   });
 
   it('recognises the same wordings the detector is offered', () => {

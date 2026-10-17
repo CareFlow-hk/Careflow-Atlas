@@ -72,15 +72,25 @@ export function floorBase(progress: number, index: number, count: number): numbe
   return base;
 }
 
+/**
+ * The stand-in block for a building with no outline yet — one met in the field, or added
+ * on a spot the basemap has nothing under: 26 m × 20 m around the point. Shared with the
+ * add panel so the preview is the shape that will actually be stored.
+ */
+export function defaultFootprintRing(point: { lng: number; lat: number }): number[][] {
+  const metresX = 111320 * Math.cos(point.lat * Math.PI / 180);
+  const west = point.lng - 13 / metresX, east = point.lng + 13 / metresX;
+  const south = point.lat - 10 / 111320, north = point.lat + 10 / 111320;
+  return [[west, south], [east, south], [east, north], [west, north], [west, south]];
+}
+
 /** Declared synthetic geometry only; not an indoor survey or inferred subdivision. */
 export function footprintOf(building: MapBuilding, paddingMetres = 0): number[][] {
   if (building.footprint && !paddingMetres) return building.footprint;
   const metresX = 111320 * Math.cos(building.latitude * Math.PI / 180);
-  const ring = building.footprint;
-  const west = ring ? Math.min(...ring.map(p => p[0])) : building.longitude - 13 / metresX;
-  const east = ring ? Math.max(...ring.map(p => p[0])) : building.longitude + 13 / metresX;
-  const south = ring ? Math.min(...ring.map(p => p[1])) : building.latitude - 10 / 111320;
-  const north = ring ? Math.max(...ring.map(p => p[1])) : building.latitude + 10 / 111320;
+  const ring = building.footprint ?? defaultFootprintRing({ lng: building.longitude, lat: building.latitude });
+  const west = Math.min(...ring.map(p => p[0])), east = Math.max(...ring.map(p => p[0]));
+  const south = Math.min(...ring.map(p => p[1])), north = Math.max(...ring.map(p => p[1]));
   const dx = paddingMetres / metresX, dy = paddingMetres / 111320;
   return [
     [west - dx, south - dy], [east + dx, south - dy],

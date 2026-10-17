@@ -92,10 +92,15 @@ body{background:var(--atlas-paper)}
 .app-shell .cf-plate__sec{padding:12px 18px;border-bottom:1px solid var(--atlas-rule);margin:0;border-top:0}
 .app-shell .cf-plate__sec>h3{margin:0 0 10px;display:flex;justify-content:space-between;align-items:baseline;font-size:12px;font-weight:400}
 .app-shell .cf-plate__key,.app-shell .cf-plate__count{font-size:11px;color:var(--atlas-mute)}
+/* On its own line under the heading, where it cannot wrap through the middle of a key.
+   The heading keeps its gap below so the two still read as one block. */
+.app-shell .cf-plate__sec>h3+.cf-plate__key{margin:0 0 10px;line-height:1.6}
 .app-shell .cf-plate__unit{font-family:var(--atlas-serif);font-size:17px;font-weight:600;color:var(--atlas-ink)}
 .app-shell .cf-plate__facts{display:grid;grid-template-columns:56px 1fr;gap:5px 12px;margin:0 0 12px;font-size:12.5px}
 .app-shell .cf-plate__facts dt{color:var(--atlas-mute)}
 .app-shell .cf-plate__facts dd{margin:0}
+/* Says where an inherited 最近 value came from, so the date is not read as a visit to this room. */
+.app-shell .cf-plate__inherited{margin-left:6px;color:var(--atlas-mute);font-size:11px}
 .app-shell .cf-building-tasks ul{margin:0}
 
 /* The elevation matrix: every floor and unit of the building in one view. */
@@ -272,3 +277,96 @@ body{background:var(--atlas-paper)}
 .app-shell .cf-recognition__issues li.is-error{background:transparent;color:var(--atlas-acc)}
 .app-shell .cf-recognition__issues li.is-warning{background:transparent;color:var(--atlas-task)}
 .app-shell .cf-recognition__detail>summary{color:var(--atlas-ink);font-weight:500}
+
+/* Experimental structure editor and 劏房 rooms in the matrix. */
+/* The 劏房 slices share their unit's one cell; the gap between them is the white line. */
+/* Positioned, so the mark the split unit carries there itself sits in its own corner
+   rather than in the corner of whichever slice happens to be first. */
+.app-shell .cf-cell-split{display:flex;gap:2px;height:22px;container-type:inline-size;position:relative}
+.app-shell .cf-cell-split .cf-cell{flex:1;min-width:0}
+.app-shell .cf-cell.is-room{border-left-color:#ffffff66}
+/* Once a slice is narrower than a badge, the badges collide instead of reading, and the
+   lines already say how many rooms there are. They come back as the cell grows. */
+@container (max-width:62px){.app-shell .cf-cell__task,.app-shell .cf-cell__clue{display:none}}
+.app-shell .cf-structure-toggle{margin-left:auto;white-space:nowrap;flex-shrink:0;display:inline-flex;align-items:center;gap:4px;border:1px solid var(--atlas-line,#d8d2c4);background:transparent;border-radius:6px;padding:2px 8px;font:inherit;font-size:11.5px;color:var(--atlas-ink);cursor:pointer}
+.app-shell .cf-structure-toggle small{font-size:9px;color:#a15c1c;letter-spacing:.04em}
+.app-shell .cf-structure-toggle.is-active{background:var(--atlas-ink);color:var(--atlas-card)}
+.app-shell .cf-matrix__edit{display:flex;gap:2px;justify-content:flex-end}
+.app-shell .cf-matrix__edit button{width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--atlas-line,#d8d2c4);border-radius:4px;background:var(--atlas-card);color:var(--atlas-mute);padding:0;cursor:pointer}
+.app-shell .cf-matrix__edit button:disabled{opacity:.35;cursor:default}
+/* Removing the whole floor is the one mark that reaches past this row, so it is the one
+   that is coloured. */
+.app-shell .cf-matrix__edit button.is-danger{color:#8b3e32;border-color:#d8a79c}
+.app-shell .cf-structure{margin-top:10px;padding:10px;border:1px dashed #c9a46a;border-radius:8px;background:#fffaf0;font-size:12px;display:flex;flex-direction:column;gap:8px}
+.app-shell .cf-structure__row{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.app-shell .cf-structure__row input{width:48px;padding:3px 5px;border:1px solid #cfc6b3;border-radius:5px;font:inherit}
+.app-shell .cf-structure__row button{display:inline-flex;align-items:center;gap:4px;padding:4px 9px;border:1px solid #cfc6b3;border-radius:6px;background:#fff;font:inherit;cursor:pointer;color:var(--atlas-ink)}
+.app-shell .cf-structure__row button:disabled{opacity:.45;cursor:default}
+.app-shell .cf-structure__row button.is-primary{background:var(--atlas-ink);border-color:var(--atlas-ink);color:var(--atlas-card)}
+.app-shell .cf-structure__hint{margin:0;color:var(--atlas-mute);line-height:1.5}
+/* Deleting the one unit the editor has open sits under the split form, kept apart from the
+   add/split controls so a destructive act is not mistaken for one of them. */
+.app-shell .cf-structure__delete{display:flex}
+.app-shell .cf-structure__delete button{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border:1px solid #d8a79c;border-radius:6px;background:#fff;color:#8b3e32;font:inherit;font-size:12.5px;cursor:pointer}
+.app-shell .cf-structure__delete button:hover{background:#fff0ed}
+.app-shell .cf-structure__problem{margin:0;padding:5px 8px;border-radius:5px;background:#fff0ed;color:#8b3e32}
+/* Only a delete that would take records with it reaches this, so the count is on screen
+   at the moment staff decide. */
+.app-shell .cf-structure__confirm{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 10px;border:1px solid #d8a79c;border-radius:6px;background:#fff0ed;color:#8b3e32}
+.app-shell .cf-structure__confirm p{margin:0;flex:1;min-width:170px;line-height:1.5}
+.app-shell .cf-structure__confirm button{padding:4px 10px;border:1px solid #cfc6b3;border-radius:6px;background:#fff;font:inherit;cursor:pointer;color:var(--atlas-ink)}
+.app-shell .cf-structure__confirm button.is-danger{background:#8b3e32;border-color:#8b3e32;color:#fff}
+/* The buttons sit together on their own line, so the sentence and the state of the gate
+   under it are read as the dialog rather than as a run-on of controls. */
+.app-shell .cf-structure__acts{display:flex;flex-wrap:wrap;gap:8px}
+.app-shell .cf-structure__confirm p.cf-structure__gate{flex:1 1 100%;margin:0;font-size:11.5px;line-height:1.5;color:#8b3e32}
+.app-shell .cf-structure__confirm p.cf-structure__gate.is-ready{color:#3f6b47}
+.app-shell .cf-structure__confirm button:disabled{opacity:.5;cursor:not-allowed}
+.app-shell .cf-link{border:0;background:none;padding:0;font:inherit;color:var(--atlas-acc);text-decoration:underline;cursor:pointer}
+.app-shell .cf-cell-split.is-selected{outline:2px solid var(--atlas-acc);outline-offset:1px;border-radius:1px}
+/* 劏房: one unit's rooms as rows in that unit's ledger, and the small form that sets how
+   many there are — docked under 新增樓層, inside the structure editor, not floating. */
+.cf-room-split{display:flex;flex-direction:column;gap:8px;padding:10px;border:1px solid var(--atlas-line,#d8d2c4);border-radius:6px;background:var(--atlas-card,#fff);font-family:var(--atlas-sans,system-ui,sans-serif);color:var(--atlas-ink)}
+.cf-room-split header{display:flex;align-items:flex-start;gap:10px}
+.cf-room-split h4{margin:3px 0 0;font-family:var(--atlas-serif);font-size:15px}
+.cf-room-split header button{margin-left:auto;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:1px solid var(--atlas-rule);border-radius:5px;background:transparent;color:var(--atlas-mute);cursor:pointer}
+.cf-room-split form{display:flex;align-items:center;gap:8px}
+.cf-room-split form input{width:56px;padding:4px 6px;border:1px solid #cfc6b3;border-radius:5px;font:inherit}
+.cf-room-split form button{display:inline-flex;align-items:center;gap:5px;margin-left:auto;padding:5px 12px;border:1px solid var(--atlas-ink);border-radius:6px;background:var(--atlas-ink);color:var(--atlas-card);font:inherit;font-size:12.5px;cursor:pointer}
+.cf-room-split__hint{margin:0;font-size:12px;color:var(--atlas-mute);line-height:1.6}
+.cf-room-split__problem{margin:0;padding:7px 10px;border-radius:5px;background:#fff0ed;color:#8b3e32;font-size:12.5px}
+.cf-room-ledger__count{margin:0 0 6px;font-size:12px;color:var(--atlas-mute)}
+.cf-room-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.cf-room-list li{display:flex;flex-direction:column;gap:5px}
+.cf-room-list__row{display:flex;align-items:center;gap:5px}
+.cf-room-list__pick{flex:1;min-width:0;display:inline-flex;align-items:center;gap:6px;padding:5px 8px;border:1px solid var(--atlas-rule);border-radius:5px;background:transparent;font:inherit;color:inherit;text-align:left;cursor:default}
+button.cf-room-list__pick{cursor:pointer}
+button.cf-room-list__pick:hover{border-color:var(--atlas-acc)}
+.cf-room-list__pick i{width:9px;height:9px;flex:none;border-radius:1px;background:var(--cf-state)}
+.cf-room-list__pick strong{font-size:13.5px}
+.cf-room-list__pick small{color:var(--atlas-mute);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cf-room-list__act{display:inline-flex;align-items:center;gap:3px;padding:5px 9px;border:1px solid var(--atlas-rule);border-radius:5px;background:transparent;font:inherit;font-size:12px;color:inherit;cursor:pointer}
+
+/* Picking several units off the elevation for one batch. A picked block is dashed, so it
+   reads as "part of a set" beside the solid outline of the one unit that is open. */
+/* The line that says how a set is picked, under the blocks it applies to. Smaller and
+   quieter than the key above: it is read once, then the blocks are what matters. */
+.app-shell .cf-plate__hint{margin:10px 0 0;color:var(--atlas-mute);font-size:11px;line-height:1.6}
+.app-shell .cf-cell.is-picked{outline:2px dashed var(--atlas-ink);outline-offset:1px}
+.app-shell .cf-cell-split.is-picked{outline:2px dashed var(--atlas-ink);outline-offset:1px;border-radius:1px}
+/* The unit that is open keeps its solid accent outline, so the set reads as the dashed
+   blocks around the one whose ledger is on screen. */
+.app-shell .cf-cell.is-picked.is-selected{outline:2px solid var(--atlas-acc)}
+/* The bar replaces the record button in the plate's footer while a set is picked. */
+.app-shell .cf-pick{flex-shrink:0;background:var(--atlas-card);border-top:1px solid var(--atlas-rule);box-shadow:none;padding:10px 18px 14px;display:flex;flex-direction:column;gap:8px}
+.app-shell .cf-pick__head{display:flex;align-items:center;gap:6px;margin:0;font-size:12.5px}
+.app-shell .cf-pick__head strong{color:var(--atlas-ink)}
+.app-shell .cf-pick__help,.app-shell .cf-pick__clear{margin-left:auto;display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border:1px solid var(--atlas-rule);border-radius:5px;background:transparent;color:var(--atlas-mute);font:inherit;font-size:11.5px;cursor:pointer}
+.app-shell .cf-pick__help{margin-left:0;padding:3px 5px}
+.app-shell .cf-pick__more{margin:0;padding:8px 10px;border:1px solid var(--atlas-rule);border-radius:5px;background:var(--atlas-paper);color:var(--atlas-mute);font-size:12px;line-height:1.6}
+.app-shell .cf-pick__acts{display:flex;flex-wrap:wrap;gap:8px}
+.app-shell .cf-pick__acts .cf-button{flex:1;min-width:150px;justify-content:center}
+/* The batch line sits under the dialog heading: what the one form is about to write. */
+.app-shell .cf-editor__batch{margin:0;padding:7px 10px;border-radius:5px;background:var(--atlas-paper);color:var(--atlas-mute);font-size:12.5px;line-height:1.5}
+.app-shell .cf-editor__confirm{display:flex;align-items:center;gap:8px;font-size:13px}
+.app-shell .cf-editor__confirm input{width:auto}

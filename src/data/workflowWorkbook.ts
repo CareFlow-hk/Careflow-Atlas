@@ -129,8 +129,10 @@ export function parseWorkflowWorkbook(buffer: ArrayBuffer, file: string, now = n
       if (key === 'buildings') {
         const b = baseline.buildings.find(b => b.id === id);
         const lng = Number(v['經度']), lat = Number(v['緯度']);
-        const lacking = [!optional(v['大廈名稱']) && '大廈名稱', !optional(v['地址']) && '地址', (v['經度'] === '' || !Number.isFinite(lng)) && '經度', (v['緯度'] === '' || !Number.isFinite(lat)) && '緯度'].filter(Boolean);
-        if (lacking.length) { add(name, row, lacking.join('／'), 'BUILDING_INCOMPLETE', `未填${lacking.join('、')}。新增大廈要有名稱、地址和座標；座標可在 Google 地圖右鍵複製（注意前面是緯度、後面是經度）。`, `經度=${JSON.stringify(v['經度'])} 緯度=${JSON.stringify(v['緯度'])}`); continue; }
+        // The address stays optional here for the same reason it is optional on the map: a
+        // building met in the field may be named before anyone knows its number.
+        const lacking = [!optional(v['大廈名稱']) && '大廈名稱', (v['經度'] === '' || !Number.isFinite(lng)) && '經度', (v['緯度'] === '' || !Number.isFinite(lat)) && '緯度'].filter(Boolean);
+        if (lacking.length) { add(name, row, lacking.join('／'), 'BUILDING_INCOMPLETE', `未填${lacking.join('、')}。新增大廈要有名稱和座標，地址可以留空；座標可在 Google 地圖右鍵複製（注意前面是緯度、後面是經度）。`, `經度=${JSON.stringify(v['經度'])} 緯度=${JSON.stringify(v['緯度'])}`); continue; }
         if (b?.footprint && (lng !== b.coordinates.lng || lat !== b.coordinates.lat)) { add(name, row, '經度／緯度', 'FOOTPRINT_MOVED', `「${b.name}」在地圖上已有形狀，不能只改座標。請把經度、緯度改回原來的數字；如果位置或形狀不對，請在地圖上選這幢大廈，用「調整大廈形狀」修改。`, `was=${b.coordinates.lng},${b.coordinates.lat} now=${lng},${lat}`); continue; }
         const building = { ...(b ?? { ...flags, layoutDeclared: false }), id, name: str(v['大廈名稱']).trim(), address: str(v['地址']).trim(), coordinates: { lng, lat } };
         const summary = str(v['樓層單位摘要']);

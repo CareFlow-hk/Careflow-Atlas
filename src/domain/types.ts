@@ -54,7 +54,13 @@ export interface Floor extends SyntheticRecord {
   /** Manual "needs follow-up" mark for the whole floor. Display only. */
   tag?: NodeTag;
 }
-export interface Unit extends SyntheticRecord { id: string; buildingId: string; floorId: string; label: string; initialCoverage?: CoverageStatus; }
+export interface Unit extends SyntheticRecord {
+  id: string; buildingId: string; floorId: string; label: string; initialCoverage?: CoverageStatus;
+  /** A subdivided room (劏房 A1, A2…) split from this unit on the same floor. Experimental. */
+  parentUnitId?: string;
+  /** Staff confirmed this unit is not subdivided. A structural mark, not a visit record. Experimental. */
+  noSubdivision?: { at: string; by?: string };
+}
 export interface Household extends SyntheticRecord { id: string; label?: string; }
 export interface Person extends SyntheticRecord { id: string; displayName: string; phone?: string; addressNote?: string; contactNote?: string; }
 export interface HouseholdMembership extends SyntheticRecord { id: string; householdId: string; personId: string; relationship?: string; }
@@ -277,11 +283,17 @@ export function latestObservation(records: Observation[]): Observation | undefin
 }
 
 export function getCoverageStatus(snapshot: OutreachSnapshot, buildingId: string, unitId?: string): CoverageStatus {
-  const records = effectiveObservations(snapshot).filter((item) => item.buildingId === buildingId && (!unitId || item.unitId === unitId));
+  const ids = unitId !== undefined ? new Set(subjectUnitIds(snapshot, unitId)) : undefined;
+  const records = effectiveObservations(snapshot).filter((item) => item.buildingId === buildingId && (!ids || (item.unitId !== undefined && ids.has(item.unitId))));
   if (unitId && records.length) return latestObservation(records)!.coverage;
   const explicitBuildingRecord = latestObservation(records.filter((item) => !item.floorId && !item.unitId));
   if (explicitBuildingRecord) return explicitBuildingRecord.coverage;
-  return unitId ? snapshot.units.find((item) => item.id === unitId)?.initialCoverage ?? "UNKNOWN" : snapshot.buildings.find((item) => item.id === buildingId)?.initialCoverage ?? "UNKNOWN";
+  if (!unitId) return snapshot.buildings.find((item) => item.id === buildingId)?.initialCoverage ?? "UNKNOWN";
+  const own = snapshot.units.find((item) => item.id === unitId);
+  /* A room the split created has no starting value of its own; the unit it came from does,
+     and the room stands in that unit's space. */
+  const parent = own?.parentUnitId ? snapshot.units.find((item) => item.id === own.parentUnitId) : undefined;
+  return own?.initialCoverage ?? parent?.initialCoverage ?? "UNKNOWN";
 }
 
 export interface CoverageSummary { total?: number; recorded: number; completed: number; followUps: number; status: CoverageStatus; }
@@ -296,18 +308,73 @@ export interface CoverageSummary { total?: number; recorded: number; completed: 
  * Does not turn a unit event into a whole-building result.
  */
 export function getCoverageSummary(snapshot: OutreachSnapshot, buildingId: string, floorId?: string): CoverageSummary {
-  const scopeUnits = snapshot.units.filter((unit) => unit.buildingId === buildingId && (!floorId || unit.floorId === floorId));
+  /*
+   * A unit split into 劏房 rooms is a container, not a slot: the elevation draws its rooms
+   * and nothing for the unit itself, so the rooms are what is counted, and each reads the
+   * unit's records as its starting point — the same reading the colour uses. Without this
+   * the figures would count a place that is no longer drawn and miss the rooms that are.
+   */
+  const splitIds = new Set(snapshot.units.map((unit) => unit.parentUnitId).filter((id): id is string => id !== undefined));
+  const scopeUnits = snapshot.units.filter((unit) => unit.buildingId === buildingId && (!floorId || unit.floorId === floorId) && !splitIds.has(unit.id));
   const scopedRecords = effectiveObservations(snapshot).filter((item) => item.buildingId === buildingId && (!floorId || item.floorId === floorId));
   const latestByUnit = new Map<string, Observation>();
-  scopedRecords.filter((item) => item.unitId).forEach((item) => { const prior = latestByUnit.get(item.unitId!); if (!prior || compareObservationTime(item, prior) > 0) latestByUnit.set(item.unitId!, item); });
+  scopeUnits.forEach((unit) => { const latest = latestForUnit(snapshot, unit.id); if (latest) latestByUnit.set(unit.id, latest); });
   const completed = [...latestByUnit.values()].filter((item) => ["VISITED_NO_FINDING", "VISITED_WITH_FINDING"].includes(item.coverage)).length;
   const hasFinding = [...latestByUnit.values()].some((item) => item.coverage === "VISITED_WITH_FINDING");
   const explicitScopeRecord = latestObservation(scopedRecords.filter((item) => floorId ? item.floorId === floorId && !item.unitId : !item.floorId && !item.unitId));
   const latestChildRecord = latestObservation([...latestByUnit.values()]);
   const derivedStatus = scopeUnits.length ? completed === scopeUnits.length ? hasFinding ? "VISITED_WITH_FINDING" : "VISITED_NO_FINDING" : latestByUnit.size ? "PARTIAL" : scopeUnits[0].initialCoverage ?? "UNKNOWN" : snapshot.buildings.find((item) => item.id === buildingId)?.initialCoverage ?? "UNKNOWN";
   const status = explicitScopeRecord && (!latestChildRecord || compareObservationTime(explicitScopeRecord, latestChildRecord) >= 0) ? explicitScopeRecord.coverage : derivedStatus;
-  const recordedLocations = new Set(scopedRecords.map(item => item.unitId ? `unit:${item.unitId}` : item.floorId ? `floor:${item.floorId}` : `building:${item.buildingId}`));
+  const recordedLocations = new Set([...latestByUnit.keys()].map(unitId => `unit:${unitId}`));
+  scopedRecords.filter((item) => !item.unitId).forEach((item) => recordedLocations.add(item.floorId ? `floor:${item.floorId}` : `building:${item.buildingId}`));
   return { total: scopeUnits.length || undefined, recorded: recordedLocations.size, completed, followUps: getOpenFollowUps(snapshot).filter(item => item.buildingId === buildingId && (!floorId || item.floorId === floorId)).length, status };
+}
+
+/* ------------------------------------------------------------------------- *
+ * What a place's records are.
+ *
+ * A 劏房 room is a division of the unit it was split from, not a new place next to
+ * it: the space the room stands in is the space that unit's visits covered. So the
+ * unit's records are read as the room's own starting point, and the room's later
+ * record is what the room itself says. Splitting copies nothing down — the records
+ * stay on the unit, exactly where they were made — and a room never speaks for its
+ * parent or for its siblings.
+ *
+ * Everything that asks "what is recorded here" goes through this, so the colour,
+ * the ledger, the entry form and the counts cannot disagree about the same place.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * The units whose records speak for this one: itself, and — for a 劏房 room — the
+ * unit it was split from. Nothing else, and nothing transitive: a room has no rooms.
+ */
+export function subjectUnitIds(snapshot: OutreachSnapshot, unitId: string): string[] {
+  const parent = snapshot.units.find(unit => unit.id === unitId)?.parentUnitId;
+  return parent ? [unitId, parent] : [unitId];
+}
+
+/**
+ * The latest of a unit's own records and the ones it inherits, by the one ordering the
+ * domain uses. A tie goes to the unit's own record: the event made at this very place is
+ * the more specific statement, and a room's own visit must not be overruled by a record
+ * made at its unit in the same moment.
+ */
+function latestOfSubjects(unitId: string, records: Observation[]): Observation | undefined {
+  const own = latestObservation(records.filter(item => item.unitId === unitId));
+  const inherited = latestObservation(records.filter(item => item.unitId !== unitId));
+  if (!own) return inherited;
+  return inherited && compareObservationTime(inherited, own) > 0 ? inherited : own;
+}
+
+/** The records that speak for this unit: its own, plus the ones it inherits. */
+function recordsForUnit(snapshot: OutreachSnapshot, unitId: string): Observation[] {
+  const ids = new Set(subjectUnitIds(snapshot, unitId));
+  return effectiveObservations(snapshot).filter(item => item.unitId !== undefined && ids.has(item.unitId));
+}
+
+/** The latest effective event that speaks for this unit. Undefined means "nothing recorded here". */
+export function latestForUnit(snapshot: OutreachSnapshot, unitId: string): Observation | undefined {
+  return latestOfSubjects(unitId, recordsForUnit(snapshot, unitId));
 }
 
 /* ------------------------------------------------------------------------- *
@@ -318,11 +385,9 @@ export function getCoverageSummary(snapshot: OutreachSnapshot, buildingId: strin
  * it. Nothing else in the repository may derive a colour.
  * ------------------------------------------------------------------------- */
 
-/** Does this event sit inside the scope at all? */
+/** Does this event sit inside the scope at all? A unit scope is answered by `latestForUnit`. */
 function inScope(item: Observation, scope: Scope): boolean {
-  return item.buildingId === scope.buildingId
-    && (!scope.floorId || item.floorId === scope.floorId)
-    && (!scope.unitId || item.unitId === scope.unitId);
+  return item.buildingId === scope.buildingId && (!scope.floorId || item.floorId === scope.floorId);
 }
 
 /**
@@ -339,6 +404,7 @@ function isNodeLevelRecord(item: Observation, scope: Scope): boolean {
 
 /** The latest effective event recorded at exactly this level. Undefined means "no record here". */
 export function latestInScope(snapshot: OutreachSnapshot, scope: Scope): Observation | undefined {
+  if (scope.unitId !== undefined) return latestForUnit(snapshot, scope.unitId);
   return latestObservation(effectiveObservations(snapshot).filter(item => inScope(item, scope) && isNodeLevelRecord(item, scope)));
 }
 
@@ -347,8 +413,9 @@ export function latestInScope(snapshot: OutreachSnapshot, scope: Scope): Observa
  * a building sees everything inside it.
  */
 export function openFollowUpsInScope(snapshot: OutreachSnapshot, scope: Scope): OpenFollowUp[] {
+  const units = scope.unitId !== undefined ? new Set(subjectUnitIds(snapshot, scope.unitId)) : undefined;
   return getOpenFollowUps(snapshot).filter(item => item.buildingId === scope.buildingId
-    && (scope.unitId !== undefined ? item.unitId === scope.unitId
+    && (units !== undefined ? item.unitId !== undefined && units.has(item.unitId)
       : scope.floorId !== undefined ? item.floorId === scope.floorId
         : true));
 }
@@ -524,8 +591,9 @@ export function followUpBadges(snapshot: OutreachSnapshot, scope: Scope): Follow
  * earlier visit concluded — the same shape as a correction superseding an event.
  */
 export function currentAssessment(snapshot: OutreachSnapshot, unitId: string): HousingAssessment | undefined {
-  return latestObservation(effectiveObservations(snapshot)
-    .filter(item => item.unitId === unitId && item.assessment && item.assessment !== "NOT_UPDATED"))?.assessment;
+  const ids = new Set(subjectUnitIds(snapshot, unitId));
+  return latestOfSubjects(unitId, effectiveObservations(snapshot)
+    .filter(item => item.unitId !== undefined && ids.has(item.unitId) && item.assessment && item.assessment !== "NOT_UPDATED"))?.assessment;
 }
 
 /** SUSPECTED and STAFF_VERIFIED differ in how strong the evidence is, so they stay apart. */

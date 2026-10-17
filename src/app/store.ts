@@ -2,10 +2,13 @@ import { create } from 'zustand';
 import { recordFollowUpEvent, tagNode, type FollowUpEventAction, type NodeTag, type Operator, type OutreachSnapshot, type SaveObservationInput } from '../domain/types';
 import { createRecordId } from './recordId';
 import type { CustomOptions } from '../domain/optionPrefs';
-import { LocalStoragePersistenceAdapter, OutreachRepository } from '../data/repository';
+import { LocalStoragePersistenceAdapter, OutreachRepository, PersistenceError } from '../data/repository';
 import { outlineCentre } from '../map/footprintGeometry';
 import { OptionPrefsRepository } from '../data/optionPrefsRepository';
 import { mergeWorkflow } from '../data/workflowMerge';
+import { addBuilding, type NewBuildingInput } from '../data/newBuilding';
+import { blankSnapshot } from '../data/blankSnapshot';
+import { applyStructureChange, setNoSubdivision, type LocationProposal, type StructureChange } from '../domain/structure';
 import { appendPhotoPages, type PhotoPage } from '../photos/model';
 
 const adapter = new LocalStoragePersistenceAdapter();
@@ -41,7 +44,15 @@ interface WorkspaceState {
   clearWorkspace: () => void;
   /** Replace a building's outline drawn on the map. Records stay attached; only the shape and its centre move. */
   setFootprint: (buildingId: string, ring: number[][]) => void;
+  /** Add a building placed on the map. An empty workspace starts from the blank template. Returns the refusal, if any. */
+  addBuilding: (input: NewBuildingInput) => { error: string; field: string } | undefined;
+  /** Experimental: edit floors, units and 劏房 rooms in the UI. Returns what happened, or the refusal. */
+  changeStructure: (change: StructureChange) => { error: string } | { message: string };
+  /** Semi-agent: apply a structure proposal accepted in paper intake. Returns the new unit, or the refusal. */
+  applyLocationProposal: (proposal: LocationProposal) => { unitId: string; snapshot: OutreachSnapshot } | { error: string };
   saveObservation: (input: SaveObservationInput) => void;
+  /** The same result recorded at every unit of a selection, optionally confirming them free of 劏房 in the same write. */
+  recordBatch: (inputs: readonly SaveObservationInput[], confirmNoSubdivision: boolean) => { saved: number; confirmed: number; skipped: number };
   savePhotoPages: (pages: PhotoPage[]) => { added: number; duplicates: number };
   /** Set or clear the manual mark on a building or a floor. A display change only. */
   setTag: (subject: { buildingId: string; floorId?: string }, tag?: NodeTag) => void;
@@ -51,7 +62,8 @@ interface WorkspaceState {
   actOnFollowUp: (observationId: string, action: FollowUpEventAction, reason?: string) => void;
   selectBuilding: (id?: string) => void;
   selectFloor: (id: string) => void;
-  selectUnit: (id: string) => void;
+  /** Undefined clears the unit, leaving the building and floor where they are. */
+  selectUnit: (id?: string) => void;
   toggleExpanded: () => void;
 }
 
@@ -77,6 +89,34 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     }) };
     set({ snapshot: repository.replaceSnapshot(next), storageError: undefined });
   },
+  addBuilding: input => {
+    const result = addBuilding(get().snapshot ?? blankSnapshot(), input);
+    if ('error' in result) return result;
+    set({ snapshot: repository.replaceSnapshot(result.snapshot), storageError: undefined });
+    get().selectBuilding(result.buildingId);
+    return undefined;
+  },
+  changeStructure: change => {
+    const current = get().snapshot;
+    if (!current) return { error: '請先載入資料。' };
+    const result = applyStructureChange(current, change, { at: new Date().toISOString(), by: get().operator?.name });
+    if ('error' in result) return result;
+    set({ snapshot: repository.replaceSnapshot(result.snapshot), storageError: undefined });
+    // A removed unit or floor cannot stay selected.
+    const { selectedUnitId, selectedFloorId } = get();
+    if (selectedUnitId && !result.snapshot.units.some(u => u.id === selectedUnitId)) set({ selectedUnitId: undefined });
+    if (selectedFloorId && !result.snapshot.floors.some(f => f.id === selectedFloorId)) set({ selectedFloorId: undefined, selectedUnitId: undefined });
+    return { message: result.message };
+  },
+  applyLocationProposal: proposal => {
+    const current = get().snapshot;
+    if (!current) return { error: '請先載入資料。' };
+    const result = proposal.apply(current);
+    if ('error' in result) return result;
+    const saved = repository.replaceSnapshot(result.snapshot);
+    set({ snapshot: saved, storageError: undefined });
+    return { unitId: result.unitId, snapshot: saved };
+  },
   clearWorkspace: () => {
     repository.clear();
     set({ snapshot: undefined, storageError: undefined, selectedBuildingId: undefined, selectedFloorId: undefined, selectedUnitId: undefined, expanded: false });
@@ -90,6 +130,19 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   saveObservation: input => {
     const saved = repository.saveObservation(input);
     set({ snapshot: saved, storageError: undefined });
+  },
+  recordBatch: (inputs, confirmNoSubdivision) => {
+    const current = get().snapshot;
+    if (!current) throw new PersistenceError('請先載入資料。');
+    // The observations land first and in one write; only then is 無劏房 confirmed on the
+    // same units, with the same actor the rest of the structure editor records.
+    const written = repository.saveObservations(inputs);
+    const unitIds = inputs.map(input => input.unitId).filter((id): id is string => !!id);
+    const confirmed = confirmNoSubdivision
+      ? setNoSubdivision(written, unitIds, true, { at: new Date().toISOString(), by: get().operator?.name })
+      : { snapshot: written, changed: 0, skipped: 0 };
+    set({ snapshot: confirmed.changed ? repository.replaceSnapshot(confirmed.snapshot) : written, storageError: undefined });
+    return { saved: inputs.length, confirmed: confirmed.changed, skipped: confirmed.skipped };
   },
   setTag: (subject, tag) => {
     const current = get().snapshot;
@@ -117,6 +170,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   selectBuilding: id => set({ selectedBuildingId: id, selectedFloorId: undefined, selectedUnitId: undefined, expanded: !!id && !!get().snapshot?.floors.some(floor => floor.buildingId === id) }),
   selectFloor: id => set({ selectedFloorId: id, selectedUnitId: undefined, expanded: true }),
   selectUnit: id => {
+    if (!id) { set({ selectedUnitId: undefined }); return; }
     const unit = get().snapshot?.units.find(u => u.id === id);
     if (unit) set({ selectedBuildingId: unit.buildingId, selectedFloorId: unit.floorId, selectedUnitId: id, expanded: true });
   },

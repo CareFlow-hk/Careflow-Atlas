@@ -102,10 +102,27 @@ export const contactLabels: Record<ContactOutcome, string> = {
   CONTACTED: '已接觸', UNKNOWN: '接觸結果未明',
 };
 
+/*
+ * One set of words for the housing answer (2026-10-15). The entry form's choices, the
+ * elevation key, the unit ledger and the history chips all read from here, so the words
+ * on the form and the mark in the block are the same statement rather than two that
+ * happen to agree. 已確認 answers "has a person confirmed the housing situation", not
+ * "is there a 劏房": the split itself, not a second mark, says which.
+ */
 export const assessmentLabels: Record<HousingAssessment, string> = {
-  NOT_UPDATED: '今次未更新住房判斷', UNKNOWN: '住房情況未能確定',
-  SUSPECTED: '疑似劏房，尚待核實', NO_INDICATION: '今次未見相關跡象',
-  STAFF_VERIFIED: '工作人員已確認',
+  NOT_UPDATED: '無更新', UNKNOWN: '住房情況未能確定',
+  SUSPECTED: '疑似劏房', NO_INDICATION: '未見相關跡象',
+  STAFF_VERIFIED: '已確認',
+};
+
+/*
+ * The mark a housing answer shows in the corner of its colour block. 無更新 and
+ * 未見相關跡象 carry none: the block's colour already says the visit happened, and a
+ * mark for "nothing to report" would read as a finding of its own. The colour keeps
+ * saying what the visit was; the mark only ever says what was found.
+ */
+export const assessmentMarks: Record<HousingAssessment, string> = {
+  NOT_UPDATED: '', UNKNOWN: '', NO_INDICATION: '', SUSPECTED: '？', STAFF_VERIFIED: '✓',
 };
 
 export const sourceLabels: Record<SourceType, string> = {
@@ -129,9 +146,24 @@ export const followUpClosedLabels: Record<Exclude<FollowUpEventAction, 'REOPENED
 /** The separate marker a building or floor carries when someone tagged it. */
 export const nodeTagLabel = '已標記跟進';
 
-/** The two clue levels stay apart: they differ in how strong the evidence is. */
+/**
+ * A clue level is a housing answer, so it keeps that answer's words rather than a
+ * second spelling of them. FINDING has no housing answer behind it — it says a record
+ * was left without a judgement — so it is the one level that names itself.
+ */
 export const clueLabels: Record<ClueLevel, string> = {
-  SUSPECTED: '疑似劏房線索', VERIFIED: '已確認劏房', FINDING: '有記錄發現',
+  SUSPECTED: assessmentLabels.SUSPECTED, VERIFIED: assessmentLabels.STAFF_VERIFIED,
+  FINDING: '有記錄發現',
+};
+
+/*
+ * The two judgement levels stay apart: they differ in how strong the evidence is.
+ * Derived from the same table as the words, so a level and its mark cannot drift.
+ * FINDING carries no mark: the coverage already says a record was left, and the corner
+ * of the block is reserved for what a person judged about the housing itself.
+ */
+export const clueMarks: Record<ClueLevel, string> = {
+  SUSPECTED: assessmentMarks.SUSPECTED, VERIFIED: assessmentMarks.STAFF_VERIFIED, FINDING: '',
 };
 
 /* ------------------------------------------------------ paper/Excel labels --- */
@@ -193,11 +225,15 @@ export const contactOptionGroups: readonly OptionGroup<ContactGroup, ContactOutc
   { group: 'CONTACTED', label: '已接觸', covers: ['CONTACTED'], canonical: 'CONTACTED' },
 ];
 
-/** Housing and source may be left blank, which is not the same as picking a value. */
+/**
+ * Housing and source may be left blank, which is not the same as picking a value. The
+ * blank choice is 「無更新」 and it stores nothing: the unit's last real judgement stands,
+ * which is what 向前繼承 in COLOR_PIPELINE_DESIGN §5.2 means on the screen.
+ */
 export const assessmentOptions: readonly { value: HousingAssessment; label: string }[] = [
-  { value: 'NO_INDICATION', label: '未見相關跡象' },
+  { value: 'NO_INDICATION', label: assessmentLabels.NO_INDICATION },
   { value: 'SUSPECTED', label: assessmentLabels.SUSPECTED },
-  { value: 'STAFF_VERIFIED', label: '已確認' },
+  { value: 'STAFF_VERIFIED', label: assessmentLabels.STAFF_VERIFIED },
 ];
 
 export const sourceOptions: readonly { value: SourceType; label: string }[] = [
@@ -232,7 +268,13 @@ export function contactGroupOf(outcome: ContactOutcome): ContactGroup {
 export const retiredLabels = {
   coverage: { '覆蓋未明': 'UNKNOWN', '曾嘗試': 'ATTEMPTED', '已訪，無記錄發現': 'VISITED_NO_FINDING' },
   contact: {},
-  assessment: { '由工作人員確認': 'STAFF_VERIFIED' },
+  assessment: {
+    '由工作人員確認': 'STAFF_VERIFIED',
+    // The four the entry screen wrote until 2026-10-15, when the housing answer was put
+    // into one set of words. A sheet or a workbook written before that still reads back.
+    '今次未更新住房判斷': 'NOT_UPDATED', '今次未見相關跡象': 'NO_INDICATION',
+    '疑似劏房，尚待核實': 'SUSPECTED', '工作人員已確認': 'STAFF_VERIFIED',
+  },
   source: {},
 } as const;
 

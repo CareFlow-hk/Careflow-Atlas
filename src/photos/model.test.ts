@@ -91,3 +91,13 @@ describe('photo review and atomic append', () => {
     expect(result.snapshot.observations.at(-1)?.photoSource).toMatchObject({ model: 'gpt-6-luna', fallback: { outcome: 'failed' } });
   });
 });
+
+describe('sample paper for the semi-agent', () => {
+  it('can add a 劏房 row the building lacks, left unmatched for a structure proposal', () => {
+    const page = samplePage(demoSnapshot, { newRoom: true });
+    const row = page.rows.at(-1)!;
+    expect(row).toMatchObject({ scope: 'UNIT', unitId: '', assessment: 'SUSPECTED' });
+    expect(row.unit).toMatch(/^[A-Z]1室$/);
+    expect(samplePage(demoSnapshot).rows).toHaveLength(page.rows.length - 1);
+  });
+});

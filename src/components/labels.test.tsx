@@ -4,11 +4,11 @@ import { BuildingDetail } from './BuildingDetail';
 import { ObservationEditor } from './ObservationEditor';
 import { ObservationHistory } from './ObservationHistory';
 import {
-  assessmentLabels, assessmentOptions, clueLabels, contactLabels, contactOptionGroups, coverageLabels,
+  assessmentLabels, assessmentMarks, assessmentOptions, clueLabels, clueMarks, contactLabels, contactOptionGroups, coverageLabels,
   coverageOptionGroups, sourceLabels, sourceOptions, stateColors, stateLabels, supportCategoryLabels,
   uncategorisedFollowUpLabel,
 } from '../domain/presentation';
-import { clueOf, recordFollowUpEvent, tagNode, unitState, type Observation, type OutreachSnapshot } from '../domain/types';
+import { clueOf, currentAssessment, recordFollowUpEvent, tagNode, unitState, type Observation, type OutreachSnapshot } from '../domain/types';
 import { addCustomOption, choiceValue, customOptions, impliedByCoverage, menuChoices } from '../domain/optionPrefs';
 
 const flags = { isSynthetic: true as const, provisional: true as const };
@@ -30,13 +30,22 @@ function scene(observations: Observation[]): OutreachSnapshot {
 }
 
 const noop = () => {};
-function renderDetail(snapshot: OutreachSnapshot) {
-  return renderToStaticMarkup(<BuildingDetail snapshot={snapshot} selectedBuildingId="b1" selectedFloorId="f1" selectedUnitId="u1"
+function renderDetail(snapshot: OutreachSnapshot, selectedUnitId = 'u1') {
+  return renderToStaticMarkup(<BuildingDetail snapshot={snapshot} selectedBuildingId="b1" selectedFloorId="f1" selectedUnitId={selectedUnitId}
     onSelectFloor={noop} onSelectUnit={noop} onToggleTag={noop} onStartObservation={noop} />);
 }
 function renderHistory(snapshot: OutreachSnapshot) {
   return renderToStaticMarkup(<ObservationHistory snapshot={snapshot} subjectId="u1" />);
 }
+/*
+ * The elevation key above the matrix names every mark the blocks can show, and the ledger
+ * below repeats the selected unit's words, so a whole-document search cannot tell one
+ * cell's mark from the key's. These two brackets say which part is being asked about.
+ */
+const cellMarkup = (html: string) => html.match(/<button[^>]*role="gridcell"[^>]*>.*?<\/button>/)?.[0] ?? '';
+const matrixMarkup = (html: string) => html.slice(html.indexOf('cf-matrix'), html.indexOf('cf-selected-unit'));
+/* The key is two lines — the marked marks, then the unmarked words — and both are the key. */
+const keyLine = (html: string) => [...html.matchAll(/<p class="cf-plate__key">([^<]*)<\/p>/g)].map(match => match[1]).join(' · ');
 
 describe('a status reads the same wherever it appears', () => {
   for (const coverage of ['UNVISITED', 'ATTEMPTED', 'VISITED_NO_FINDING', 'VISITED_WITH_FINDING', 'INACCESSIBLE'] as const) {
@@ -60,7 +69,7 @@ describe('a status reads the same wherever it appears', () => {
 });
 
 describe('history chips keep every axis', () => {
-  it('shows every housing judgement that says something, and no chip for 今次未更新', () => {
+  it('shows every housing judgement that says something, and no chip for 無更新', () => {
     for (const assessment of Object.keys(assessmentLabels) as (keyof typeof assessmentLabels)[]) {
       const html = renderHistory(scene([observation({ id: 'o1', assessment })]));
       if (assessment === 'NOT_UPDATED') expect(html).not.toContain(assessmentLabels[assessment]);
@@ -107,19 +116,113 @@ describe('two markers, never a fifth colour', () => {
     const snapshot = scene([observation({ id: 'o1', coverage: 'VISITED_WITH_FINDING' })]);
     expect(clueOf(snapshot, 'b1', 'u1')).toBe('FINDING');
     expect(unitState(snapshot, 'b1', 'u1')).toBe('GREEN');
-    expect(renderDetail(snapshot)).toContain(clueLabels.FINDING);
+    // Named for a screen reader, unmarked for the eye: the block's corner is for the
+    // housing judgement, and a finding is not one.
+    const cell = cellMarkup(renderDetail(snapshot));
+    expect(cell).toContain(clueLabels.FINDING);
+    expect(cell).not.toContain('cf-cell__clue');
   });
 
   it('keeps the two judgement levels visually apart', () => {
-    const suspected = renderDetail(scene([observation({ id: 'o1', assessment: 'SUSPECTED' })]));
-    const verified = renderDetail(scene([observation({ id: 'o1', assessment: 'STAFF_VERIFIED' })]));
+    const suspected = cellMarkup(renderDetail(scene([observation({ id: 'o1', assessment: 'SUSPECTED' })])));
+    const verified = cellMarkup(renderDetail(scene([observation({ id: 'o1', assessment: 'STAFF_VERIFIED' })])));
+    expect(suspected).toContain(clueMarks.SUSPECTED);
+    expect(verified).toContain(clueMarks.VERIFIED);
+    expect(suspected).not.toContain(clueMarks.VERIFIED);
+    expect(verified).not.toContain(clueMarks.SUSPECTED);
+    // The words beside the mark are the ones the entry form offered.
     expect(suspected).toContain(clueLabels.SUSPECTED);
     expect(verified).toContain(clueLabels.VERIFIED);
-    expect(suspected).not.toContain(clueLabels.VERIFIED);
-    expect(verified).not.toContain(clueLabels.SUSPECTED);
     expect(suspected).toContain('cf-cell__clue');
     expect(suspected).not.toContain('cf-cell__clue is-verified');
     expect(verified).toContain('cf-cell__clue is-verified');
+  });
+});
+
+/*
+ * The housing answer, in one set of words (2026-10-15): the entry form's choices, the
+ * elevation key and the mark in the block are three views of the same table. What the
+ * colour keeps saying is what the visit was; the mark only ever says what was found.
+ */
+describe('the housing mark and the housing words are the same statement', () => {
+  const editor = renderToStaticMarkup(<ObservationEditor open targetLabel="合成大廈 · A室" subjectId="u1" onClose={noop} onSubmit={noop} />);
+  const cell = (item: Observation) => cellMarkup(renderDetail(scene([item])));
+
+  it('names the same words on the entry form and in the elevation key', () => {
+    const key = keyLine(renderDetail(scene([observation({ id: 'o1' })])));
+    for (const option of assessmentOptions) {
+      expect(editor).toContain(option.label);
+      expect(key).toContain(option.label);
+      // Where there is a mark, the key shows the mark the block shows, beside that word.
+      if (assessmentMarks[option.value]) expect(key).toContain(`${assessmentMarks[option.value]} ${option.label}`);
+    }
+    // 無更新 is the blank choice: no mark, and it stores nothing.
+    expect(editor).toContain(assessmentLabels.NOT_UPDATED);
+    expect(key).toContain(assessmentLabels.NOT_UPDATED);
+    expect(assessmentMarks.NOT_UPDATED).toBe('');
+  });
+
+  it('marks 疑似劏房 with ？ and 已確認 with ✓, and answers nothing else with a mark', () => {
+    expect(cell(observation({ id: 'o1', assessment: 'SUSPECTED' }))).toContain('？');
+    expect(cell(observation({ id: 'o1', assessment: 'STAFF_VERIFIED' }))).toContain('✓');
+    // 未見相關跡象 is a conclusion, but one with nothing to point at.
+    expect(cell(observation({ id: 'o1', assessment: 'NO_INDICATION' }))).not.toContain('cf-cell__clue');
+    // 無更新 judges nothing, so the block keeps only what the colour says.
+    expect(cell(observation({ id: 'o1', assessment: 'NOT_UPDATED' }))).not.toContain('cf-cell__clue');
+  });
+
+  it('leaves the last judgement standing when a later record updates nothing', () => {
+    const snapshot = scene([
+      observation({ id: 'o1', occurredAt: '2026-01-05T02:00:00.000Z', assessment: 'STAFF_VERIFIED' }),
+      observation({ id: 'o2', occurredAt: '2026-02-05T02:00:00.000Z', assessment: 'NOT_UPDATED' }),
+    ]);
+    expect(currentAssessment(snapshot, 'u1')).toBe('STAFF_VERIFIED');
+    expect(cellMarkup(renderDetail(snapshot))).toContain(clueMarks.VERIFIED);
+  });
+
+  it('marks a split unit once, on the group, and marks none of its rooms', () => {
+    const snapshot = scene([
+      observation({ id: 'o1', assessment: 'STAFF_VERIFIED' }),
+      // A room carrying its own judgement: the slice still shows no mark, because a slice
+      // already is a 劏房 room and a mark on it would only repeat the shape of the block.
+      observation({ id: 'o2', unitId: 'r1', assessment: 'SUSPECTED' }),
+    ]);
+    snapshot.units.push({ ...flags, id: 'r1', buildingId: 'b1', floorId: 'f1', label: 'A1室', parentUnitId: 'u1' });
+    const matrix = matrixMarkup(renderDetail(snapshot));
+    expect(matrix.split('cf-cell__clue').length - 1).toBe(1);
+    expect(matrix).toContain(clueMarks.VERIFIED);
+    expect(matrix).not.toContain(clueMarks.SUSPECTED);
+    expect(matrix).toContain(clueLabels.SUSPECTED); // still named in the room's own label
+  });
+});
+
+/*
+ * Splitting a visited unit must not lose the visit. The room is where the unit's space now
+ * is, so it carries the unit's colour rather than opening blank, and the ledger says the
+ * value came from the unit rather than from a visit to this room (2026-10-15).
+ */
+describe('a split unit keeps its colour on the rooms that replaced it', () => {
+  const splitScene = () => {
+    const snapshot = scene([observation({ id: 'o1', coverage: 'VISITED_NO_FINDING' })]);
+    snapshot.units.push({ ...flags, id: 'r1', buildingId: 'b1', floorId: 'f1', label: 'A1室', parentUnitId: 'u1' });
+    return snapshot;
+  };
+
+  it('shows the unit’s colour on the room, not an empty block', () => {
+    const matrix = matrixMarkup(renderDetail(splitScene()));
+    expect(matrix).toContain('is-green is-room');
+    expect(matrix).not.toContain('is-gray');
+  });
+
+  it('says in the ledger that the 最近 value is the unit’s, and where its own records are', () => {
+    const ledger = renderDetail(splitScene(), 'r1');
+    expect(ledger).toContain('承自分拆前的原單位');
+    // The room's own history is still its own, and says so rather than reading as lost work.
+    expect(ledger).toContain('這間房還未有自己的記錄');
+  });
+
+  it('claims nothing of the sort for a unit that was never split', () => {
+    expect(renderDetail(scene([observation({ id: 'o1' })]))).not.toContain('承自分拆前的原單位');
   });
 });
 
@@ -145,7 +248,7 @@ describe('the editor offers the shared option tables', () => {
 
   it('lets housing and source be left blank', () => {
     expect(markup).toContain('value=""');
-    expect(markup).toContain('今次未更新');
+    expect(markup).toContain(assessmentLabels.NOT_UPDATED);
     expect(markup).toContain('未分類');
     for (const option of assessmentOptions) expect(markup).toContain(option.label);
     for (const option of sourceOptions) expect(markup).toContain(option.label);
@@ -317,6 +420,133 @@ describe('a category written out by hand is shown as written (§10.4)', () => {
  * Decisions of 2026-09-29 (user review of 4b343de).
  * ------------------------------------------------------------------------------- */
 
+/*
+ * One result at every picked unit (2026-10-15). The form is the same form — the same
+ * choices, storing the same things — with the parts that only make sense for a single place
+ * left out, and one extra statement that only makes sense for a set.
+ */
+describe('the entry form for a whole selection', () => {
+  const batch = renderToStaticMarkup(<ObservationEditor open targetLabel="合成大廈 · 已選 3 個單位" batch={{ units: 3 }} onClose={noop} onSubmit={noop} />);
+  const single = renderToStaticMarkup(<ObservationEditor open targetLabel="合成大廈 · A室" subjectId="u1" onClose={noop} onSubmit={noop} />);
+
+  it('says what it is about to write, and where', () => {
+    expect(batch).toContain('會為已選的 3 個單位各寫入一筆相同的記錄。');
+    expect(batch).toContain('記錄內容（會寫進每個單位）');
+    expect(single).not.toContain('會為已選的');
+  });
+
+  it('asks the same three questions as a single record, in the same words', () => {
+    for (const legend of ['覆蓋狀態', '住房判斷', '資料來源']) expect(batch).toContain(`<legend>${legend}`);
+    for (const option of assessmentOptions) expect(batch).toContain(option.label);
+    expect(batch).toContain(assessmentLabels.NOT_UPDATED);
+  });
+
+  /* A follow-up is one place needing one thing done; three units is three different things. */
+  it('offers no 跟進 at all, rather than opening a task per unit', () => {
+    expect(batch).not.toContain('name="followUpReason"');
+    expect(batch).not.toContain('name="followUpDueAt"');
+    expect(batch).not.toContain('更多跟進資料');
+    // The single-place form still has it.
+    expect(single).toContain('name="followUpReason"');
+  });
+
+  it('offers the one statement that only a set can make, and leaves it unticked', () => {
+    expect(batch).toContain('name="confirmNoSubdivision"');
+    expect(batch).toMatch(/name="confirmNoSubdivision"[^>]*\/>/);
+    expect(batch).not.toMatch(/name="confirmNoSubdivision"[^>]*checked/);
+    // Recording one unit at a time cannot confirm a set, so the box is not there.
+    expect(single).not.toContain('name="confirmNoSubdivision"');
+  });
+
+  it('keeps the record itself identical: nothing batch-only is stored', () => {
+    for (const field of ['name="coverageStatus"', 'name="housingAssessment"', 'name="sourceType"', 'name="note"', 'name="occurredAt"']) {
+      expect(batch).toContain(field);
+      expect(single).toContain(field);
+    }
+  });
+});
+
+/*
+ * What a 劏房 room's form opens with (review, 2026-10-15). Both defaults belong to the
+ * room, not to the visit: 住房判斷 restates the split, and 覆蓋狀態 is carried over from
+ * the room's own last record and says so. Neither may answer for a visit nobody described —
+ * a room with no record opens blank rather than at the ordinary outcome.
+ */
+describe('the form a 劏房 room opens with', () => {
+  const editor = (props: Partial<Parameters<typeof ObservationEditor>[0]>) =>
+    renderToStaticMarkup(<ObservationEditor open targetLabel="合成大廈 · A1室" subjectId="r1" onClose={noop} onSubmit={noop} {...props} />);
+  /* The value of the one choice ticked in that row, or undefined when the row is unanswered. */
+  const chosen = (html: string, name: string) =>
+    [...html.matchAll(new RegExp(`<input type="radio"[^>]*name="${name}"[^>]*>`, 'g'))].find(tag => tag[0].includes('checked'))?.[0].match(/value="([^"]*)"/)?.[1];
+
+  it('pre-selects the confirmed housing answer, because the room is one', () => {
+    expect(chosen(editor({ defaultAssessment: 'STAFF_VERIFIED' }), 'housingAssessment')).toBe('STAFF_VERIFIED');
+  });
+
+  it('carries the last coverage over and says that is what it is', () => {
+    expect(chosen(editor({ defaultCoverage: 'ATTEMPTED' }), 'coverageStatus')).toBe('ATTEMPTED');
+    // Beside the coverage legend, where the value it is about sits.
+    expect(editor({ defaultCoverage: 'ATTEMPTED' })).toContain('<legend>覆蓋狀態<span class="cf-choice-row__hint">沿用上次結果</span>');
+  });
+
+  it('says nothing about carrying over when there is nothing carried over', () => {
+    expect(editor({ defaultAssessment: 'STAFF_VERIFIED' })).not.toContain('沿用上次結果');
+    expect(editor({})).not.toContain('沿用上次結果');
+  });
+
+  /* The one case the review asked to change: no record, no answer. */
+  it('answers nothing at all for a room with no record', () => {
+    expect(chosen(editor({ defaultAssessment: 'STAFF_VERIFIED' }), 'coverageStatus')).toBeUndefined();
+  });
+
+  /* Ordinary units keep opening unanswered: coverage with nothing ticked, housing on the
+     blank choice, which stands for 無更新 and stores nothing. */
+  it('leaves an ordinary unit unanswered', () => {
+    const plain = editor({});
+    expect(chosen(plain, 'coverageStatus')).toBeUndefined();
+    expect(chosen(plain, 'housingAssessment')).toBe('');
+  });
+});
+
+/*
+ * The elevation is where a set is picked, so the panel must not offer anything about sets
+ * until one exists: an untouched panel is the panel it always was.
+ */
+describe('the building panel before anything is picked', () => {
+  const markup = renderDetail(scene([observation({ id: 'o1' })]));
+
+  it('shows the ordinary footer button, not the bar', () => {
+    expect(markup).toContain('cf-record-action');
+    expect(markup).not.toContain('cf-pick');
+  });
+
+  it('marks no cell as picked', () => {
+    expect(markup).not.toContain('is-picked');
+  });
+
+  /* Ctrl/Command-clicking is not discoverable on its own, and the batch bar only appears
+     after the picking it explains has already been done. */
+  it('says under the blocks how a set is picked', () => {
+    expect(markup).toContain('Ctrl');
+    expect(markup).toContain('Command');
+    // It is the elevation's own note, and it is not the key: the key names marks, not keys.
+    expect(markup).toContain('cf-plate__hint');
+    expect(keyLine(markup).startsWith('↻')).toBe(true);
+  });
+
+  /*
+   * The marks run down the first line and the words with no mark get a line of their own:
+   * a list where every line but the last starts with a mark reads as a table, and the
+   * qualifier that has no mark would break it.
+   */
+  it('keeps the unmarked words on a line of their own', () => {
+    const lines = [...markup.matchAll(/<p class="cf-plate__key">([^<]*)<\/p>/g)].map(match => match[1]);
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toBe(`↻ 待跟進 · ${clueMarks.SUSPECTED} ${assessmentLabels.SUSPECTED} · ${clueMarks.VERIFIED} ${assessmentLabels.STAFF_VERIFIED}`);
+    expect(lines[1]).toBe(`無符號＝${assessmentLabels.NO_INDICATION}／${assessmentLabels.NOT_UPDATED}`);
+  });
+});
+
 describe('the form reads back in the words it offered', () => {
   it('shows 未能完成探訪 for what that choice stores, not 曾嘗試', () => {
     const history = renderHistory(scene([observation({ id: 'o1', coverage: 'ATTEMPTED' })]));
@@ -386,6 +616,16 @@ describe('the building panel', () => {
     const html = renderDetail(scene([buildingTask]));
     expect(html).toContain('本幢待跟進');
     expect(html).toContain('聯絡中心護士');
+  });
+
+  it('names the elevation columns after the units the building actually has', () => {
+    const numbered = {
+      ...scene([]),
+      units: [{ ...flags, id: 'u1', buildingId: 'b1', floorId: 'f1', label: '1室' }, { ...flags, id: 'u2', buildingId: 'b1', floorId: 'f1', label: '2室' }],
+    };
+    const headers = (html: string) => [...matrixMarkup(html).matchAll(/role="columnheader"[^>]*>([^<]*)</g)].map(match => match[1]);
+    // The figures column is the panel's own, not a unit column.
+    expect(headers(renderDetail(numbered))).toEqual(['1室', '2室', '完成']);
   });
 
   it('hides the manual mark in v1 and never lets a stored one change a status', () => {
