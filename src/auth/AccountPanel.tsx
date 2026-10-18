@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { api, type Account, type Session } from './api';
+import type { FeatureSwitches } from './accountContext';
 
 interface Device { id: string; created_at: number; seen_at: number; current: boolean; }
-interface AuditEvent { id: number; time: number; action: string; actor_email?: string; target_email?: string; }
-const actions: Record<string, string> = { login: '登入', login_failed: '登入失敗', logout: '登出', user_created: '建立帳號', user_updated: '修改帳號', password_link_created: '生成設定密碼連結', password_set: '設定密碼', password_changed: '修改密碼', other_sessions_revoked: '撤銷其他登入', operator_recovery: '運維恢復管理員' };
-export function AccountPanel({ session, onClose, onSignedOut, advanced }: { session: Session; onClose: () => void; onSignedOut: () => void; /** Workspace settings, folded under 高級設定. */ advanced?: ReactNode }) {
+interface AuditEvent { id: number; time: number; action: string; actor_email?: string; target_email?: string; target?: string; }
+const actions: Record<string, string> = { login: '登入', login_failed: '登入失敗', logout: '登出', user_created: '建立帳號', user_updated: '修改帳號', password_link_created: '生成設定密碼連結', password_set: '設定密碼', password_changed: '修改密碼', other_sessions_revoked: '撤銷其他登入', operator_recovery: '運維恢復管理員', feature_enabled: '開啟功能', feature_disabled: '關閉功能' };
+/** What each site-wide switch does, in staff wording. Keys match server/features.mjs. */
+const featureText: Record<keyof FeatureSwitches, { label: string; detail: string }> = {
+  photoIntake: { label: '照片回錄（Azure 辨識）', detail: '開啟後，同事可以上傳紙本照片，照片會傳送到 Azure 辨識。關閉時頂欄不顯示入口，伺服器也拒絕轉送照片。' },
+};
+export function AccountPanel({ session, features = {}, onFeaturesChanged, onClose, onSignedOut, advanced }: { session: Session; /** Site-wide switches; only an administrator sees and changes them. */ features?: FeatureSwitches; onFeaturesChanged?: (features: FeatureSwitches) => void; onClose: () => void; onSignedOut: () => void; /** Workspace settings, folded under 高級設定. */ advanced?: ReactNode }) {
   const [users, setUsers] = useState<Account[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
   const [changing, setChanging] = useState(false);
@@ -13,6 +18,7 @@ export function AccountPanel({ session, onClose, onSignedOut, advanced }: { sess
   const [message, setMessage] = useState('');
   const [link, setLink] = useState('');
   const [busy, setBusy] = useState(false);
+  const [azureReady, setAzureReady] = useState<boolean>();
   const admin = session.user.role === 'ADMIN';
   const reload = useCallback(async () => {
     const [deviceData, userData, auditData] = await Promise.all([
@@ -21,6 +27,7 @@ export function AccountPanel({ session, onClose, onSignedOut, advanced }: { sess
       admin ? api<{ events: AuditEvent[] }>('/admin/audit') : Promise.resolve({ events: [] }),
     ]);
     setDevices(deviceData.sessions); setUsers(userData.users); setEvents(auditData.events);
+    if (admin) setAzureReady((await api<{ configured: boolean }>('/photos/status')).configured);
   }, [admin]);
   useEffect(() => { void reload().catch(e => setError(e instanceof Error ? e.message : '讀取失敗。')); }, [reload]);
   async function perform(action: () => Promise<void>) {
@@ -47,6 +54,13 @@ export function AccountPanel({ session, onClose, onSignedOut, advanced }: { sess
       if (user.id === session.user.id) onSignedOut(); else { await reload(); setMessage('帳號已更新，其已有登入已撤銷。'); }
     });
   }
+  function toggle(key: keyof FeatureSwitches, enabled: boolean) {
+    void perform(async () => {
+      const result = await api<{ features: FeatureSwitches }>('/admin/features', 'PUT', { key, enabled });
+      onFeaturesChanged?.(result.features); await reload();
+      setMessage(`已${enabled ? '開啟' : '關閉'}「${featureText[key].label}」，所有帳號立即生效。`);
+    });
+  }
   return <section className="account-page" aria-label="設定">
     <header><div><h1>設定</h1><p>{session.user.name} · {session.user.email}</p></div><button onClick={onClose}>返回工作台</button></header>
     {error && <p role="alert" className="account-error">{error}</p>}
@@ -68,6 +82,13 @@ export function AccountPanel({ session, onClose, onSignedOut, advanced }: { sess
       </section>
     </div>
     {admin && <>
+      <section className="account-features"><h2>功能開關</h2><p>影響所有帳號，預設全部關閉。每次開關都記在下面的操作記錄裡。</p>
+        <ul>{(Object.keys(featureText) as (keyof FeatureSwitches)[]).map(key => <li key={key}>
+          <label><input type="checkbox" checked={features[key] === true} disabled={busy} onChange={e => toggle(key, e.target.checked)} /><strong>{featureText[key].label}</strong></label>
+          <p>{featureText[key].detail}</p>
+          {key === 'photoIntake' && azureReady === false && <p className="account-features__warn">伺服器未設定 Azure 金鑰：即使開啟，照片也無法辨識。</p>}
+        </li>)}</ul>
+      </section>
       <section><h2>邀請成員</h2><form onSubmit={invite} className="account-invite">
         <label>姓名<input name="name" required maxLength={80} autoComplete="off" /></label>
         <label>電郵<input name="email" type="email" required maxLength={254} autoComplete="off" /></label>
@@ -79,7 +100,7 @@ export function AccountPanel({ session, onClose, onSignedOut, advanced }: { sess
         <td><select aria-label={`${user.email}角色`} disabled={busy || user.id === session.user.id} value={user.role} onChange={e => update(user, { role: e.target.value as Account['role'] })}><option value="MEMBER">成員</option><option value="ADMIN">管理員</option></select></td>
         <td>{user.id === session.user.id ? <small>（你自己；請用上面的「修改密碼」）</small> : <><button disabled={busy} onClick={() => update(user, { disabled: !user.disabled })}>{user.disabled ? '啟用' : '停用'}</button> <button disabled={busy || user.disabled} onClick={() => void perform(async () => { const result = await api<{ link: string }>(`/admin/users/${user.id}/reset`, 'POST'); setLink(result.link); await reload(); })}>{user.pending ? '重新邀請' : '重設密碼'}</button></>}</td>
       </tr>)}</tbody></table></div></section>
-      <section><h2>最近 100 條帳號操作記錄</h2><div className="account-table"><table><thead><tr><th>時間</th><th>操作者</th><th>操作</th><th>對象</th></tr></thead><tbody>{events.map(event => <tr key={event.id}><td>{new Date(event.time).toLocaleString('zh-HK')}</td><td>{event.actor_email ?? '系統／未登入'}</td><td>{actions[event.action] ?? event.action}</td><td>{event.target_email ?? '—'}</td></tr>)}</tbody></table></div></section>
+      <section><h2>最近 100 條帳號操作記錄</h2><div className="account-table"><table><thead><tr><th>時間</th><th>操作者</th><th>操作</th><th>對象</th></tr></thead><tbody>{events.map(event => <tr key={event.id}><td>{new Date(event.time).toLocaleString('zh-HK')}</td><td>{event.actor_email ?? '系統／未登入'}</td><td>{actions[event.action] ?? event.action}</td><td>{event.target_email ?? (event.target && event.target in featureText ? featureText[event.target as keyof FeatureSwitches].label : '—')}</td></tr>)}</tbody></table></div></section>
     </>}
     {advanced && <details className="account-advanced"><summary>高級設定</summary>{advanced}</details>}
   </section>;
