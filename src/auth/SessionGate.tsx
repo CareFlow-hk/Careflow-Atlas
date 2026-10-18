@@ -46,8 +46,10 @@ export function SessionGate({ children }: { children: ReactNode }) {
     generation.current++;
     setCsrf(); setSession(undefined); setSettings(false); setWorkspaceAccount();
   }, []);
+  // The third argument turns on the account端 copy: only a session the server confirmed
+  // reaches this point, so the workspace can be read from and written to that account.
   const accept = useCallback((next: Session) => {
-    setCsrf(next.csrf); setWorkspaceAccount(next.user.id, next.user.name); setSession(next);
+    setCsrf(next.csrf); setWorkspaceAccount(next.user.id, next.user.name, true); setSession(next);
   }, []);
   const refresh = useCallback(async () => {
     const version = generation.current;
@@ -109,7 +111,7 @@ export function SessionGate({ children }: { children: ReactNode }) {
       <button disabled={busy}>{busy ? '正在處理…' : grant ? '設定密碼' : '登入'}</button>
     </form>
     {grant ? <button className="account-text-button" onClick={() => { setGrant(''); setError(''); }}>返回登入</button> : <details><summary>忘記密碼或沒有帳號？</summary><p>請聯絡機構管理員核對身份，獲取一次性邀請或重設連結。管理員無法登入時，由 VPS 運維人員執行恢復命令。</p></details>}
-    <p className="account-note">目前工作台僅用於合成資料示範。帳號不會讓業務資料自動跨裝置同步。</p>
+    <p className="account-note">目前工作台僅用於合成資料示範。示範資料存放在這個帳號，用同一帳號登入其他裝置會看到同一份；但仍不是正式的業務資料庫。</p>
   </section></main>;
   // The workspace header shows the account; this gate only supplies what it needs.
   const controls = { name: session.user.name, role: session.user.role, busy, openSettings: () => setSettings(true), logout: () => void logout() };

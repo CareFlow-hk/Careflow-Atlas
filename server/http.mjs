@@ -1,8 +1,9 @@
 import { createServer } from 'node:http';
 import { createPhotoService, PHOTO_BODY_LIMIT } from './photos.mjs';
+import { createWorkspaceStore, WORKSPACE_BODY_LIMIT } from './workspace.mjs';
 import { HttpError, requireValue, publicUser, SESSION_IDLE_MS } from './auth.mjs';
 
-export function createAuthServer(auth, { origin, secure = true, trustProxy = false, photos = createPhotoService() }) {
+export function createAuthServer(auth, { origin, secure = true, trustProxy = false, photos = createPhotoService(), workspace = createWorkspaceStore(auth) }) {
   requireValue(new URL(origin).origin === origin, 500, 'APP_ORIGIN 必須是完整 origin，不帶路徑或末尾斜線。');
   requireValue(!secure || origin.startsWith('https://'), 500, '安全 Cookie 需要 HTTPS APP_ORIGIN。');
   const cookieName = secure ? '__Host-atlas_session' : 'atlas_session';
@@ -25,16 +26,18 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
       }
       requireValue(!req.headers['sec-fetch-site'] || ['same-origin', 'none'].includes(req.headers['sec-fetch-site']), 403, '不允許跨站請求。');
       const photoRequest = req.method === 'POST' && path === '/api/photos/recognize';
+      const workspaceRequest = req.method === 'PUT' && path === '/api/workspace';
       // Authorize before allocating the larger upload buffer.
-      if (photoRequest) {
+      if (photoRequest || workspaceRequest) {
         const token = req.headers.cookie?.split(';').map(v => v.trim()).find(v => v.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1);
         const session = auth.session(token);
         requireValue(session, 401, '請登入後繼續。');
         requireValue(req.headers['x-csrf-token'] === session.csrf, 403, '請求校驗失敗，請重新整理頁面。');
         const user = auth.assertSession(session);
-        auth.limit(`photo:${user.id}`, 40);
+        if (photoRequest) auth.limit(`photo:${user.id}`, 40);
+        if (workspaceRequest) auth.limit(`workspace:${user.id}`, 1200);
       }
-      const bodyLimit = photoRequest ? PHOTO_BODY_LIMIT : 8192;
+      const bodyLimit = workspaceRequest ? WORKSPACE_BODY_LIMIT : photoRequest ? PHOTO_BODY_LIMIT : 8192;
       let body = {};
       if (mutation) {
         requireValue(!req.headers['content-length'] || Number(req.headers['content-length']) <= bodyLimit, 413, '請求過大。');
@@ -68,6 +71,15 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
         finally { res.off('close', abort); }
       }
       if (req.method === 'GET' && path === '/api/session') return send(res, 200, view(row));
+      /*
+       * The account's business workspace. Scoped to the session's user id, never to an id
+       * in the request, so one account cannot read or write another's snapshot.
+       */
+      if (path === '/api/workspace') {
+        if (req.method === 'GET') return send(res, 200, workspace.get(user.id) ?? {});
+        if (req.method === 'PUT') return send(res, 200, workspace.put(user.id, body));
+        if (req.method === 'DELETE') return send(res, 200, workspace.remove(user.id) ?? { ok: true });
+      }
       if (req.method === 'POST' && path === '/api/logout') {
         auth.transaction(() => { auth.run('DELETE FROM sessions WHERE hash=?', row.hash); auth.audit(user.id, 'logout'); });
         res.setHeader('Set-Cookie', cookie('', 0)); return send(res, 200, { ok: true });

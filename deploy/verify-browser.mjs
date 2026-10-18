@@ -173,6 +173,35 @@ try {
     assert.ok(await fallback.evaluate(k => JSON.parse(globalThis.localStorage.getItem(k)).buildings.length > 0, key));
     await offline.close();
   });
+  /*
+   * The account端 copy: what this browser merged must reach the server, and a second
+   * browser with the same account but no local copy must show it.
+   */
+  await check('the workspace is stored on the account and reaches another browser', async () => {
+    const local = await snapshot();
+    let stored;
+    for (let attempt = 0; attempt < 50; attempt++) {
+      stored = await (await context.request.get(`${base}/api/workspace`)).json();
+      if (stored.snapshot?.buildings?.length === local.buildings.length) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    assert.ok(stored.version >= 1, 'the account端 has no version yet');
+    assert.equal(stored.snapshot.buildings.length, local.buildings.length);
+    assert.equal(stored.snapshot.observations.length, local.observations.length);
+    const other = await browser.newContext();
+    const before = await other.storageState();
+    assert.equal(before.origins.some(origin => origin.localStorage?.length), false, 'the second browser must start with no local copy');
+    await authenticate(other);
+    const otherPage = await other.newPage();
+    await otherPage.goto(base);
+    await otherPage.locator('.list-heading').waitFor();
+    const seen = await otherPage.evaluate(() => {
+      const key = Object.keys(globalThis.localStorage).find(name => /^careflow-atlas\.account\..*\.demo$/.test(name));
+      return key ? JSON.parse(globalThis.localStorage.getItem(key)).buildings.length : -1;
+    });
+    assert.equal(seen, local.buildings.length);
+    await other.close();
+  });
 } finally { await browser.close(); }
 const failed = results.filter(([status]) => status === 'FAIL').length;
 console.log(`${results.filter(([status]) => status === 'PASS').length} passed, ${failed} failed, ${results.filter(([status]) => status === 'WARN').length} unverified`);

@@ -236,3 +236,37 @@ test('a failed login records which existing account it was for, never the passwo
   assert.deepEqual(failed.map(r => r.target), [member.id, null]);
   assert.ok(!JSON.stringify(f.auth.all('SELECT * FROM audit')).includes('wrong passphrase'));
 });
+
+test('the workspace belongs to the signed-in account, is versioned, and refuses a stale write', async t => {
+  const f = await fixture(t);
+  const a = await f.account('MEMBER', 'a@example.test');
+  const b = await f.account('MEMBER', 'b@example.test');
+  assert.equal((await f.request('/api/workspace')).status, 401);
+  assert.deepEqual((await f.request('/api/workspace', a)).value, {});
+  const snapshot = { schemaVersion: '0.1-demo', isSynthetic: true, notice: '', buildings: [], floors: [], units: [], observations: [] };
+  const created = await f.request('/api/workspace', { method: 'PUT', ...a, body: { snapshot } });
+  assert.equal(created.status, 200); assert.equal(created.value.version, 1);
+  // Another account never sees it.
+  assert.deepEqual((await f.request('/api/workspace', b)).value, {});
+  const read = await f.request('/api/workspace', a);
+  assert.equal(read.value.version, 1); assert.deepEqual(read.value.snapshot, snapshot);
+  // A write that started from an old version is reported, not applied.
+  assert.equal((await f.request('/api/workspace', { method: 'PUT', ...a, body: { snapshot, baseVersion: 0 } })).status, 409);
+  const next = { ...snapshot, notice: 'changed' };
+  const updated = await f.request('/api/workspace', { method: 'PUT', ...a, body: { snapshot: next, baseVersion: 1 } });
+  assert.equal(updated.status, 200); assert.equal(updated.value.version, 2);
+  assert.equal((await f.request('/api/workspace', a)).value.snapshot.notice, 'changed');
+  // A malformed body is refused and leaves the stored copy exactly as it was.
+  assert.equal((await f.request('/api/workspace', { method: 'PUT', ...a, body: { snapshot: { schemaVersion: '0.1-demo' }, baseVersion: 2 } })).status, 400);
+  assert.equal((await f.request('/api/workspace', a)).value.snapshot.notice, 'changed');
+  // Clearing removes only this account's document.
+  assert.equal((await f.request('/api/workspace', { method: 'DELETE', ...a })).status, 200);
+  assert.deepEqual((await f.request('/api/workspace', a)).value, {});
+  /*
+   * The demo/production boundary: this store holds the prototype's synthetic workspace only,
+   * so a document without the synthetic marker is refused before it is ever stored.
+   */
+  const production = { ...snapshot, isSynthetic: false };
+  assert.equal((await f.request('/api/workspace', { method: 'PUT', ...a, body: { snapshot: production } })).status, 400);
+  assert.deepEqual((await f.request('/api/workspace', a)).value, {});
+});

@@ -96,7 +96,8 @@ export default function App() {
   }, [helpOpen]);
 
   useEffect(registerWorkspaceTools, []);
-  useEffect(() => { workspace.initialize(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Resolves once the account端 copy has been read (or the local copy when there is no session).
+  useEffect(() => { void workspace.initialize(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(''), 5500); return () => clearTimeout(timer); }, [toast]);
 
   const mapBuildings = useMemo<MapBuilding[]>(() => snapshot?.buildings.map(building => {
@@ -302,7 +303,10 @@ export default function App() {
             const selected = selectedBuildingId === building.id;
             return <BuildingCard key={building.id} name={building.name} address={building.address} floorCount={building.floorCount} index={index} state={state} summary={summary} selected={selected} onSelect={() => { workspace.selectBuilding(building.id); setFinderOpen(false); }} />;
           })}{!buildings.length && <div className="list-empty"><Search size={24} /><p>{query ? '找不到相符的大廈' : '暫無待跟進大廈'}</p><button onClick={() => { setQuery(''); setFilter('ALL'); }}>查看所有大廈</button></div>}</div>
-        </> : <div className="start-import"><span className="import-file-icon"><FileSpreadsheet size={30} strokeWidth={1.4} /></span><h2>開始使用</h2><p>載入一個虛構街區試用：20 幢大廈、多次探訪和待跟進事項。也可以下載空白範本，填上你們自己的大廈再匯入。</p><button className="primary-button" disabled={importLoading} onClick={() => void loadDemo()}><Upload size={16} />{importLoading ? '載入中…' : '載入示範資料'}<ChevronRight size={16} /></button><button className="start-import__secondary" onClick={openImport}><FileSpreadsheet size={16} />匯入自己的 Excel／下載空白範本</button></div>}
+        </> : workspace.loading
+          // The account端 copy has not arrived yet; offering "load demo" here would invite a merge into it.
+          ? <div className="start-import" role="status"><span className="import-file-icon"><FileSpreadsheet size={30} strokeWidth={1.4} /></span><h2>正在讀取帳號端的資料…</h2><p>稍候片刻。若長時間沒有回應，請檢查網絡後重新整理。</p></div>
+          : <div className="start-import"><span className="import-file-icon"><FileSpreadsheet size={30} strokeWidth={1.4} /></span><h2>開始使用</h2><p>載入一個虛構街區試用：20 幢大廈、多次探訪和待跟進事項。也可以下載空白範本，填上你們自己的大廈再匯入。</p><button className="primary-button" disabled={importLoading} onClick={() => void loadDemo()}><Upload size={16} />{importLoading ? '載入中…' : '載入示範資料'}<ChevronRight size={16} /></button><button className="start-import__secondary" onClick={openImport}><FileSpreadsheet size={16} />匯入自己的 Excel／下載空白範本</button></div>}
         {/* One way into paper and Excel: printing, exporting and importing all live in that dialog. */}
         {snapshot && <div className="sidebar-footer"><button onClick={openImport}><FileSpreadsheet size={16} />紙本與 Excel</button></div>}
         </div>
@@ -316,7 +320,7 @@ export default function App() {
     </main>
     {workspace.storageError && <div className="storage-banner" role="alert">{workspace.storageError}</div>}
     {toast && <div className="toast" key={toast} role="status"><Check size={17} /><span>{toast}</span><button aria-label="關閉提示" onClick={() => setToast('')}><X size={16} /></button></div>}
-    {helpOpen && <div ref={helpRef} id="demo-help" className="help-popover" role="region" aria-label="示範說明"><strong>這是一個外展流程示範</strong><p>大廈、住戶及記錄全部虛構，只儲存在這個瀏覽器，不會同步到其他裝置。</p><h3>顏色</h3><ul className="help-legend">{OUTREACH_STATES.map(state => <li key={state}><i style={{ background: stateColors[state] }} /><b>{stateLabels[state]}</b>{stateLegendNotes[state]}</li>)}</ul><p>「沒有記錄」不等於「沒有發現」：先查看上次結果，再決定下一步。</p><p className="help-credit">地圖底圖由 OpenFreeMap / OpenStreetMap 提供。</p><button onClick={() => setHelpOpen(false)}>知道了</button></div>}
+    {helpOpen && <div ref={helpRef} id="demo-help" className="help-popover" role="region" aria-label="示範說明"><strong>這是一個外展流程示範</strong><p>大廈、住戶及記錄全部虛構。資料存放在登入的帳號：換一部裝置用同一帳號登入，會看到同一份；但這仍是示範資料，不是正式的機構業務資料庫。</p><h3>顏色</h3><ul className="help-legend">{OUTREACH_STATES.map(state => <li key={state}><i style={{ background: stateColors[state] }} /><b>{stateLabels[state]}</b>{stateLegendNotes[state]}</li>)}</ul><p>「沒有記錄」不等於「沒有發現」：先查看上次結果，再決定下一步。</p><p className="help-credit">地圖底圖由 OpenFreeMap / OpenStreetMap 提供。</p><button onClick={() => setHelpOpen(false)}>知道了</button></div>}
     <ImportDialog notice={toast.startsWith('Excel 已準備') ? toast : undefined} open={importOpen} review={importReview} loading={importLoading} error={importError} onClose={() => setImportOpen(false)} onFile={loadFile} onLoadDistrict={loadDistrict} onExport={() => void (snapshot ? exportExcel() : exportBlank())} exportLabel={snapshot ? undefined : '下載空白範本'} onPrint={snapshot?.buildings.length ? () => { setImportOpen(false); setPaperOpen(true); } : undefined} onRetry={openImport} onRemap={remapImport} onConfirmReplace={confirmImport} />
     {paperOpen && snapshot && <PaperForm snapshot={snapshot} buildingId={selectedBuildingId} onClose={() => setPaperOpen(false)} />}
     {snapshot && workspace.operator && <PhotoIntake key={workspace.operator.accountId} onApplyProposal={features.structureEditing ? workspace.applyLocationProposal : undefined} open={photoOpen} snapshot={snapshot} operator={workspace.operator} onClose={() => setPhotoOpen(false)} onSave={workspace.savePhotoPages} onView={(buildingId, unitId) => { workspace.selectBuilding(buildingId); if (unitId) workspace.selectUnit(unitId); setFinderOpen(false); }} />}
