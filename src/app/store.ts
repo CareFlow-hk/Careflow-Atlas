@@ -8,6 +8,7 @@ import { RemoteWorkspaceRepository } from '../data/remoteWorkspaceRepository';
 import { outlineCentre } from '../map/footprintGeometry';
 import { OptionPrefsRepository } from '../data/optionPrefsRepository';
 import { mergeWorkflow } from '../data/workflowMerge';
+import { mergeSync, type SyncChoice, type SyncConflict } from '../data/syncMerge';
 import { addBuilding, type NewBuildingInput } from '../data/newBuilding';
 import { blankSnapshot } from '../data/blankSnapshot';
 import { applyStructureChange, setNoSubdivision, type LocationProposal, type StructureChange } from '../domain/structure';
@@ -15,7 +16,7 @@ import { appendPhotoPages, type PhotoPage } from '../photos/model';
 
 const adapter = new LocalStoragePersistenceAdapter();
 let repository = new OutreachRepository(adapter);
-let backupRepository = new OutreachRepository(adapter, 'careflow-field-outreach.backup');
+let baseRepository = new OutreachRepository(adapter, 'careflow-field-outreach.base');
 let prefsRepository = new OptionPrefsRepository(adapter);
 let accountId: string | undefined;
 /*
@@ -26,10 +27,12 @@ let accountId: string | undefined;
 let server: RemoteWorkspaceRepository | undefined;
 /** The version this tab last read from or wrote to the server. A write names it. */
 let serverVersion: number | undefined;
-/** Serialises writes: one in flight, in order, never two snapshots racing. */
+/** Serialises pulls and writes: one in flight, in order, never two snapshots racing. */
 let writes: Promise<void> = Promise.resolve();
-/** The last snapshot the server confirmed, so an unchanged snapshot is not sent again. */
+/** The JSON the account端 held when this tab last read or wrote it. */
 let confirmed = '';
+/** The JSON both sides last agreed on; written once to remember the common ancestor. */
+let savedBase = '';
 /**
  * Demo caches only. Never adopt the pre-authentication shared cache.
  * `remote` is set only by the session gate, after the server has confirmed a session.
@@ -41,75 +44,156 @@ export function setWorkspaceAccount(id?: string, name?: string, remote = false) 
   accountId = id;
   const suffix = id ? `careflow-atlas.account.${id}` : 'careflow-atlas.signed-out';
   repository = new OutreachRepository(adapter, `${suffix}.demo`);
-  backupRepository = new OutreachRepository(adapter, `${suffix}.demo.backup`);
+  baseRepository = new OutreachRepository(adapter, `${suffix}.demo.base`);
   prefsRepository = new OptionPrefsRepository(adapter, `${suffix}.options`);
   server = id && remote ? new RemoteWorkspaceRepository() : undefined;
-  serverVersion = undefined; confirmed = ''; writes = Promise.resolve();
-  useWorkspace.setState({ snapshot: undefined, loading: false, storageError: undefined, selectedBuildingId: undefined, selectedFloorId: undefined, selectedUnitId: undefined, expanded: false, optionPrefs: prefsRepository.get() });
+  serverVersion = undefined; confirmed = ''; savedBase = ''; writes = Promise.resolve();
+  useWorkspace.setState({ snapshot: undefined, loading: false, storageError: undefined, pendingConflicts: [], conflictsOpen: false, syncBlocked: false, selectedBuildingId: undefined, selectedFloorId: undefined, selectedUnitId: undefined, expanded: false, optionPrefs: prefsRepository.get() });
 }
+
+/** This browser's working copy; a corrupt store is reported, not thrown at the caller. */
+function workingSnapshot(): OutreachSnapshot | undefined {
+  try { return repository.getSnapshot(); } catch { return undefined; }
+}
+/** The snapshot both sides last agreed on, when this browser remembers one. */
+function readBase(): OutreachSnapshot | undefined {
+  try { return baseRepository.getSnapshot(); } catch { return undefined; }
+}
+function rememberBase(snapshot: OutreachSnapshot) {
+  const json = JSON.stringify(snapshot);
+  if (json === savedBase) return;
+  savedBase = json;
+  try { baseRepository.replaceSnapshot(snapshot); } catch { /* merges then keep both sides rather than delete */ }
+}
+const conflictMessage = (count: number) =>
+  `這個帳號的資料已在其他裝置更新，其中 ${count} 筆記錄兩邊都改過，未有自動決定。本機的版本仍留在這部電腦；請在視窗逐筆選擇保留哪一份，選好之前不會寫上帳號端。`;
+const blockedMessage = '這個帳號的資料已在其他裝置更新，但兩邊的改動在關聯上對不上，未能自動合併。本機版本仍然保留，未寫上帳號端；請先匯出 Excel 核對。';
 
 /** Publish a snapshot the account端 has not been told about yet, then tell it. */
 function publish(set: (partial: Partial<WorkspaceState>) => void, snapshot: OutreachSnapshot) {
-  set({ snapshot, storageError: undefined });
-  scheduleSync(snapshot);
+  // An unresolved record conflict keeps its banner: the edit does not settle it.
+  set(useWorkspace.getState().pendingConflicts.length ? { snapshot } : { snapshot, storageError: undefined });
+  scheduleSync();
 }
-function scheduleSync(snapshot: OutreachSnapshot) {
+/**
+ * Queue a pull-then-write. The snapshot is read when the queued task runs, not when the
+ * edit happened, so a later edit always carries the newest merged copy to the account端.
+ */
+function scheduleSync() {
   const target = server;
   if (!target) return;
-  const json = JSON.stringify(snapshot);
-  if (json === confirmed) return;
-  writes = writes.then(() => push(target, snapshot, json));
+  writes = writes.then(() => push(target));
+}
+/**
+ * Read the account端 and fold in what another device wrote, keeping this browser's changes.
+ *
+ * Returns `conflict` when the two sides changed the same record differently; the caller must
+ * then leave the working copy alone and ask. Nothing is ever written here.
+ */
+async function reconcile(target: RemoteWorkspaceRepository): Promise<'ok' | 'conflict' | 'blocked'> {
+  const record = await target.load();
+  if (target !== server) return 'ok';
+  if (!record) {
+    // Nothing on the account端: this browser's copy is the first one, and there is no
+    // common ancestor to compare a future write against.
+    serverVersion = undefined; confirmed = ''; savedBase = '';
+    return 'ok';
+  }
+  if (serverVersion !== undefined && record.version === serverVersion) return 'ok';
+  const local = workingSnapshot();
+  // The form the working copy will take, so comparisons do not trip over alignment.
+  const remoteStored = repository.prepare(record.snapshot);
+  serverVersion = record.version;
+  confirmed = JSON.stringify(remoteStored);
+  if (!local) {
+    const stored = repository.replaceSnapshot(remoteStored);
+    rememberBase(stored);
+    useWorkspace.setState({ snapshot: stored });
+    return 'ok';
+  }
+  const result = mergeSync(remoteStored, local, readBase());
+  if (!result.snapshot) {
+    useWorkspace.setState({ storageError: blockedMessage, pendingConflicts: [], conflictsOpen: false, syncBlocked: true });
+    return 'blocked';
+  }
+  if (result.conflicts.length) {
+    // The local copy is the only place the local version exists, so it stays exactly as
+    // it is until the person has chosen; the account端 version is not adopted here.
+    useWorkspace.setState({ snapshot: local, pendingConflicts: result.conflicts, conflictsOpen: true, storageError: conflictMessage(result.conflicts.length), syncBlocked: false });
+    return 'conflict';
+  }
+  const stored = repository.replaceSnapshot(result.snapshot);
+  // From now on the local changes are relative to what the account端 holds.
+  rememberBase(remoteStored);
+  useWorkspace.setState({ snapshot: stored, pendingConflicts: [], conflictsOpen: false, syncBlocked: false, ...(result.keptBoth
+    ? { storageError: '這個帳號的資料已在其他裝置更新。兩邊的樓層／單位改動對不上，為免刪錯，已保留兩邊的資料（帳號端刪除的結構可能重新出現），請核對。' }
+    : {}) });
+  return 'ok';
 }
 /**
  * A failed write is reported, never swallowed: the banner says the change is on this
- * machine but not yet on the account端. A 409 means another device wrote first, so the
- * change is not forced through and the person is asked to reload.
+ * machine but not yet on the account端. A 409 means another device wrote between our pull
+ * and our write, so the loop pulls again and folds the two copies together instead of
+ * forcing this one through.
  */
-async function push(target: RemoteWorkspaceRepository, snapshot: OutreachSnapshot, json: string) {
+async function push(target: RemoteWorkspaceRepository) {
   if (target !== server) return;
   try {
-    const version = await target.save(snapshot, serverVersion);
-    if (target !== server) return;
-    serverVersion = version; confirmed = json;
-    if (useWorkspace.getState().storageError) useWorkspace.setState({ storageError: undefined });
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const outcome = await reconcile(target);
+      if (target !== server) return;
+      const awaitingChoice = useWorkspace.getState().pendingConflicts.length;
+      if (awaitingChoice) {
+        // Still undecided: pull again so a newer account端 version updates the question,
+        // but never write a copy the person has not settled.
+        useWorkspace.setState({ conflictsOpen: true, storageError: conflictMessage(awaitingChoice) });
+        return;
+      }
+      if (outcome !== 'ok') return;
+      const merged = workingSnapshot();
+      if (!merged) return;
+      const json = JSON.stringify(merged);
+      if (json === confirmed) {
+        if (useWorkspace.getState().storageError) useWorkspace.setState({ storageError: undefined });
+        return;
+      }
+      try {
+        const version = await target.save(merged, serverVersion);
+        if (target !== server) return;
+        serverVersion = version; confirmed = json;
+        rememberBase(merged);
+        if (useWorkspace.getState().storageError) useWorkspace.setState({ storageError: undefined });
+        return;
+      } catch (error) {
+        if (target !== server) return;
+        if (error instanceof ApiError && error.status === 409) continue;
+        throw error;
+      }
+    }
+    throw new ApiError(409, '工作區同時被其他裝置更新。');
   } catch (error) {
     if (target !== server) return;
     const conflict = error instanceof ApiError && error.status === 409;
     useWorkspace.setState({ storageError: conflict
-      ? '這個帳號的資料已在其他裝置更新，本次改動未寫上帳號端。請重新載入後再修改；本機副本仍然保留。'
+      ? '這個帳號的資料不斷被其他裝置更新，本次改動未寫上帳號端。本機副本仍然保留，請稍後再試。'
       : '本次改動已儲存在本機，但未能同步到帳號端。請檢查網絡；本機副本仍然保留，稍後可再儲存。' });
   }
 }
 /**
- * Read the account端 copy and make it the working copy.
+ * Read the account端 copy and make it the working copy, merging rather than replacing.
  *
- * Two copies that differ are never merged here: without a reliable business key there is
- * no honest way to tell a repeated visit from a second visit (CLAUDE.md §3.2), so the
- * account端 wins, the local copy is kept as a backup, and the person is told.
+ * Two copies that differ are merged record by record (see data/syncMerge.ts). Only a record
+ * both sides changed differently stops the merge and asks; nothing is silently dropped.
  */
 async function loadRemote(target: RemoteWorkspaceRepository) {
-  let local: OutreachSnapshot | undefined;
-  try { local = repository.getSnapshot(); } catch { local = undefined; }
+  const local = workingSnapshot();
   try {
-    const record = await target.load();
+    const outcome = await reconcile(target);
     if (target !== server) return;
-    if (!record) {
-      serverVersion = undefined; confirmed = '';
-      useWorkspace.setState({ snapshot: local, storageError: undefined, loading: false });
-      if (local) scheduleSync(local);
-      return;
-    }
-    serverVersion = record.version;
-    const same = !!local && JSON.stringify(local) === JSON.stringify(record.snapshot);
-    let keptBackup = false;
-    if (local && !same) { try { backupRepository.replaceSnapshot(local); keptBackup = true; } catch { /* the message says it was not merged either way */ } }
-    // The working copy is what alignment and validation made of the stored document; that,
-    // not the raw bytes read back, is what an unchanged snapshot is compared against.
-    const stored = repository.replaceSnapshot(record.snapshot);
-    confirmed = JSON.stringify(stored);
-    useWorkspace.setState({ loading: false, snapshot: stored, storageError: local && !same
-      ? `這個帳號的資料已在其他裝置更新，已載入帳號端的版本，未有自動合併。${keptBackup ? '本機原有的另一份副本已另存備份。' : ''}需要的話請先匯出 Excel 核對。`
-      : undefined });
+    // A fresh account端 copy, or a local copy whose changes were merged in, is still
+    // something the account端 does not hold. Sending an unchanged copy costs no write.
+    if (outcome === 'ok') scheduleSync();
+    useWorkspace.setState({ loading: false, ...(outcome === 'ok' ? { storageError: undefined } : {}) });
   } catch (error) {
     if (target !== server) return;
     /*
@@ -132,6 +216,21 @@ interface WorkspaceState {
   /** True while the account端 copy is being read, so an empty start screen cannot be mistaken for an empty workspace. */
   loading: boolean;
   storageError?: string;
+  /** Records the account端 and this browser both changed; nothing is written until they are settled. */
+  pendingConflicts: SyncConflict[];
+  /** Whether the conflict dialog is showing. Closing it keeps the question for later. */
+  conflictsOpen: boolean;
+  /** The two copies could not be merged at all; only an explicit decision can move them on. */
+  syncBlocked: boolean;
+  /** Hide the banner. The underlying state is unchanged: a real failure is reported again. */
+  dismissStorageError: () => void;
+  openConflicts: () => void;
+  /** Close the dialog without deciding. The question stays until it is settled. */
+  deferConflicts: () => void;
+  /** Apply the person's choice per conflicted record, then write the result to the account端. */
+  resolveConflicts: (choices: Readonly<Record<string, SyncChoice>>) => void;
+  /** Last resort for a merge that cannot be reconciled: this browser's copy replaces the account端's. */
+  forcePushLocal: () => void;
   /** Self-defined entry choices for this account. A shortcut list, not a record. */
   optionPrefs: CustomOptions;
   /** The signed-in account. Recorded as the operator of task actions, never as a field worker. */
@@ -175,11 +274,77 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   expanded: false,
   loading: false,
   optionPrefs: {},
+  pendingConflicts: [],
+  conflictsOpen: false,
+  syncBlocked: false,
   initialize: () => {
     if (server) { set({ loading: true, storageError: undefined }); return loadRemote(server); }
     try { set({ snapshot: repository.getSnapshot(), storageError: undefined }); }
     catch { set({ storageError: '本機資料未能讀取。原有資料保留；你可以重新匯入合成資料。' }); }
     return Promise.resolve();
+  },
+  dismissStorageError: () => set({ storageError: undefined }),
+  openConflicts: () => set({ conflictsOpen: true }),
+  deferConflicts: () => set(state => ({ conflictsOpen: false, ...(state.pendingConflicts.length ? { storageError: conflictMessage(state.pendingConflicts.length) } : {}) })),
+  resolveConflicts: choices => {
+    const target = server;
+    const local = workingSnapshot();
+    if (!target || !local) return;
+    writes = writes.then(async () => {
+      if (target !== server) return;
+      try {
+        const record = await target.load();
+        if (target !== server) return;
+        if (!record) {
+          // Nothing left on the account端: this browser's copy can be written as the first one.
+          const stored = repository.replaceSnapshot(local);
+          serverVersion = undefined; confirmed = ''; savedBase = '';
+          set({ snapshot: stored, pendingConflicts: [], conflictsOpen: false, syncBlocked: false, storageError: undefined });
+          scheduleSync();
+          return;
+        }
+        const remoteStored = repository.prepare(record.snapshot);
+        const result = mergeSync(remoteStored, local, readBase(), choices);
+        serverVersion = record.version;
+        confirmed = JSON.stringify(remoteStored);
+        if (!result.snapshot) { set({ pendingConflicts: [], conflictsOpen: false, syncBlocked: true, storageError: blockedMessage }); return; }
+        if (result.conflicts.length) {
+          // The account端 moved again while the question was open; ask about the new pair.
+          set({ pendingConflicts: result.conflicts, conflictsOpen: true, storageError: conflictMessage(result.conflicts.length) });
+          return;
+        }
+        const stored = repository.replaceSnapshot(result.snapshot);
+        rememberBase(remoteStored);
+        set({ snapshot: stored, pendingConflicts: [], conflictsOpen: false, syncBlocked: false, storageError: undefined });
+        scheduleSync();
+      } catch (error) {
+        if (target !== server) return;
+        set({ storageError: error instanceof ApiError && error.status === 401
+          ? '登入已過期，未能把選擇寫上帳號端。本機副本仍然保留。'
+          : '未能讀取帳號端的資料，選擇未寫上。本機副本仍然保留，請檢查網絡後再試。' });
+      }
+    });
+  },
+  forcePushLocal: () => {
+    const target = server;
+    if (!target) return;
+    writes = writes.then(async () => {
+      if (target !== server) return;
+      try {
+        const record = await target.load();
+        if (target !== server) return;
+        const local = workingSnapshot();
+        if (!local) return;
+        const version = await target.save(local, record?.version);
+        if (target !== server) return;
+        serverVersion = version; confirmed = JSON.stringify(local);
+        rememberBase(local);
+        set({ storageError: undefined, syncBlocked: false, pendingConflicts: [], conflictsOpen: false });
+      } catch {
+        if (target !== server) return;
+        set({ storageError: '未能以本機版本寫上帳號端。本機副本仍然保留，請檢查網絡後重試。' });
+      }
+    });
   },
   importSnapshot: snapshot => {
     const saved = repository.replaceSnapshot(snapshot);
@@ -227,6 +392,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   },
   clearWorkspace: () => {
     repository.clear();
+    savedBase = '';
+    try { baseRepository.clear(); } catch { /* an unreadable baseline only costs a conservative merge */ }
     const target = server;
     /*
      * Queue behind any write still in flight, so a late PUT cannot restore what was
@@ -245,7 +412,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       useWorkspace.setState({ storageError: '本機工作區已清空，但未能清空帳號端的副本。請檢查網絡後重試。' });
     });
     else { serverVersion = undefined; confirmed = ''; }
-    set({ snapshot: undefined, storageError: undefined, selectedBuildingId: undefined, selectedFloorId: undefined, selectedUnitId: undefined, expanded: false });
+    set({ snapshot: undefined, storageError: undefined, pendingConflicts: [], conflictsOpen: false, syncBlocked: false, selectedBuildingId: undefined, selectedFloorId: undefined, selectedUnitId: undefined, expanded: false });
   },
   mergeSnapshot: (incoming, baseline) => {
     const result = mergeWorkflow(repository.getSnapshot(), incoming, baseline);

@@ -12,6 +12,7 @@ import { BuildingDetail } from '../components/BuildingDetail';
 import { ObservationEditor, type ObservationDraft } from '../components/ObservationEditor';
 import { ImportDialog, type ImportReview } from '../components/ImportDialog';
 import { PaperForm } from '../components/PaperForm';
+import { SyncConflictDialog } from '../components/SyncConflictDialog';
 import { AccountMenu } from '../components/AccountMenu';
 import { features } from './features';
 import { stateColors, stateLabels, stateLegendNotes } from '../domain/presentation';
@@ -36,6 +37,18 @@ interface EditTarget {
   eventIds: string[];
   /** The picked units, when one result is being recorded at several of them at once. */
   unitIds?: string[];
+}
+
+/**
+ * The escape hatch for a merge that cannot be reconciled at all. It overwrites the account端
+ * copy, so it takes a second, explicit click; the banner has already said what that costs.
+ */
+function ReplaceRemoteButton() {
+  const forcePushLocal = useWorkspace(state => state.forcePushLocal);
+  const [confirming, setConfirming] = useState(false);
+  return <button type="button" className="storage-banner__action" onClick={() => { if (!confirming) { setConfirming(true); return; } setConfirming(false); forcePushLocal(); }}>
+    {confirming ? '再按一次：覆寫帳號端' : '以本機版本覆寫帳號端'}
+  </button>;
 }
 
 function download(url: string, name: string) {
@@ -318,10 +331,16 @@ export default function App() {
       </section>
       {snapshot && selectedBuildingId && <BuildingDetail snapshot={snapshot} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} selectedUnitId={selectedUnitId} onBack={() => workspace.selectBuilding()} onSelectFloor={workspace.selectFloor} onSelectUnit={workspace.selectUnit} onToggleTag={workspace.setTag} onFollowUpAction={workspace.actOnFollowUp} onStartObservation={startObservation} onStructureChange={features.structureEditing ? change => { const result = workspace.changeStructure(change); if ('error' in result) return result.error; setToast(result.message); return undefined; } : undefined} onBackup={downloadWorkbook} />}
     </main>
-    {workspace.storageError && <div className="storage-banner" role="alert">{workspace.storageError}</div>}
+    {workspace.storageError && <div className="storage-banner" role="alert">
+      <span>{workspace.storageError}</span>
+      {workspace.pendingConflicts.length > 0 && <button type="button" className="storage-banner__action" onClick={workspace.openConflicts}>立即處理</button>}
+      {workspace.syncBlocked && !workspace.pendingConflicts.length && <ReplaceRemoteButton />}
+      <button type="button" className="storage-banner__close" aria-label="關閉提示" onClick={workspace.dismissStorageError}><X size={16} /></button>
+    </div>}
     {toast && <div className="toast" key={toast} role="status"><Check size={17} /><span>{toast}</span><button aria-label="關閉提示" onClick={() => setToast('')}><X size={16} /></button></div>}
     {helpOpen && <div ref={helpRef} id="demo-help" className="help-popover" role="region" aria-label="示範說明"><strong>這是一個外展流程示範</strong><p>大廈、住戶及記錄全部虛構。資料存放在登入的帳號：換一部裝置用同一帳號登入，會看到同一份；但這仍是示範資料，不是正式的機構業務資料庫。</p><h3>顏色</h3><ul className="help-legend">{OUTREACH_STATES.map(state => <li key={state}><i style={{ background: stateColors[state] }} /><b>{stateLabels[state]}</b>{stateLegendNotes[state]}</li>)}</ul><p>「沒有記錄」不等於「沒有發現」：先查看上次結果，再決定下一步。</p><p className="help-credit">地圖底圖由 OpenFreeMap / OpenStreetMap 提供。</p><button onClick={() => setHelpOpen(false)}>知道了</button></div>}
     <ImportDialog notice={toast.startsWith('Excel 已準備') ? toast : undefined} open={importOpen} review={importReview} loading={importLoading} error={importError} onClose={() => setImportOpen(false)} onFile={loadFile} onLoadDistrict={loadDistrict} onExport={() => void (snapshot ? exportExcel() : exportBlank())} exportLabel={snapshot ? undefined : '下載空白範本'} onPrint={snapshot?.buildings.length ? () => { setImportOpen(false); setPaperOpen(true); } : undefined} onRetry={openImport} onRemap={remapImport} onConfirmReplace={confirmImport} />
+    {workspace.conflictsOpen && workspace.pendingConflicts.length > 0 && <SyncConflictDialog conflicts={workspace.pendingConflicts} onResolve={workspace.resolveConflicts} onDefer={workspace.deferConflicts} />}
     {paperOpen && snapshot && <PaperForm snapshot={snapshot} buildingId={selectedBuildingId} onClose={() => setPaperOpen(false)} />}
     {snapshot && workspace.operator && <PhotoIntake key={workspace.operator.accountId} onApplyProposal={features.structureEditing ? workspace.applyLocationProposal : undefined} open={photoOpen} snapshot={snapshot} operator={workspace.operator} onClose={() => setPhotoOpen(false)} onSave={workspace.savePhotoPages} onView={(buildingId, unitId) => { workspace.selectBuilding(buildingId); if (unitId) workspace.selectUnit(unitId); setFinderOpen(false); }} />}
     {editTarget && <ObservationEditor open targetLabel={editTarget.label} subjectId={editTarget.unitIds ? undefined : editTarget.unitId ?? editTarget.buildingId} subjectType={editTarget.unitId ? 'UNIT' : 'BUILDING'} batch={editTarget.unitIds ? { units: editTarget.unitIds.length } : undefined} optionPrefs={workspace.optionPrefs} defaultCoverage={editDefaults.coverage} defaultAssessment={editDefaults.assessment} onClose={() => setEditTarget(undefined)} onSubmit={saveObservation} />}

@@ -161,7 +161,9 @@ describe('the workspace the account端 holds', () => {
       const method = init?.method ?? 'GET';
       const body = init?.body ? JSON.parse(String(init.body)) : undefined;
       calls.push({ method, body });
-      if (fail) { const status = fail; fail = undefined; return reply(status, { error: '拒絕' }); }
+      // Persistent until cleared: a pull now runs before every write, so "the next request"
+      // is not the one the caller meant.
+      if (fail) return reply(fail, { error: '拒絕' });
       if (method === 'GET') return reply(200, record ?? {});
       if (method === 'PUT') {
         // The real server refuses a write that started from a version it no longer holds.
@@ -172,29 +174,39 @@ describe('the workspace the account端 holds', () => {
       if (method === 'DELETE') { record = undefined; return reply(200, { ok: true }); }
       return reply(404, { error: '找不到接口。' });
     };
-    return { fetch, calls, get record() { return record; }, set record(value) { record = value; }, fail: (status: number) => { fail = status; } };
+    return { fetch, calls, get record() { return record; }, set record(value) { record = value; }, fail: (status?: number) => { fail = status; } };
   }
   const values = new Map<string, string>();
   const localKey = 'careflow-atlas.account.account-a.demo';
+  /** Let the queue the load itself scheduled finish, so a test's next move is not racing it. */
+  const settle = () => new Promise(resolve => setTimeout(resolve, 20));
   const start = async (server: ReturnType<typeof serverStub>) => {
     vi.stubGlobal('fetch', server.fetch);
     setWorkspaceAccount('account-a', '合成操作員', true);
     await useWorkspace.getState().initialize();
+    await settle();
   };
   const put = (server: ReturnType<typeof serverStub>) => server.calls.find(call => call.method === 'PUT');
 
   beforeEach(() => { values.clear(); vi.stubGlobal('localStorage', { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value), removeItem: (key: string) => values.delete(key) }); });
   afterEach(() => { setWorkspaceAccount(); vi.unstubAllGlobals(); });
 
-  it('loads the copy the account端 holds and keeps a differing local one as a backup', async () => {
+  /*
+   * A local copy from before this browser remembered a sync baseline has no common ancestor
+   * with the account端 copy, so an edit both sides made cannot be attributed. It is not
+   * guessed at: the local copy stays exactly where it is and the person is asked.
+   */
+  it('asks about a record both sides changed instead of replacing the local copy', async () => {
     const server = serverStub();
     const stale = structuredClone(demoSnapshot); stale.people[0].phone = '99999999';
     values.set(localKey, JSON.stringify(stale));
     server.record = { snapshot: demoSnapshot, version: 3 };
     await start(server);
-    expect(useWorkspace.getState().snapshot?.people[0].phone).not.toBe('99999999');
-    expect(useWorkspace.getState().storageError).toContain('未有自動合併');
-    expect(JSON.parse(values.get(`${localKey}.backup`)!).people[0].phone).toBe('99999999');
+    expect(useWorkspace.getState().snapshot?.people[0].phone).toBe('99999999');
+    expect(useWorkspace.getState().pendingConflicts).toHaveLength(1);
+    expect(useWorkspace.getState().conflictsOpen).toBe(true);
+    expect(useWorkspace.getState().storageError).toContain('未有自動決定');
+    expect(server.record?.version).toBe(3);
   });
 
   /*
@@ -252,17 +264,56 @@ describe('the workspace the account端 holds', () => {
     expect(server.record?.version).toBe(1);
   });
 
-  it('does not overwrite a change another device already wrote', async () => {
+  /*
+   * The reason a pull runs before every write: another device's change is folded in first,
+   * so this tab's write carries both. It is not a version-check that throws the local copy
+   * away, and it is not a blind overwrite either.
+   */
+  it('keeps this browser\'s change and folds in what another device wrote', async () => {
     const server = serverStub();
     server.record = { snapshot: demoSnapshot, version: 3 };
     await start(server);
-    // Another device moved the server on while this tab still held version 3.
+    const elsewhere = structuredClone(demoSnapshot); elsewhere.people[0].phone = '88888888';
+    server.record = { snapshot: elsewhere, version: 4 };
+    const changed = structuredClone(demoSnapshot); changed.people[1].phone = '12345678';
+    useWorkspace.getState().importSnapshot(changed);
+    await vi.waitFor(() => expect(server.record?.version).toBe(5));
+    const written = server.record!.snapshot as typeof demoSnapshot;
+    expect(written.people[0].phone).toBe('88888888');
+    expect(written.people[1].phone).toBe('12345678');
+  });
+
+  /* The same record changed on both devices: stop and ask, then write the choice back. */
+  it('asks before choosing, then writes the choice to the account端', async () => {
+    const server = serverStub();
+    server.record = { snapshot: demoSnapshot, version: 3 };
+    await start(server);
     const elsewhere = structuredClone(demoSnapshot); elsewhere.people[0].phone = '88888888';
     server.record = { snapshot: elsewhere, version: 4 };
     const changed = structuredClone(demoSnapshot); changed.people[0].phone = '12345678';
     useWorkspace.getState().importSnapshot(changed);
-    await vi.waitFor(() => expect(useWorkspace.getState().storageError).toContain('已在其他裝置更新'));
-    expect(JSON.parse(JSON.stringify(server.record?.snapshot)).people[0].phone).toBe('88888888');
+    await vi.waitFor(() => expect(useWorkspace.getState().pendingConflicts).toHaveLength(1));
+    // Nothing is written while the question is open, and the account端 keeps its version.
+    expect(server.record?.version).toBe(4);
+    expect((server.record!.snapshot as typeof demoSnapshot).people[0].phone).toBe('88888888');
+    const [conflict] = useWorkspace.getState().pendingConflicts;
+    useWorkspace.getState().resolveConflicts({ [conflict.key]: 'local' });
+    await vi.waitFor(() => expect(server.record?.version).toBe(5));
+    expect((server.record!.snapshot as typeof demoSnapshot).people[0].phone).toBe('12345678');
+    expect(useWorkspace.getState().pendingConflicts).toHaveLength(0);
+    expect(useWorkspace.getState().conflictsOpen).toBe(false);
+  });
+
+  it('lets the person close the banner', async () => {
+    const server = serverStub();
+    server.record = { snapshot: demoSnapshot, version: 1 };
+    await start(server);
+    server.fail(500);
+    const changed = structuredClone(demoSnapshot); changed.people[0].phone = '12345678';
+    useWorkspace.getState().importSnapshot(changed);
+    await vi.waitFor(() => expect(useWorkspace.getState().storageError).toContain('未能同步到帳號端'));
+    useWorkspace.getState().dismissStorageError();
+    expect(useWorkspace.getState().storageError).toBeUndefined();
   });
 });
 
