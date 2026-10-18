@@ -112,9 +112,19 @@ async function loadRemote(target: RemoteWorkspaceRepository) {
       : undefined });
   } catch (error) {
     if (target !== server) return;
-    useWorkspace.setState({ loading: false, snapshot: local, storageError: error instanceof ApiError && error.status === 401
-      ? '登入已過期，未能讀取帳號端的資料。目前顯示的是本機副本。'
-      : '未能連接帳號服務，目前顯示的是本機副本。恢復連線後請重新整理。' });
+    /*
+     * Name what actually failed. A 404 is not a network problem: it means the running
+     * account service predates this interface (a process started before the upgrade, or a
+     * deployment that was never rebuilt), which sends people looking at their network.
+     */
+    const message = error instanceof ApiError
+      ? error.status === 401 ? '登入已過期，未能讀取帳號端的資料。目前顯示的是本機副本。'
+        : error.status === 404 ? '帳號服務的版本較舊，未提供工作區接口。請重新啟動或重新部署帳號服務，再重新整理。目前顯示的是本機副本。'
+          : `帳號服務未能讀取工作區（HTTP ${error.status}）。目前顯示的是本機副本。`
+      : error instanceof Error && error.name === 'ZodError'
+        ? '帳號端的資料格式不完整，未有載入。目前顯示的是本機副本；請先匯出 Excel 核對。'
+        : '未能連接帳號服務，目前顯示的是本機副本。恢復連線後請重新整理。';
+    useWorkspace.setState({ loading: false, snapshot: local, storageError: message });
   }
 }
 interface WorkspaceState {

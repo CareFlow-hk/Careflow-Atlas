@@ -197,6 +197,20 @@ describe('the workspace the account端 holds', () => {
     expect(JSON.parse(values.get(`${localKey}.backup`)!).people[0].phone).toBe('99999999');
   });
 
+  /*
+   * A running account service older than the interface answers 404. Saying "check your
+   * network" sends people to the wrong place; the message has to name the stale service.
+   */
+  it('names an account service that is older than the workspace interface', async () => {
+    const server = serverStub();
+    vi.stubGlobal('fetch', async () => reply(404, { error: '找不到接口。' }));
+    setWorkspaceAccount('account-a', '合成操作員', true);
+    await useWorkspace.getState().initialize();
+    expect(useWorkspace.getState().storageError).toContain('帳號服務的版本較舊');
+    expect(useWorkspace.getState().loading).toBe(false);
+    void server;
+  });
+
   it('writes a change to the account端 with the version it read', async () => {
     const server = serverStub();
     server.record = { snapshot: demoSnapshot, version: 3 };
