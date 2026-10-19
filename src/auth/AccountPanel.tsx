@@ -99,12 +99,12 @@ export function AccountPanel({ session, features = {}, onFeaturesChanged, onKeyC
       <section><h2>邀請成員</h2><form onSubmit={invite} className="account-invite">
         <label>姓名<input name="name" required maxLength={80} autoComplete="off" /></label>
         <label>電郵<input name="email" type="email" required maxLength={254} autoComplete="off" /></label>
-        <label>角色<select name="role"><option value="MEMBER">成員</option><option value="ADMIN">管理員</option></select></label>
+        <label>角色<select name="role"><option value="MEMBER">成員</option><option value="ADMIN">機構管理員</option></select></label>
         <button disabled={busy}>建立邀請</button>
       </form></section>
       <section><h2>機構帳號</h2><div className="account-table"><table><thead><tr><th>成員</th><th>狀態</th><th>角色</th><th>操作</th></tr></thead><tbody>{users.map(user => <tr key={user.id}>
         <td>{user.name}{user.platformAdmin && <span className="account-badge">平台管理員</span>}<small>{user.email}</small></td><td>{user.disabled ? '已停用' : user.pending ? '待啟用' : '正常'}</td>
-        <td><select aria-label={`${user.email}角色`} disabled={busy || user.id === session.user.id || (user.platformAdmin && !platform)} value={user.role} onChange={e => update(user, { role: e.target.value as Account['role'] })}><option value="MEMBER">成員</option><option value="ADMIN">管理員</option></select></td>
+        <td><select aria-label={`${user.email}角色`} disabled={busy || user.id === session.user.id || (user.platformAdmin && !platform)} value={user.role} onChange={e => update(user, { role: e.target.value as Account['role'] })}><option value="MEMBER">成員</option><option value="ADMIN">機構管理員</option></select></td>
         <td>{user.id === session.user.id ? <small>（你自己；請用上面的「修改密碼」）</small> : user.platformAdmin && !platform ? <small>（平台管理員的帳號只可由平台管理員修改）</small> : <><button disabled={busy} onClick={() => update(user, { disabled: !user.disabled })}>{user.disabled ? '啟用' : '停用'}</button> <button disabled={busy || user.disabled} onClick={() => void perform(async () => { const result = await api<{ link: string }>(`/admin/users/${user.id}/reset`, 'POST'); setLink(result.link); await reload(); })}>{user.pending ? '重新邀請' : '重設密碼'}</button></>}</td>
       </tr>)}</tbody></table></div></section>
       <section><h2>最近 100 條帳號操作記錄</h2><div className="account-table"><table><thead><tr><th>時間</th><th>操作者</th><th>操作</th><th>對象</th></tr></thead><tbody>{events.map(event => <tr key={event.id}><td>{new Date(event.time).toLocaleString('zh-HK')}</td><td>{event.actor_email ?? '系統／未登入'}</td><td>{actions[event.action] ?? event.action}</td><td>{event.target_email ?? (event.target && event.target in featureText ? featureText[event.target as keyof FeatureSwitches].label : event.target === session.user.orgId ? '本機構' : '—')}</td></tr>)}</tbody></table></div></section>
