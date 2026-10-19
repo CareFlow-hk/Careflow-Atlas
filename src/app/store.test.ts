@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { demoSnapshot } from '../data/demoFixture';
-import { setWorkspaceAccount, useWorkspace } from './store';
+import { pullWorkspace, setWorkspaceAccount, useWorkspace } from './store';
 import type { WorkspaceCipher } from '../data/workspaceCipher';
 
 /** These tests are about syncing, not encryption; workspaceCipher.test.ts covers that. */
@@ -403,6 +403,24 @@ describe('the workspace the account端 holds', () => {
     await start(server);
     useWorkspace.getState().importSnapshot(structuredClone(demoSnapshot));
     await new Promise(resolve => setTimeout(resolve, 20));
+    expect(put(server)).toBeUndefined();
+  });
+
+  /*
+   * A colleague's save shows up without this browser editing anything: the gate pulls on
+   * focus and every half minute. An unmoved version costs one small request and no write.
+   */
+  it('picks up what another device saved, and asks only for the version when nothing moved', async () => {
+    const server = serverStub();
+    server.record = { snapshot: demoSnapshot, version: 3 };
+    await start(server);
+    const before = server.calls.length;
+    await pullWorkspace();
+    expect(server.calls.length).toBe(before + 1);
+    const colleague = structuredClone(demoSnapshot); colleague.people[0].phone = '23456789';
+    server.record = { snapshot: colleague, version: 4 };
+    await pullWorkspace();
+    expect(useWorkspace.getState().snapshot?.people[0].phone).toBe('23456789');
     expect(put(server)).toBeUndefined();
   });
 

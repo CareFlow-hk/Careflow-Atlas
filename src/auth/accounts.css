@@ -29,3 +29,7 @@
 .account-page .account-key__check input{width:18px;height:18px;min-height:0;margin:0;padding:0;flex:none}
 .account-page .account-key .account-features__warn{color:#8b3e32}
 @media print{.account-page>*:not(.account-key){display:none}.account-key__actions,.account-key__check{display:none}}
+/* Where the workspace lives, beside the demo marker: a local copy must never pass for a shared one. */
+.app-shell .demo-badge .sync-place{font-weight:600;letter-spacing:.04em;text-transform:none;margin-left:4px;white-space:nowrap}
+.app-shell .demo-badge .sync-place.is-device{color:#8b3e32}
+.app-shell .demo-badge .sync-place.is-shared{color:#205b45}

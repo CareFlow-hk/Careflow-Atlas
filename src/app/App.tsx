@@ -60,7 +60,8 @@ function download(url: string, name: string) {
 export default function App() {
   const workspace = useWorkspace();
   // Photo intake sends pages to Azure, so it only appears once an administrator has turned it on.
-  const photoIntake = useAccount()?.features.photoIntake === true;
+  const account = useAccount();
+  const photoIntake = account?.features.photoIntake === true;
   const { snapshot, selectedBuildingId, selectedFloorId, selectedUnitId, expanded } = workspace;
   const [importOpen, setImportOpen] = useState(false);
   const [importReview, setImportReview] = useState<ImportReview>();
@@ -302,7 +303,7 @@ export default function App() {
     <header className="app-header">
       <a className="brand" href="#" onClick={e => { e.preventDefault(); workspace.selectBuilding(); }} aria-label="CareFlow 街區總覽"><span className="brand-symbol"><Footprints size={21} strokeWidth={1.8} /></span><strong>CareFlow<span>Atlas</span></strong></a>
       <span className="cf-caps app-header__place">西營盤 · Sai Ying Pun · 外展工作台</span>
-      <span className="demo-badge"><span />示範資料</span>
+      <span className="demo-badge"><span />示範資料{account && <b className={`sync-place is-${account.workspace}`} title={account.workspace === 'shared' ? '同一機構的同事會看到這裡的改動（約半分鐘內）；住戶資料加密後才存到伺服器。' : '這裡的改動只存在這部裝置，同事看不到。管理員開啟「跨裝置同步」並解鎖後才會共享。'}>{account.workspace === 'shared' ? '· 跨裝置同步' : '· 只存在這部裝置'}</b>}</span>
       <button ref={helpButtonRef} className="help-button icon-button" aria-label="示範說明" aria-expanded={helpOpen} aria-controls="demo-help" onClick={() => setHelpOpen(!helpOpen)}><CircleHelp size={19} /></button>
       <AccountMenu />
       {snapshot && photoIntake && <button className="photo-entry" onClick={() => setPhotoOpen(true)}><Camera size={16} />照片回錄</button>}

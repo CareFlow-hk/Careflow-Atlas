@@ -471,6 +471,8 @@ test('the workspace stays on the device until an administrator turns sync on and
   const ok = await f.request('/api/workspace', { method: 'PUT', ...admin, body: { snapshot: { ...snapshot, people: [person] }, baseVersion: 1 } });
   assert.equal(ok.status, 200);
   assert.ok(!f.auth.get('SELECT snapshot FROM org_workspaces').snapshot.includes('陳大文'));
+  // Colleagues poll the version alone; the copy is only fetched when it moved.
+  assert.deepEqual((await f.request('/api/workspace/version', member)).value, { version: 2 });
 
   // A new passphrase locks the same key again: accepted while there is data. A different
   // key would leave that data unreadable, so it waits until the workspace is cleared.
@@ -485,6 +487,7 @@ test('the workspace stays on the device until an administrator turns sync on and
   // Turned off again, the server stops serving the copy it holds.
   await f.request('/api/admin/features', { method: 'PUT', ...admin, body: { key: 'workspaceSync', enabled: false } });
   assert.equal((await f.request('/api/workspace', member)).status, 403);
+  assert.equal((await f.request('/api/workspace/version', member)).status, 403);
 });
 
 test('a member may correct anything but remove nothing, and signs their own work', async t => {

@@ -100,10 +100,14 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
           return send(res, 200, { key: keys.set(user, body) });
         }
       }
-      if (path === '/api/workspace') {
+      if (path === '/api/workspace' || path === '/api/workspace/version') {
         // Off unless an administrator turned it on: nothing of the workspace leaves the
         // browser otherwise, and the server neither serves nor stores a copy.
         requireValue(features.enabled('workspaceSync'), 403, '跨裝置同步未開啟，資料只存在這部裝置。');
+      }
+      // A few bytes, asked for every half minute: the whole copy is only fetched when it moved.
+      if (req.method === 'GET' && path === '/api/workspace/version') return send(res, 200, { version: workspace.get(user.org_id)?.version ?? null });
+      if (path === '/api/workspace') {
         if (req.method === 'GET') return send(res, 200, workspace.get(user.org_id) ?? {});
         // Until there is a key, nothing could be encrypted, so nothing is stored.
         if (req.method === 'PUT') requireValue(keys.get(user.org_id), 409, '機構尚未設定加密密語。請管理員在「設定」裡設定後再同步。');

@@ -26,6 +26,10 @@ export class RemoteWorkspaceRepository {
     // is refused here, not carried into the editor as if it were valid.
     return { snapshot: validateSnapshot(await this.cipher.open(value.snapshot)), version: value.version ?? 1 };
   }
+  /** The version the server holds, without the workspace itself; nothing stored is `undefined`. */
+  async version(): Promise<number | undefined> {
+    return (await api<{ version?: number | null }>('/workspace/version')).version ?? undefined;
+  }
   /** Returns the new version. A stale baseVersion is a 409 the caller must not ignore. */
   async save(snapshot: OutreachSnapshot, baseVersion?: number): Promise<number> {
     return (await api<{ version: number }>('/workspace', 'PUT', { snapshot: await this.cipher.seal(snapshot), baseVersion })).version;

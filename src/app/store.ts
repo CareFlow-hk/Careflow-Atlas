@@ -154,6 +154,27 @@ function scheduleSync() {
   if (!target) return;
   writes = writes.then(() => push(target));
 }
+/** Set while a background pull is asking the server; one at a time is enough. */
+let pulling = false;
+/**
+ * Pick up what colleagues saved, without waiting for this browser's next edit.
+ *
+ * Asks only for the version first. When it moved, the usual pull-merge-write runs, so the
+ * merge rules, the conflict question and the queue are the same as for a local edit. Called
+ * by the session gate when the window comes back into view and every half minute while it
+ * is in view. A failure is not reported here: the next pull or the next edit says so.
+ */
+export async function pullWorkspace(): Promise<void> {
+  const target = server;
+  if (!target || pulling) return;
+  pulling = true;
+  try {
+    const version = await target.version();
+    if (target !== server || version === serverVersion) return;
+    scheduleSync();
+    await writes;
+  } catch { /* reported by the next write */ } finally { pulling = false; }
+}
 /**
  * Read the account端 and fold in what another device wrote, keeping this browser's changes.
  *

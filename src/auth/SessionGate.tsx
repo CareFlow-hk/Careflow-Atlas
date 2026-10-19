@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api, ApiError, SESSION_IDLE_MS, setCsrf, type Session } from './api';
-import { setWorkspaceAccount } from '../app/store';
+import { pullWorkspace, setWorkspaceAccount } from '../app/store';
 import { AccountPanel } from './AccountPanel';
 import { AccountContext, type FeatureSwitches } from './accountContext';
 import { WorkspaceAdvancedSettings } from '../components/WorkspaceAdvancedSettings';
@@ -139,6 +139,18 @@ export function SessionGate({ children }: { children: ReactNode }) {
     window.addEventListener('pointerdown', active); window.addEventListener('keydown', active); window.addEventListener('focus', focus);
     return () => { clearInterval(timer); clearTimeout(expiry); window.removeEventListener('pointerdown', active); window.removeEventListener('keydown', active); window.removeEventListener('focus', focus); };
   }, [session, refresh, drop]);
+  /*
+   * Colleagues' saves arrive without anyone pressing reload: when this window comes back into
+   * view, and every half minute while it is in view. A hidden tab asks nothing.
+   */
+  const syncing = sync.mode === 'on';
+  useEffect(() => {
+    if (!syncing) return;
+    const pull = () => { if (!document.hidden) void pullWorkspace(); };
+    const timer = window.setInterval(pull, 30_000);
+    window.addEventListener('focus', pull); document.addEventListener('visibilitychange', pull);
+    return () => { clearInterval(timer); window.removeEventListener('focus', pull); document.removeEventListener('visibilitychange', pull); };
+  }, [syncing]);
   function broadcast() { if (typeof BroadcastChannel !== 'undefined') { const channel = new BroadcastChannel('atlas-account'); channel.postMessage('changed'); channel.close(); } }
   // Signing out forgets the unlocked institution key on this device, too.
   function signedOut() { void forgetKeys(); drop(); broadcast(); setNotice('請重新登入。'); }
@@ -179,7 +191,8 @@ export function SessionGate({ children }: { children: ReactNode }) {
   const admin = session.user.role === 'ADMIN';
   const scope = keyScope(session);
   // The workspace header shows the account; this gate only supplies what it needs.
-  const controls = { name: session.user.name, role: session.user.role, busy, features, openSettings: () => setSettings(true), logout: () => void logout() };
+  const where = sync.mode === 'on' ? 'shared' : 'device';
+  const controls = { name: session.user.name, role: session.user.role, busy, features, workspace: where, openSettings: () => setSettings(true), logout: () => void logout() } as const;
   return <AccountContext.Provider value={controls}><div className="authenticated-app">
     {error && <p role="alert" className="account-error">{error}</p>}
     {!settings && sync.mode === 'locked' && <WorkspaceUnlock orgId={scope} locked={sync.key} onUnlocked={keys => settle({ mode: 'on', key: sync.key }, createCipher(keys))} />}
