@@ -1,5 +1,9 @@
-/** `orgId` names the institution whose shared workspace this account works in. */
-export interface Account { id: string; email: string; name: string; role: 'ADMIN' | 'MEMBER'; orgId?: string; disabled: boolean; pending: boolean; createdAt: number; }
+/**
+ * `orgId` names the institution whose shared workspace this account works in. `platformAdmin`
+ * marks the person running the site: only they turn site-wide switches, and an institution's
+ * administrator cannot change their account. It is set on the server, never from the page.
+ */
+export interface Account { id: string; email: string; name: string; role: 'ADMIN' | 'MEMBER'; orgId?: string; platformAdmin?: boolean; disabled: boolean; pending: boolean; createdAt: number; }
 export interface Session { user: Account; csrf: string; expiresAt: number; }
 /** Browser copy of server/auth.mjs SESSION_IDLE_MS (the server cannot be bundled); keep the two equal. */
 export const SESSION_IDLE_MS = 6 * 60 * 60_000;

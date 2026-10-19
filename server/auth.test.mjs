@@ -40,7 +40,14 @@ async function fixture(t, settings = {}) {
     auth.run("INSERT OR IGNORE INTO features(key,enabled,updated_at) VALUES('workspaceSync',1,0)");
     auth.run('INSERT OR REPLACE INTO org_keys(org_id,key_id,salt,iterations,wrapped,updated_at) VALUES(?,?,?,?,?,0)', orgId, testKey.keyId, testKey.salt, testKey.iterations, testKey.wrapped);
   }
-  return { auth, request, account, openWorkspace, dir, path, tick: ms => { clock += ms; } };
+  /** The site's platform administrator: set on the server's command line, never through the API. */
+  const platform = who => auth.setPlatformAdmin(who.id, true) && relogin(who);
+  async function relogin(who) {
+    const login = await request('/api/login', { method: 'POST', body: { email: who.email, password } });
+    Object.assign(who, { cookie: login.cookie, csrf: login.value.csrf });
+    return who;
+  }
+  return { auth, request, account, platform, openWorkspace, dir, path, tick: ms => { clock += ms; } };
 }
 const testKey = { keyId: 'a'.repeat(32), salt: Buffer.alloc(16, 1).toString('base64'), iterations: 600_000, wrapped: Buffer.alloc(60, 2).toString('base64') };
 /** What the browser sends for a sensitive field; the server only checks the marker. */
@@ -275,6 +282,8 @@ test('an existing v1 account database keeps its accounts and adopts the institut
     assert.deepEqual(JSON.parse(seeded.snapshot), JSON.parse(newer));
     assert.equal(seeded.version, 1);
     assert.equal(auth.get('SELECT COUNT(*) AS n FROM workspaces').n, 2);
+    // The first administrator — the one `bootstrap` made — keeps the switches; nobody else gains them.
+    assert.deepEqual(auth.all('SELECT id, platform_admin FROM users ORDER BY id').map(u => [u.id, u.platform_admin]), [['u1', 1], ['u2', 0]]);
   } finally { auth.close(); }
 
   // Re-opening is idempotent: the seed is not later overwritten by an older copy.
@@ -410,11 +419,15 @@ test('a member may only withdraw their own records; an administrator may withdra
   assert.deepEqual(await stored(), { ...base, floors: [], units: [], observations: [withdrawn, adminWithdrew] });
 });
 
-test('feature switches start off, only an administrator turns them, and photo intake obeys', async t => {
+test('feature switches start off, only the platform administrator turns them, and photo intake obeys', async t => {
   let calls = 0;
   const photos = { status: () => ({ configured: true, model: 'gpt-6-luna' }), recognize: async () => { calls++; return { rows: [], warnings: [], model: 'gpt-6-luna' }; } };
   const f = await fixture(t, { photos });
-  const admin = await f.account(), member = await f.account('MEMBER');
+  const admin = await f.platform(await f.account()), member = await f.account('MEMBER');
+  // An institution's administrator sees the switches but cannot turn them.
+  const orgAdmin = await f.account('ADMIN', 'org-admin@example.test');
+  assert.equal((await f.request('/api/admin/features', { method: 'PUT', ...orgAdmin, body: { key: 'photoIntake', enabled: true } })).status, 403);
+  assert.equal((await f.request('/api/features', orgAdmin)).value.features.photoIntake, false);
   assert.deepEqual((await f.request('/api/features', member)).value, { features: { photoIntake: false, workspaceSync: false } });
   assert.equal((await f.request('/api/photos/status', member)).value.enabled, false);
   // Off: refused before the upload is read, so nothing reaches Azure.
@@ -438,7 +451,7 @@ test('feature switches start off, only an administrator turns them, and photo in
 
 test('the workspace stays on the device until an administrator turns sync on and sets a key', async t => {
   const f = await fixture(t);
-  const admin = await f.account(), member = await f.account('MEMBER');
+  const admin = await f.platform(await f.account()), member = await f.account('MEMBER');
   const snapshot = { schemaVersion: '0.1-demo', isSynthetic: true, notice: '', buildings: [], floors: [], units: [], observations: [] };
   // Off: no read, no write, no clear — refused before anything is stored.
   for (const method of ['GET', 'PUT', 'DELETE']) {
@@ -540,4 +553,31 @@ test('an administrator filling an empty workspace keeps the names the records al
   assert.equal(first.status, 200);
   assert.equal((await f.request('/api/workspace', { method: 'PUT', ...member, body: { snapshot: restored, baseVersion: cleared.value.version } })).status, 403);
   assert.equal((await f.request('/api/workspace', { method: 'PUT', ...admin, body: { snapshot: restored, baseVersion: cleared.value.version } })).status, 200);
+});
+
+test('an institution administrator cannot take the platform administrator account away', async t => {
+  const f = await fixture(t);
+  const owner = await f.platform(await f.account('ADMIN', 'owner@example.test'));
+  const orgAdmin = await f.account('ADMIN', 'samson@example.test');
+  const member = await f.account('MEMBER');
+  const users = (await f.request('/api/admin/users', orgAdmin)).value.users;
+  assert.deepEqual(users.filter(u => u.platformAdmin).map(u => u.email), ['owner@example.test']);
+  // No disable, no rename, no reset link they could hand themselves.
+  const patch = changes => f.request(`/api/admin/users/${owner.id}`, { method: 'PATCH', ...orgAdmin, body: { name: 'ADMIN', role: 'ADMIN', disabled: false, ...changes } });
+  assert.equal((await patch({ disabled: true })).status, 403);
+  assert.equal((await patch({ name: 'pwn' })).status, 403);
+  assert.equal((await f.request(`/api/admin/users/${owner.id}/reset`, { method: 'POST', ...orgAdmin })).status, 403);
+  assert.equal((await f.request('/api/session', owner)).status, 200);
+  // Their own colleagues they still manage.
+  assert.equal((await f.request(`/api/admin/users/${member.id}`, { method: 'PATCH', ...orgAdmin, body: { name: 'MEMBER', role: 'MEMBER', disabled: true } })).status, 200);
+  assert.equal((await f.request(`/api/admin/users/${orgAdmin.id}/reset`, { method: 'POST', ...owner })).status, 200);
+  // A platform administrator stays an administrator until the flag is taken away on the server.
+  const self = await f.request(`/api/admin/users/${owner.id}`, { method: 'PATCH', ...owner, body: { name: 'ADMIN', role: 'MEMBER', disabled: false } });
+  assert.equal(self.status, 409);
+  // The flag goes only to an active administrator, and is never set through the API.
+  assert.throws(() => f.auth.setPlatformAdmin(member.id, true), /管理員/);
+  await f.request(`/api/admin/users/${orgAdmin.id}`, { method: 'PATCH', ...owner, body: { name: 'ADMIN', role: 'ADMIN', disabled: false, platformAdmin: true } });
+  assert.equal(f.auth.userById(orgAdmin.id).platform_admin, 0);
+  const actions = f.auth.all("SELECT action FROM audit WHERE action LIKE 'platform_admin_%'").map(row => row.action);
+  assert.deepEqual(actions, ['platform_admin_granted']);
 });

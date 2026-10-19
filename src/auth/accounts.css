@@ -33,3 +33,6 @@
 .app-shell .demo-badge .sync-place{font-weight:600;letter-spacing:.04em;text-transform:none;margin-left:4px;white-space:nowrap}
 .app-shell .demo-badge .sync-place.is-device{color:#8b3e32}
 .app-shell .demo-badge .sync-place.is-shared{color:#205b45}
+/* The platform administrator, marked in the account list; their row is read-only to an institution's administrator. */
+.account-page .account-badge{display:inline-block;margin-left:8px;padding:1px 6px;border-radius:4px;background:#e7efe9;color:#205b45;font-size:12px;font-weight:600;vertical-align:middle}
+.account-page .account-features__state{margin-left:auto;font-size:13px;color:#5f716d}

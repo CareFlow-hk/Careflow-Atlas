@@ -135,6 +135,9 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
         auth.assertSession(row, true);
         if (req.method === 'GET' && path === '/api/admin/users') return send(res, 200, { users: auth.all('SELECT * FROM users WHERE org_id=? ORDER BY created_at,id', user.org_id).map(publicUser) });
         if (req.method === 'PUT' && path === '/api/admin/features') {
+          // Site-wide: every institution's data goes where these send it, so an institution's
+          // administrator sees them but does not turn them.
+          auth.assertSession(row, 'platform');
           auth.limit(`admin:${user.id}`, 30);
           return send(res, 200, { features: features.set(body.key, body.enabled, user.id) });
         }
@@ -151,6 +154,7 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
           auth.limit(`admin:${user.id}`, 30);
           const target = auth.userById(match[1]);
           requireValue(target && !target.disabled && target.org_id === user.org_id, 400, '帳號不存在或已停用。');
+          auth.assertMayManage(user, target);
           const token = auth.transaction(() => auth.grant(target.id, user.id));
           return send(res, 200, { link: link(token) });
         }

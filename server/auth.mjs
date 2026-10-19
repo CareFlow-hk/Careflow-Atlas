@@ -43,7 +43,7 @@ async function verifyPassword(password, encoded) {
   const actual = await derive(typeof password === 'string' ? password.slice(0, 128) : '', salt);
   return timingSafeEqual(actual, Buffer.from(expected, 'hex'));
 }
-export const publicUser = user => ({ id: user.id, email: user.email, name: user.name, role: user.role, orgId: user.org_id, disabled: !!user.disabled, pending: !user.password_hash, createdAt: user.created_at });
+export const publicUser = user => ({ id: user.id, email: user.email, name: user.name, role: user.role, orgId: user.org_id, platformAdmin: !!user.platform_admin, disabled: !!user.disabled, pending: !user.password_hash, createdAt: user.created_at });
 /** One institution today; the column and table are here so a second one can be added later. */
 export const DEFAULT_ORG_ID = 'org-default';
 export const DEFAULT_ORG_NAME = '預設機構';
@@ -62,7 +62,7 @@ export function openAuth(path, { now = Date.now } = {}) {
       id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
       role TEXT NOT NULL CHECK(role IN ('ADMIN','MEMBER')), disabled INTEGER NOT NULL DEFAULT 0,
       password_hash TEXT, version INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL,
-      org_id TEXT);
+      org_id TEXT, platform_admin INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE IF NOT EXISTS sessions (
       hash TEXT PRIMARY KEY, id TEXT UNIQUE NOT NULL, user_id TEXT NOT NULL REFERENCES users(id),
       csrf TEXT NOT NULL, created_at INTEGER NOT NULL, seen_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
@@ -81,6 +81,18 @@ export function openAuth(path, { now = Date.now } = {}) {
   const columns = db.prepare('PRAGMA table_info(users)').all().map(column => column.name);
   if (!columns.includes('org_id')) db.exec('ALTER TABLE users ADD COLUMN org_id TEXT');
   run0('UPDATE users SET org_id=? WHERE org_id IS NULL', DEFAULT_ORG_ID);
+  /*
+   * Platform administrator (2026-10-19): the person running the site, above any institution's
+   * administrator. Only they turn site-wide switches (which send data to Azure or to this
+   * server for every institution) and only they can touch their own account. Set from the
+   * server's command line, never through the API. An existing database gives the flag to its
+   * first active administrator — the one `bootstrap` created — so the site is not left with
+   * nobody who can turn a switch; ADD COLUMN, like org_id, keeps older programs able to read it.
+   */
+  if (!columns.includes('platform_admin')) {
+    db.exec('ALTER TABLE users ADD COLUMN platform_admin INTEGER NOT NULL DEFAULT 0');
+    run0("UPDATE users SET platform_admin=1 WHERE id=(SELECT id FROM users WHERE role='ADMIN' AND disabled=0 ORDER BY created_at, id LIMIT 1)");
+  }
   if (version < 2) {
     /*
      * The v1 store kept one whole snapshot per account. The institution now has one, so the
@@ -148,13 +160,34 @@ export function openAuth(path, { now = Date.now } = {}) {
     if (row && touch) run('UPDATE sessions SET seen_at=? WHERE hash=?', now(), row.hash);
     return row;
   }
+  /** `admin`: an institution's administrator. `'platform'`: the site's platform administrator. */
   function assertSession(row, admin = false) {
     const fresh = get(`SELECT s.hash FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.hash=?
       AND u.disabled=0 AND s.expires_at>? AND s.seen_at>?`, row.hash, now(), now() - SESSION_IDLE_MS);
     requireValue(fresh, 401, '登入已過期，請重新登入。');
     const user = userById(row.user_id);
     requireValue(!admin || user.role === 'ADMIN', 403, '需要管理員權限。');
+    requireValue(admin !== 'platform' || user.platform_admin === 1, 403, '只有平台管理員可以進行這項操作。');
     return user;
+  }
+  /*
+   * An institution's administrator manages their colleagues, not the platform administrator
+   * whose account sits in the same institution: a reset link they could hand themselves, or
+   * a disable, would take the platform away from the person running it.
+   */
+  function assertMayManage(actorUser, target) {
+    requireValue(!target.platform_admin || actorUser.platform_admin === 1, 403, '平台管理員的帳號只可由平台管理員修改。');
+  }
+  /** Turned on and off from the server's command line only (server/manage.mjs). */
+  function setPlatformAdmin(userId, on) {
+    return transaction(() => {
+      const user = userById(userId);
+      requireValue(user && (!on || (user.role === 'ADMIN' && !user.disabled)), 400, '只可以把已啟用的管理員設為平台管理員。');
+      run('UPDATE users SET platform_admin=?,version=version+1 WHERE id=?', on ? 1 : 0, userId);
+      run('DELETE FROM sessions WHERE user_id=?', userId);
+      audit(null, on ? 'platform_admin_granted' : 'platform_admin_revoked', userId);
+      return publicUser(userById(userId));
+    });
   }
   function newSession(userId) {
     const token = secret(), timestamp = now();
@@ -220,6 +253,9 @@ export function openAuth(path, { now = Date.now } = {}) {
       // Another institution's account is reported as absent, not as forbidden.
       requireValue(user && user.org_id === actorUser.org_id, 404, '帳號不存在。');
       requireValue(['ADMIN', 'MEMBER'].includes(input.role) && typeof input.disabled === 'boolean', 400, '無效帳號設定。');
+      assertMayManage(actorUser, user);
+      // A platform administrator stays an administrator; the flag is taken away on the server first.
+      requireValue(!user.platform_admin || input.role === 'ADMIN', 409, '平台管理員必須是管理員。請先在伺服器取消平台管理員。');
       const name = nameValue(input.name);
       if (user.role === 'ADMIN' && !user.disabled && user.password_hash && (input.role !== 'ADMIN' || input.disabled)) {
         requireValue(get("SELECT COUNT(*) AS n FROM users WHERE role='ADMIN' AND disabled=0 AND password_hash IS NOT NULL AND org_id=?", actorUser.org_id).n > 1, 409, '不能停用或降級最後一位已啟用管理員。');
@@ -231,6 +267,6 @@ export function openAuth(path, { now = Date.now } = {}) {
       return publicUser(userById(id));
     });
   }
-  return { db, run, get, all, clean, audit, limit, transaction, createUser, userById, session, assertSession, login, grantInfo, redeem, changePassword, updateUser, grant,
+  return { db, run, get, all, clean, audit, limit, transaction, createUser, userById, session, assertSession, assertMayManage, setPlatformAdmin, login, grantInfo, redeem, changePassword, updateUser, grant,
     close: () => db.close() };
 }
