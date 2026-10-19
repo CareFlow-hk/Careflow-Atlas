@@ -2,9 +2,10 @@ import { createServer } from 'node:http';
 import { createPhotoService, PHOTO_BODY_LIMIT } from './photos.mjs';
 import { createFeatureStore } from './features.mjs';
 import { createWorkspaceStore, WORKSPACE_BODY_LIMIT } from './workspace.mjs';
+import { createWorkspaceKeyStore } from './workspaceKey.mjs';
 import { HttpError, requireValue, publicUser, SESSION_IDLE_MS } from './auth.mjs';
 
-export function createAuthServer(auth, { origin, secure = true, trustProxy = false, photos = createPhotoService(), features = createFeatureStore(auth), workspace = createWorkspaceStore(auth) }) {
+export function createAuthServer(auth, { origin, secure = true, trustProxy = false, photos = createPhotoService(), features = createFeatureStore(auth), workspace = createWorkspaceStore(auth), keys = createWorkspaceKeyStore(auth) }) {
   requireValue(new URL(origin).origin === origin, 500, 'APP_ORIGIN 必須是完整 origin，不帶路徑或末尾斜線。');
   requireValue(!secure || origin.startsWith('https://'), 500, '安全 Cookie 需要 HTTPS APP_ORIGIN。');
   const cookieName = secure ? '__Host-atlas_session' : 'atlas_session';
@@ -40,7 +41,10 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
           requireValue(features.enabled('photoIntake'), 403, '照片回錄未開啟，請聯絡管理員。');
           auth.limit(`photo:${user.id}`, 40);
         }
-        if (workspaceRequest) auth.limit(`workspace:${user.id}`, 1200);
+        if (workspaceRequest) {
+          requireValue(features.enabled('workspaceSync'), 403, '跨裝置同步未開啟，資料只存在這部裝置。');
+          auth.limit(`workspace:${user.id}`, 1200);
+        }
       }
       const bodyLimit = workspaceRequest ? WORKSPACE_BODY_LIMIT : photoRequest ? PHOTO_BODY_LIMIT : 8192;
       let body = {};
@@ -83,8 +87,30 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
        * Everyone in this organisation sees the same snapshot; a member's changes are
        * checked against what is stored (server/workspaceAccess.mjs).
        */
+      /*
+       * The institution's key, locked with its passphrase (server/workspaceKey.mjs). Every
+       * member reads it to unlock the workspace in their own browser; only an administrator
+       * sets it, and the server never sees the passphrase or the unlocked key. It can be set
+       * before sync is switched on, so the first copy stored is already encrypted.
+       */
+      if (path === '/api/workspace/key') {
+        if (req.method === 'GET') return send(res, 200, { key: keys.get(user.org_id) ?? null });
+        if (req.method === 'PUT') {
+          auth.limit(`admin:${user.id}`, 30);
+          return send(res, 200, { key: keys.set(user, body) });
+        }
+      }
+      if (path === '/api/workspace' || path === '/api/workspace/version') {
+        // Off unless an administrator turned it on: nothing of the workspace leaves the
+        // browser otherwise, and the server neither serves nor stores a copy.
+        requireValue(features.enabled('workspaceSync'), 403, '跨裝置同步未開啟，資料只存在這部裝置。');
+      }
+      // A few bytes, asked for every half minute: the whole copy is only fetched when it moved.
+      if (req.method === 'GET' && path === '/api/workspace/version') return send(res, 200, { version: workspace.get(user.org_id)?.version ?? null });
       if (path === '/api/workspace') {
         if (req.method === 'GET') return send(res, 200, workspace.get(user.org_id) ?? {});
+        // Until there is a key, nothing could be encrypted, so nothing is stored.
+        if (req.method === 'PUT') requireValue(keys.get(user.org_id), 409, '機構尚未設定加密密語。請管理員在「設定」裡設定後再同步。');
         if (req.method === 'PUT') return send(res, 200, workspace.put(user, body));
         if (req.method === 'DELETE') {
           // Emptying the workspace empties the whole institution's copy, not one account's.

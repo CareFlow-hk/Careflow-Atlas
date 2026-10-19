@@ -4,19 +4,26 @@ import { requireValue } from './auth.mjs';
  * Who may change what inside the institution's shared snapshot.
  *
  * The workspace is written as a whole document, so the check compares the stored copy with
- * the incoming one record by record. Two roles differ in two places:
+ * the incoming one record by record. A member may change, never take away (「C 方案」,
+ * 2026-10-19 review):
  *
- * - a member may only withdraw (soft-delete) a record they created, never remove one;
- * - a member may not take a floor, a unit or a 劏房 room away at all — not even an empty
- *   unit they added themselves (2026-10-19 review). Adding structure, editing records,
- *   follow-ups, photo intake and Excel import stay open to both roles, because the team
- *   works on the same buildings.
+ * - correcting a phone number, a building name or a household is open to both roles;
+ * - removing anything — a person, a household, a floor, a unit, a 劏房 room, a record — is
+ *   for an administrator only, even an empty unit the member added a minute ago;
+ * - records (observations) are append-only for a member: add, or withdraw (soft-delete)
+ *   one they created themselves and nobody has changed since. Visits and follow-up events
+ *   are only ever added.
+ *
+ * Both roles must sign their own work: a record added names the account saving it, a
+ * follow-up event names the account that pressed the button, and a withdrawal names the
+ * account withdrawing. Otherwise anyone could put a colleague's name on what they typed.
  *
  * A structure delete reaches the server as removed floors/units plus the records that went
  * with them; both are refused here, so neither route can be used to get around the other.
  *
  * The comparison is canonical JSON, not raw text: property order must not decide whether a
- * record changed. Records are matched by id, never by content.
+ * record changed. Records are matched by id, never by content. Encrypted fields compare the
+ * same way: the browser encrypts an unchanged value to the same ciphertext.
  */
 export const WORKSPACE_COLLECTIONS = [
   'buildings', 'floors', 'units', 'people', 'households', 'householdMemberships',
@@ -62,18 +69,42 @@ function withoutDeletion(row) {
   return rest;
 }
 
+const actsAs = (operator, user) => !!operator && typeof operator === 'object' && operator.accountId === user.id;
+
+/** A withdrawal marker this account may have written: it names the person acting now. */
+function ownMarker(deleted, user) {
+  return actsAs(deleted?.by, user) && typeof deleted.at === 'string' && deleted.at.length <= 64;
+}
+
 function isOwnWithdrawal(change, user) {
-  const owner = change.previous?.createdBy?.accountId;
-  if (owner !== user.id) return false;
+  if (!actsAs(change.previous?.createdBy, user)) return false;
   if (canonical(withoutDeletion(change.previous)) !== canonical(withoutDeletion(change.next))) return false;
-  // The person who withdrew it is the person acting now; a marker naming someone else is
-  // not a withdrawal this account is allowed to have written.
-  if (change.next.deleted) {
-    const by = change.next.deleted.by;
-    if (!by || by.accountId !== user.id) return false;
-    if (typeof change.next.deleted.at !== 'string' || change.next.deleted.at.length > 64) return false;
+  return !change.next.deleted || ownMarker(change.next.deleted, user);
+}
+
+const hasRecords = snapshot => WORKSPACE_COLLECTIONS.some(collection => rowsOf(snapshot, collection).length > 0);
+
+/**
+ * The signatures both roles must get right. Skipped only when an administrator fills an
+ * empty workspace — loading the demo, or putting a backup back after a clear — where the
+ * rows were signed by whoever made them, not by the person restoring them.
+ */
+function assertSigned(user, change) {
+  const { collection, kind, next, previous } = change;
+  if (collection === 'observations') {
+    if (kind === 'added') {
+      // A member's record must say who saved it, or they could never withdraw it; any
+      // name it carries must be theirs.
+      if (next.createdBy !== undefined || user.role !== 'ADMIN') {
+        requireValue(actsAs(next.createdBy, user), 403, '新增的記錄必須以登入的帳號名義儲存，不能用其他人的名字。');
+      }
+    } else if (kind === 'changed' && next.deleted && canonical(next.deleted) !== canonical(previous.deleted)) {
+      requireValue(ownMarker(next.deleted, user), 403, '撤回記錄必須以登入的帳號名義進行。');
+    }
   }
-  return true;
+  if (collection === 'followUpEvents' && kind === 'added') {
+    requireValue(actsAs(next.operator, user), 403, '跟進操作必須以登入的帳號名義記錄。');
+  }
 }
 
 /**
@@ -82,31 +113,23 @@ function isOwnWithdrawal(change, user) {
  * unchanged costs nothing.
  */
 export function assertWorkspaceWrite(user, previous, next) {
-  if (user.role === 'ADMIN' || !previous) return;
+  if (!previous) return;
+  const seeding = user.role === 'ADMIN' && !hasRecords(previous);
   for (const change of diffSnapshots(previous, next)) {
+    if (!seeding) assertSigned(user, change);
+    if (user.role === 'ADMIN') continue;
+    if (change.collection === 'floors' || change.collection === 'units' || change.collection === 'buildings') {
+      // Named on its own: an empty unit is protected the same way as one with records.
+      requireValue(change.kind !== 'removed', 403, '員工不能刪除樓層、單位或劏房，即使是自己新增的也一樣。如需刪除，請聯絡管理員。');
+    }
+    requireValue(change.kind !== 'removed', 403, '員工不能刪除資料（包括住戶、人員、記錄）；可以修改。如需刪除，請聯絡管理員。');
     if (change.collection === 'observations') {
       if (change.kind === 'added') continue;
-      requireValue(change.kind === 'changed', 403, '員工不能刪除記錄；如需移除，請聯絡管理員。');
       requireValue(isOwnWithdrawal(change, user), 403, '員工只能撤回自己建立、且內容未被改動的記錄。');
       continue;
     }
-    /*
-     * Structure is additive for a member: floors, units and 劏房 rooms can be added, never
-     * taken away. The removal is refused on its own, whether or not records sit there, so
-     * an empty unit somebody added a minute ago is protected the same way. A structure
-     * delete that carries records also shows up above as a removed observation or visit,
-     * and is refused there too — either message is true; this one names the action.
-     */
-    if (change.collection === 'floors' || change.collection === 'units' || change.collection === 'buildings') {
-      requireValue(change.kind !== 'removed', 403, '員工不能刪除樓層、單位或劏房，即使是自己新增的也一樣。如需刪除，請聯絡管理員。');
-    }
-    /*
-     * A visit or follow-up event is only removed when a record they belong to is removed
-     * (a structure delete). Members may add them through their own entries, but removing
-     * one would take a record with it.
-     */
     if (change.collection === 'visits' || change.collection === 'followUpEvents') {
-      requireValue(change.kind === 'added', 403, '員工不能移除到訪或跟進記錄；如需刪除帶記錄的結構，請聯絡管理員。');
+      requireValue(change.kind === 'added', 403, '到訪和跟進記錄只可新增，不能修改；如需更正，請新增一筆更正記錄。');
     }
   }
 }
