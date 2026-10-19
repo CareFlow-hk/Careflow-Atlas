@@ -1,5 +1,6 @@
 import { requireValue } from './auth.mjs';
 import { assertWorkspaceWrite } from './workspaceAccess.mjs';
+import { assertSealed } from './workspaceSealed.mjs';
 
 /**
  * The institution's business snapshot, stored whole, one row per organisation.
@@ -14,6 +15,9 @@ import { assertWorkspaceWrite } from './workspaceAccess.mjs';
  * Every member of an organisation reads and writes the same row; `workspaceAccess.mjs`
  * decides which changes a member may make. The request never names an organisation, so a
  * member of one cannot reach another's workspace.
+ *
+ * The fields that describe a person are stored encrypted with the institution's key
+ * (`workspaceSealed.mjs`, docs/ENCRYPTION.md); this process never holds that key.
  */
 export const WORKSPACE_BODY_LIMIT = 5 * 1024 * 1024;
 
@@ -31,6 +35,8 @@ function checkSnapshot(snapshot) {
   requireValue(snapshot.isSynthetic === true && snapshot.schemaVersion === '0.1-demo', 400,
     '帳號端目前只接受標記為合成示範的資料。正式業務資料要等 W2 的資料庫，不會寫進這張表。');
   for (const key of requiredArrays) requireValue(Array.isArray(snapshot[key]), 400, `工作區資料缺少 ${key}。`);
+  // Names, phones and notes arrive encrypted by the browser, or not at all (workspaceSealed.mjs).
+  assertSealed(snapshot);
   return snapshot;
 }
 

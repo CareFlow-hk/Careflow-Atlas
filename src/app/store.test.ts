@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { demoSnapshot } from '../data/demoFixture';
 import { setWorkspaceAccount, useWorkspace } from './store';
+import type { WorkspaceCipher } from '../data/workspaceCipher';
+
+/** These tests are about syncing, not encryption; workspaceCipher.test.ts covers that. */
+const plain: WorkspaceCipher = { keyId: 'test', seal: async snapshot => snapshot, open: async value => value };
 
 describe('building focus', () => {
   beforeEach(() => useWorkspace.setState({ snapshot: demoSnapshot, expanded: false, selectedBuildingId: undefined, selectedFloorId: undefined, selectedUnitId: undefined }));
@@ -340,7 +344,7 @@ describe('the workspace the account端 holds', () => {
   const settle = () => new Promise(resolve => setTimeout(resolve, 20));
   const start = async (server: ReturnType<typeof serverStub>) => {
     vi.stubGlobal('fetch', server.fetch);
-    setWorkspaceAccount('account-a', '合成操作員', true);
+    setWorkspaceAccount('account-a', '合成操作員', plain);
     await useWorkspace.getState().initialize();
     await settle();
   };
@@ -374,7 +378,7 @@ describe('the workspace the account端 holds', () => {
   it('names an account service that is older than the workspace interface', async () => {
     const server = serverStub();
     vi.stubGlobal('fetch', async () => reply(404, { error: '找不到接口。' }));
-    setWorkspaceAccount('account-a', '合成操作員', true);
+    setWorkspaceAccount('account-a', '合成操作員', plain);
     await useWorkspace.getState().initialize();
     expect(useWorkspace.getState().storageError).toContain('帳號服務的版本較舊');
     expect(useWorkspace.getState().loading).toBe(false);

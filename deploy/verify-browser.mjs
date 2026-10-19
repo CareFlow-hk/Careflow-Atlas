@@ -174,33 +174,16 @@ try {
     await offline.close();
   });
   /*
-   * The account端 copy: what this browser merged must reach the server, and a second
-   * browser with the same account but no local copy must show it.
+   * A fresh deployment keeps the workspace in the browser: cross-device sync is off until an
+   * administrator turns it on and sets the institution passphrase (docs/ENCRYPTION.md), and
+   * the server refuses to serve or store a copy before then. The shared, encrypted path is
+   * covered by the unit tests and a manual walkthrough, since it needs that passphrase.
    */
-  await check('the workspace is stored on the account and reaches another browser', async () => {
-    const local = await snapshot();
-    let stored;
-    for (let attempt = 0; attempt < 50; attempt++) {
-      stored = await (await context.request.get(`${base}/api/workspace`)).json();
-      if (stored.snapshot?.buildings?.length === local.buildings.length) break;
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    assert.ok(stored.version >= 1, 'the account端 has no version yet');
-    assert.equal(stored.snapshot.buildings.length, local.buildings.length);
-    assert.equal(stored.snapshot.observations.length, local.observations.length);
-    const other = await browser.newContext();
-    const before = await other.storageState();
-    assert.equal(before.origins.some(origin => origin.localStorage?.length), false, 'the second browser must start with no local copy');
-    await authenticate(other);
-    const otherPage = await other.newPage();
-    await otherPage.goto(base);
-    await otherPage.locator('.list-heading').waitFor();
-    const seen = await otherPage.evaluate(() => {
-      const key = Object.keys(globalThis.localStorage).find(name => /^careflow-atlas\.account\..*\.demo$/.test(name));
-      return key ? JSON.parse(globalThis.localStorage.getItem(key)).buildings.length : -1;
-    });
-    assert.equal(seen, local.buildings.length);
-    await other.close();
+  await check('the workspace stays in this browser while cross-device sync is off', async () => {
+    const features = await (await context.request.get(`${base}/api/features`)).json();
+    assert.equal(features.features.workspaceSync, false);
+    assert.equal((await context.request.get(`${base}/api/workspace`)).status(), 403);
+    assert.ok((await snapshot()).buildings.length > 0);
   });
 } finally { await browser.close(); }
 const failed = results.filter(([status]) => status === 'FAIL').length;

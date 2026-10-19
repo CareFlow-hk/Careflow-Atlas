@@ -85,8 +85,10 @@ export function openAuth(path, { now = Date.now } = {}) {
     /*
      * The v1 store kept one whole snapshot per account. The institution now has one, so the
      * most recently written account copy becomes the seed — that is the copy the team was
-     * actually using. The old rows stay in place untouched, so an upgrade can be rolled back
-     * without losing them. A fresh database has no `workspaces` table at all and skips this.
+     * actually using. The old rows stay in place untouched, but that does not make the upgrade
+     * reversible: an older program refuses a v2 database (above). Back up before deploying
+     * (server/backup.mjs) and restore the backup to go back. A fresh database has no
+     * `workspaces` table at all and skips this.
      */
     const legacy = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='workspaces'").get();
     if (legacy && !db.prepare('SELECT 1 FROM org_workspaces WHERE org_id=?').get(DEFAULT_ORG_ID)) {

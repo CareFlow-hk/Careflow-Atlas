@@ -5,6 +5,7 @@ import type { CustomOptions } from '../domain/optionPrefs';
 import { LocalStoragePersistenceAdapter, OutreachRepository, PersistenceError } from '../data/repository';
 import { ApiError } from '../auth/api';
 import { RemoteWorkspaceRepository } from '../data/remoteWorkspaceRepository';
+import { WorkspaceKeyError, type WorkspaceCipher } from '../data/workspaceCipher';
 import { outlineCentre } from '../map/footprintGeometry';
 import { OptionPrefsRepository } from '../data/optionPrefsRepository';
 import { mergeWorkflow } from '../data/workflowMerge';
@@ -27,6 +28,7 @@ let workspaceOrgId: string | undefined;
  * the second one on, so the demo/test paths never depend on the network.
  */
 let server: RemoteWorkspaceRepository | undefined;
+let workspaceCipher: WorkspaceCipher | undefined;
 /** The version this tab last read from or wrote to the server. A write names it. */
 let serverVersion: number | undefined;
 /** Serialises pulls and writes: one in flight, in order, never two snapshots racing. */
@@ -39,22 +41,25 @@ let savedBase = '';
 export interface WorkspaceAccount { id: string; name: string; role?: 'ADMIN' | 'MEMBER'; orgId?: string }
 /**
  * Demo caches only. Never adopt the pre-authentication shared cache.
- * `remote` is set only by the session gate, after the server has confirmed a session.
+ * `cipher` is passed only by the session gate, after the server has confirmed a session,
+ * sync is switched on and this device has unlocked the institution's key. Without it the
+ * workspace stays on this device: nothing is sent to the server in the clear.
  *
  * Colleagues of one institution share one working copy, so the browser copy is keyed by
  * institution — that is what makes two accounts see the same records even before the
  * server copy comes back. Without an institution (tests, demo) the key stays per account.
  */
-export function setWorkspaceAccount(account?: string | WorkspaceAccount, name?: string, remote = false) {
+export function setWorkspaceAccount(account?: string | WorkspaceAccount, name?: string, cipher?: WorkspaceCipher) {
   const id = typeof account === 'string' ? account : account?.id;
   const fullName = typeof account === 'string' ? name : account?.name;
   const role = typeof account === 'object' ? account?.role : undefined;
   const orgId = typeof account === 'object' ? account?.orgId : undefined;
   // The operator travels with the account so a closed task names who closed it.
   useWorkspace.setState({ operator: id ? { accountId: id, name: fullName ?? id } : undefined, role, orgId });
-  if (id === accountId && remote === !!server && orgId === workspaceOrgId) return;
+  if (id === accountId && cipher === workspaceCipher && orgId === workspaceOrgId) return;
   accountId = id;
   workspaceOrgId = orgId;
+  workspaceCipher = id ? cipher : undefined;
   const suffix = orgId ? `careflow-atlas.org.${orgId}` : id ? `careflow-atlas.account.${id}` : 'careflow-atlas.signed-out';
   repository = new OutreachRepository(adapter, `${suffix}.demo`);
   baseRepository = new OutreachRepository(adapter, `${suffix}.demo.base`);
@@ -69,7 +74,7 @@ export function setWorkspaceAccount(account?: string | WorkspaceAccount, name?: 
     const legacy = readRaw(`careflow-atlas.account.${id}.demo`);
     if (legacy) { try { adapter.write(`${suffix}.demo`, legacy); } catch { /* the copy stays where it was */ } }
   }
-  server = id && remote ? new RemoteWorkspaceRepository() : undefined;
+  server = id && cipher ? new RemoteWorkspaceRepository(cipher) : undefined;
   serverVersion = undefined; confirmed = ''; savedBase = ''; writes = Promise.resolve();
   useWorkspace.setState({ snapshot: undefined, loading: false, storageError: undefined, pendingConflicts: [], conflictsOpen: false, syncBlocked: false, selectedBuildingId: undefined, selectedFloorId: undefined, selectedUnitId: undefined, expanded: false, optionPrefs: prefsRepository.get() });
 }
@@ -282,6 +287,8 @@ async function loadRemote(target: RemoteWorkspaceRepository) {
       ? error.status === 401 ? '登入已過期，未能讀取帳號端的資料。目前顯示的是本機副本。'
         : error.status === 404 ? '帳號服務的版本較舊，未提供工作區接口。請重新啟動或重新部署帳號服務，再重新整理。目前顯示的是本機副本。'
           : `帳號服務未能讀取工作區（HTTP ${error.status}）。目前顯示的是本機副本。`
+      : error instanceof WorkspaceKeyError
+        ? '帳號端的資料無法用這部裝置解鎖的機構密鑰解開（機構可能換了密鑰）。請登出後重新登入，再輸入機構密語。目前顯示的是本機副本。'
       : error instanceof Error && error.name === 'ZodError'
         ? '帳號端的資料格式不完整，未有載入。目前顯示的是本機副本；請先匯出 Excel 核對。'
         : '未能連接帳號服務，目前顯示的是本機副本。恢復連線後請重新整理。';
