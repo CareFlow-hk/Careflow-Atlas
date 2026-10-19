@@ -5,7 +5,7 @@ import { addBuilding } from '../data/newBuilding';
 import { blankSnapshot } from '../data/blankSnapshot';
 import { exportWorkflowWorkbook, parseWorkflowWorkbook } from '../data/workflowWorkbook';
 import { validateSnapshot } from './schema';
-import { applyStructureChange, deleteGate, findPaperLocation, floorColumnCount, floorHeadings, floorUnitColumns, floorUnitGroups, lastDrawnUnit, proposeLocation, roomCountAction, structureImpact, unitColumn, UNIT_LETTERS, type StructureChange } from './structure';
+import { applyStructureChange, deleteGate, findPaperLocation, floorColumnCount, floorHeadings, floorUnitColumns, floorUnitGroups, lastDrawnUnit, proposeLocation, removesStructure, roomCountAction, structureImpact, unitColumn, UNIT_LETTERS, type StructureChange } from './structure';
 import type { OutreachSnapshot } from './types';
 
 const actor = { at: '2026-10-10T08:00:00.000Z', by: '測試同事' };
@@ -346,6 +346,44 @@ describe('a delete names the places that are on screen', () => {
     if ('error' in r) throw new Error(r.error);
     expect(labelsOnFloor(r.snapshot)).toEqual([]);
     expect(r.message).toContain('已刪除 3 個單位');
+  });
+});
+
+/*
+ * Who may take structure away. A member may add floors, units and rooms, but every way of
+ * removing one — including merging 劏房 back to fewer rooms — is a delete, and a delete is
+ * the administrator's (2026-10-19 review).
+ */
+describe('a structure delete is anything that takes a place away', () => {
+  const split = () => {
+    const s = apply(start(), { kind: 'addFloors', buildingId: 'SYP-001', count: 1, unitsPerFloor: 1 });
+    return apply(s, { kind: 'split', unitId: s.units[0].id, rooms: 3 });
+  };
+
+  it('counts removing a floor, a unit or a 劏房 room as a delete', () => {
+    const s = split();
+    const parent = s.units.find(u => !u.parentUnitId)!;
+    expect(removesStructure(s, { kind: 'removeFloor', floorId: s.floors[0].id })).toBe(true);
+    expect(removesStructure(s, { kind: 'removeUnits', unitIds: [parent.id] })).toBe(true);
+    expect(removesStructure(s, { kind: 'removeUnits', unitIds: [s.units.find(u => u.parentUnitId)!.id] })).toBe(true);
+    // A count below what the unit has drops rooms; 1 merges them all away.
+    expect(removesStructure(s, { kind: 'split', unitId: parent.id, rooms: 2 })).toBe(true);
+    expect(removesStructure(s, { kind: 'split', unitId: parent.id, rooms: 1 })).toBe(true);
+  });
+
+  it('does not count adding floors, adding a unit or splitting into more rooms', () => {
+    const s = split();
+    const parent = s.units.find(u => !u.parentUnitId)!;
+    expect(removesStructure(s, { kind: 'addFloors', buildingId: 'SYP-001', count: 1, unitsPerFloor: 2 })).toBe(false);
+    expect(removesStructure(s, { kind: 'addUnit', floorId: s.floors[0].id })).toBe(false);
+    expect(removesStructure(s, { kind: 'split', unitId: parent.id, rooms: 3 })).toBe(false);
+    expect(removesStructure(s, { kind: 'split', unitId: parent.id, rooms: 4 })).toBe(false);
+  });
+
+  it('does not call an id that names nothing a delete', () => {
+    const s = split();
+    expect(removesStructure(s, { kind: 'removeUnits', unitIds: ['gone-already'] })).toBe(false);
+    expect(removesStructure(s, { kind: 'removeFloor', floorId: 'gone-already' })).toBe(false);
   });
 });
 

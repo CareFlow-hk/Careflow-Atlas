@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { demoSnapshot } from "../data/demoFixture";
-import { currentAssessment, effectiveObservations, floorState, getCorrectionConflicts, getCoverageStatus, getCoverageSummary, getOpenFollowUps, latestForUnit, subjectUnitIds, supersededObservationIds, unitState, type Observation, type OutreachSnapshot } from "./types";
+import { canWithdrawObservation, currentAssessment, effectiveObservations, floorState, getCorrectionConflicts, getCoverageStatus, getCoverageSummary, getOpenFollowUps, latestForUnit, subjectUnitIds, supersededObservationIds, unitState, withdrawObservation, type Observation, type OutreachSnapshot } from "./types";
 
 describe("coverage summaries", () => {
   it("does not promote one unit result to an entire building", () => {
@@ -168,5 +168,60 @@ describe("appended corrections", () => {
     expect(getCorrectionConflicts(snapshot)).toEqual([{ observationId: "wrong", correctionIds: ["fix-a", "fix-b"] }]);
     // Once one of them is itself corrected, the chain is unambiguous again.
     expect(getCorrectionConflicts(subject([wrong, fix({ id: "fix-a" }), fix({ id: "fix-b", recordedAt: "2026-09-14T10:00:00+08:00", correctsObservationId: "fix-a" })])).length).toBe(0);
+  });
+});
+
+describe("withdrawn records", () => {
+  const member = { accountId: "account-member", name: "同事" };
+  const admin = { accountId: "account-admin", name: "管理員" };
+  const withdrawn = (over: Partial<Observation> = {}) => ({ ...event({ id: "gone", ...over }), deleted: { at: "2026-10-19T09:00:00.000Z", by: member } });
+
+  it("stays in history but leaves coverage, summaries and follow-ups", () => {
+    const live = event({ id: "live", occurredAt: "2026-09-09T10:00:00+08:00", coverage: "VISITED_WITH_FINDING", followUp: { action: "跟進", status: "OPEN" } });
+    const gone = withdrawn({ occurredAt: "2026-09-11T10:00:00+08:00", coverage: "INACCESSIBLE", followUp: { action: "已撤回的跟進", status: "OPEN" } });
+    const snapshot = subject([live, gone]);
+    // The row itself is still there for the audit trail.
+    expect(snapshot.observations.map(item => item.id)).toEqual(["live", "gone"]);
+    expect(effectiveObservations(snapshot).map(item => item.id)).toEqual(["live"]);
+    expect(getCoverageStatus(snapshot, "b1", "u1")).toBe("VISITED_WITH_FINDING");
+    expect(getOpenFollowUps(snapshot).map(item => item.action)).toEqual(["跟進"]);
+  });
+
+  it("comes back when the withdrawal itself is the newest fact about a correction", () => {
+    // A correction that was itself withdrawn no longer corrects: the original stands again.
+    const original = event({ id: "original", coverage: "ATTEMPTED" });
+    const correction = { ...event({ id: "correction", occurredAt: "2026-09-11T10:00:00+08:00", recordedAt: "2026-09-12T10:00:00+08:00", coverage: "VISITED_NO_FINDING", correctsObservationId: "original", correctionReason: "錯填" }), deleted: { at: "2026-10-19T09:00:00.000Z", by: member } };
+    const snapshot = subject([original, correction]);
+    expect(effectiveObservations(snapshot).map(item => item.id)).toEqual(["original"]);
+    expect(getCoverageStatus(snapshot, "b1", "u1")).toBe("ATTEMPTED");
+  });
+
+  it("keeps a live correction replacing a chain that passes through a withdrawn link", () => {
+    // c1 was withdrawn, but c2 was written against it and is still live: one version stands.
+    const original = event({ id: "original", coverage: "ATTEMPTED" });
+    const c1 = { ...event({ id: "c1", occurredAt: "2026-09-11T10:00:00+08:00", recordedAt: "2026-09-12T10:00:00+08:00", coverage: "VISITED_NO_FINDING", correctsObservationId: "original", correctionReason: "錯填" }), deleted: { at: "2026-10-19T09:00:00.000Z", by: member } };
+    const c2 = event({ id: "c2", occurredAt: "2026-09-13T10:00:00+08:00", recordedAt: "2026-09-14T10:00:00+08:00", coverage: "PARTIAL", correctsObservationId: "c1", correctionReason: "再更正" });
+    expect(effectiveObservations(subject([original, c1, c2])).map(item => item.id)).toEqual(["c2"]);
+  });
+
+  it("names who saved a record and who withdrew it, in separate fields", () => {
+    const saved = { ...event({ id: "mine" }), createdBy: member };
+    expect(saved.createdBy).toEqual(member);
+    expect(withdrawObservation(saved, admin, "2026-10-19T09:30:00.000Z")).toMatchObject({ createdBy: member, deleted: { at: "2026-10-19T09:30:00.000Z", by: admin } });
+    // Withdrawing twice keeps the first marker: re-syncing the same action changes nothing.
+    const once = withdrawObservation(saved, member, "2026-10-19T09:30:00.000Z");
+    expect(withdrawObservation(once, admin, "2026-10-20T09:30:00.000Z")).toEqual(once);
+  });
+
+  it("lets a member withdraw only what they saved, and an administrator withdraw anything", () => {
+    const mine = { ...event({ id: "mine" }), createdBy: member };
+    const theirs = { ...event({ id: "theirs" }), createdBy: admin };
+    const legacy = event({ id: "legacy" }); // recorded before accounts existed
+    expect(canWithdrawObservation(mine, member, false)).toBe(true);
+    expect(canWithdrawObservation(theirs, member, false)).toBe(false);
+    expect(canWithdrawObservation(legacy, member, false)).toBe(false);
+    expect(canWithdrawObservation(theirs, admin, true)).toBe(true);
+    // Nobody withdraws the same row twice.
+    expect(canWithdrawObservation(withdrawn(), admin, true)).toBe(false);
   });
 });

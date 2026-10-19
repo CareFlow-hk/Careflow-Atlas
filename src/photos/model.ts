@@ -73,6 +73,8 @@ export function appendPhotoPages(snapshot: OutreachSnapshot, pages: PhotoPage[],
       paperRef: page.name.slice(0, 200), paperLine: row.line || '未標行號',
       followUp: row.followUp?.trim() ? { action: row.followUp.trim(), status: 'OPEN', dueDate: row.dueDate || undefined, timingNote: row.timingNote || undefined, assignee: row.assignee || undefined, category: row.category ?? undefined } : undefined,
       photoSource: { hash: page.id, file: page.name.slice(0, 200), line: row.line, model: page.model ?? 'unknown', fallback: page.fallback, reviewedBy: operator, reviewedAt: now, sample: !!page.sample },
+      // Who saved the reviewed row, so it can be withdrawn the same way a typed record can.
+      createdBy: operator,
     });
     observations.push(observation);
     visits.push({ id: visitId, occurredAt: observation.occurredAt, recordedAt: now, workerName: observation.workerName, isSynthetic: true, provisional: true });

@@ -43,18 +43,26 @@ async function verifyPassword(password, encoded) {
   const actual = await derive(typeof password === 'string' ? password.slice(0, 128) : '', salt);
   return timingSafeEqual(actual, Buffer.from(expected, 'hex'));
 }
-export const publicUser = user => ({ id: user.id, email: user.email, name: user.name, role: user.role, disabled: !!user.disabled, pending: !user.password_hash, createdAt: user.created_at });
+export const publicUser = user => ({ id: user.id, email: user.email, name: user.name, role: user.role, orgId: user.org_id, disabled: !!user.disabled, pending: !user.password_hash, createdAt: user.created_at });
+/** One institution today; the column and table are here so a second one can be added later. */
+export const DEFAULT_ORG_ID = 'org-default';
+export const DEFAULT_ORG_NAME = '預設機構';
+const SCHEMA_VERSION = 2;
 
 export function openAuth(path, { now = Date.now } = {}) {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(path, { timeout: 5000 });
   if (path !== ':memory:') chmodSync(path, 0o600);
-  if (db.prepare('PRAGMA user_version').get().user_version > 1) { db.close(); throw new Error('帳號庫版本高於目前程式，拒絕降級打開。'); }
+  const version = db.prepare('PRAGMA user_version').get().user_version;
+  if (version > SCHEMA_VERSION) { db.close(); throw new Error('帳號庫版本高於目前程式，拒絕降級打開。'); }
   db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
+    CREATE TABLE IF NOT EXISTS organizations (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
       role TEXT NOT NULL CHECK(role IN ('ADMIN','MEMBER')), disabled INTEGER NOT NULL DEFAULT 0,
-      password_hash TEXT, version INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+      password_hash TEXT, version INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL,
+      org_id TEXT);
     CREATE TABLE IF NOT EXISTS sessions (
       hash TEXT PRIMARY KEY, id TEXT UNIQUE NOT NULL, user_id TEXT NOT NULL REFERENCES users(id),
       csrf TEXT NOT NULL, created_at INTEGER NOT NULL, seen_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
@@ -64,7 +72,30 @@ export function openAuth(path, { now = Date.now } = {}) {
     CREATE TABLE IF NOT EXISTS rate_limits (key TEXT PRIMARY KEY, count INTEGER NOT NULL, expires_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS audit (
       id INTEGER PRIMARY KEY, time INTEGER NOT NULL, actor TEXT, action TEXT NOT NULL, target TEXT);
-    PRAGMA user_version=1;`);
+    /* The institution's shared workspace, replacing the per-account rows in v1. */
+    CREATE TABLE IF NOT EXISTS org_workspaces (
+      org_id TEXT PRIMARY KEY REFERENCES organizations(id) ON DELETE CASCADE,
+      snapshot TEXT NOT NULL, version INTEGER NOT NULL, updated_at INTEGER NOT NULL);`);
+  run0('INSERT OR IGNORE INTO organizations(id,name,created_at) VALUES(?,?,?)', DEFAULT_ORG_ID, DEFAULT_ORG_NAME, now());
+  // A v1 database already has users; ADD COLUMN is the only way to give them an institution.
+  const columns = db.prepare('PRAGMA table_info(users)').all().map(column => column.name);
+  if (!columns.includes('org_id')) db.exec('ALTER TABLE users ADD COLUMN org_id TEXT');
+  run0('UPDATE users SET org_id=? WHERE org_id IS NULL', DEFAULT_ORG_ID);
+  if (version < 2) {
+    /*
+     * The v1 store kept one whole snapshot per account. The institution now has one, so the
+     * most recently written account copy becomes the seed — that is the copy the team was
+     * actually using. The old rows stay in place untouched, so an upgrade can be rolled back
+     * without losing them. A fresh database has no `workspaces` table at all and skips this.
+     */
+    const legacy = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='workspaces'").get();
+    if (legacy && !db.prepare('SELECT 1 FROM org_workspaces WHERE org_id=?').get(DEFAULT_ORG_ID)) {
+      const latest = db.prepare('SELECT snapshot FROM workspaces ORDER BY updated_at DESC LIMIT 1').get();
+      if (latest) run0('INSERT INTO org_workspaces(org_id,snapshot,version,updated_at) VALUES(?,?,?,?)', DEFAULT_ORG_ID, latest.snapshot, 1, now());
+    }
+    db.exec(`PRAGMA user_version=${SCHEMA_VERSION};`);
+  }
+  function run0(sql, ...args) { return db.prepare(sql).run(...args); }
   const run = (sql, ...args) => db.prepare(sql).run(...args);
   const get = (sql, ...args) => db.prepare(sql).get(...args);
   const all = (sql, ...args) => db.prepare(sql).all(...args);
@@ -97,10 +128,13 @@ export function openAuth(path, { now = Date.now } = {}) {
   function createUser(input, actor = null) {
     const email = emailValue(input.email), name = nameValue(input.name);
     requireValue(['ADMIN', 'MEMBER'].includes(input.role), 400, '無效角色。');
+    // An administrator invites into their own institution; CLI bootstrap lands in the default one.
+    const actorUser = actor ? userById(actor) : undefined;
+    const orgId = actorUser?.org_id ?? DEFAULT_ORG_ID;
     return transaction(() => {
       requireValue(!get('SELECT id FROM users WHERE email=?', email), 409, '該電郵已存在。');
       const id = randomUUID();
-      run('INSERT INTO users(id,email,name,role,created_at) VALUES(?,?,?,?,?)', id, email, name, input.role, now());
+      run('INSERT INTO users(id,email,name,role,created_at,org_id) VALUES(?,?,?,?,?,?)', id, email, name, input.role, now(), orgId);
       audit(actor, 'user_created', id);
       return { user: publicUser(userById(id)), token: grant(id, actor) };
     });
@@ -179,13 +213,14 @@ export function openAuth(path, { now = Date.now } = {}) {
   }
   function updateUser(actor, id, input) {
     return transaction(() => {
-      assertSession(actor, true);
+      const actorUser = assertSession(actor, true);
       const user = userById(id);
-      requireValue(user, 404, '帳號不存在。');
+      // Another institution's account is reported as absent, not as forbidden.
+      requireValue(user && user.org_id === actorUser.org_id, 404, '帳號不存在。');
       requireValue(['ADMIN', 'MEMBER'].includes(input.role) && typeof input.disabled === 'boolean', 400, '無效帳號設定。');
       const name = nameValue(input.name);
       if (user.role === 'ADMIN' && !user.disabled && user.password_hash && (input.role !== 'ADMIN' || input.disabled)) {
-        requireValue(get("SELECT COUNT(*) AS n FROM users WHERE role='ADMIN' AND disabled=0 AND password_hash IS NOT NULL").n > 1, 409, '不能停用或降級最後一位已啟用管理員。');
+        requireValue(get("SELECT COUNT(*) AS n FROM users WHERE role='ADMIN' AND disabled=0 AND password_hash IS NOT NULL AND org_id=?", actorUser.org_id).n > 1, 409, '不能停用或降級最後一位已啟用管理員。');
       }
       run('UPDATE users SET role=?,disabled=?,name=?,version=version+1 WHERE id=?', input.role, Number(input.disabled), name, id);
       run('DELETE FROM sessions WHERE user_id=?', id);

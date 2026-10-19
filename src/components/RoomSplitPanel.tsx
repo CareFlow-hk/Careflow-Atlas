@@ -53,6 +53,11 @@ export interface RoomSplitPanelProps {
   /** Returns the refusal in staff wording, if any. A removal awaiting confirmation says so. */
   onStructureChange: (change: StructureChange) => string | undefined;
   onClose: () => void;
+  /**
+   * Whether this account may reduce the room count. A member may only add rooms; the field
+   * then starts at what the unit has, and the hint says why it cannot go lower.
+   */
+  canDelete?: boolean;
 }
 
 /**
@@ -60,7 +65,7 @@ export interface RoomSplitPanelProps {
  * dialog of its own — the number is a property of the unit, and the unit is already on screen.
  * 1 merges the rooms back, which is the only way a room is removed.
  */
-export function RoomSplitPanel({ snapshot, unitId, onStructureChange, onClose }: RoomSplitPanelProps) {
+export function RoomSplitPanel({ snapshot, unitId, onStructureChange, onClose, canDelete = true }: RoomSplitPanelProps) {
   const unit = snapshot.units.find(item => item.id === unitId);
   const children = unit ? snapshot.units.filter(item => item.parentUnitId === unit.id) : [];
   /** Only set once someone types: until then the field follows the unit's own room count. */
@@ -85,13 +90,15 @@ export function RoomSplitPanel({ snapshot, unitId, onStructureChange, onClose }:
         if (!refused) setTyped(undefined);
       }}>
         <span>分為</span>
-        <input type="number" min={1} max={MAX_ROOMS} value={rooms} onChange={event => setTyped(event.target.value)} aria-label="劏房間數" />
+        {/* A member cannot take rooms away, so the field starts where the unit is: below
+            that there is nothing to type but a refusal. */}
+        <input type="number" min={canDelete ? 1 : Math.max(children.length, 1)} max={MAX_ROOMS} value={rooms} onChange={event => setTyped(event.target.value)} aria-label="劏房間數" />
         <span>間</span>
         <button type="submit"><Scissors size={14} />{roomCountAction(count, children.length)}</button>
       </form>
       <p className="cf-room-split__hint">{children.length
         ? `現在有 ${children.length} 間。填 1 即合併回一個單位；房間的記錄會跟着一起刪除，要先確認。`
-        : "分拆後原單位保留，分拆前的記錄仍在它名下。每間劏房可各自記錄。"}</p>
+        : "分拆後原單位保留，分拆前的記錄仍在它名下。每間劏房可各自記錄。"}{!canDelete && "員工只能增加劏房，不能減少或合併。"}</p>
       {problem && <p className="cf-room-split__problem" role="alert">{problem}</p>}
     </div>
   );

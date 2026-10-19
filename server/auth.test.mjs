@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { backup } from 'node:sqlite';
-import { openAuth, SESSION_IDLE_MS } from './auth.mjs';
+import { backup, DatabaseSync } from 'node:sqlite';
+import { DEFAULT_ORG_ID, openAuth, SESSION_IDLE_MS } from './auth.mjs';
 import { createAuthServer } from './http.mjs';
 import { config } from './config.mjs';
 
@@ -89,6 +89,20 @@ test('member cannot manage accounts; duplicate emails rejected; admin can invite
   const audit = await f.request('/api/admin/audit', admin);
   assert.ok(audit.value.events.some(e => e.action === 'user_created'));
   assert.ok(!JSON.stringify(audit.value).includes(created.value.link.split('=')[1]));
+});
+
+test('an administrator only sees and manages their own institution', async t => {
+  const f = await fixture(t); const admin = await f.account(); const outsider = await f.account('MEMBER', 'outsider@example.test');
+  // Move one account into a second institution; nothing else about it changes.
+  f.auth.run('INSERT INTO organizations(id,name,created_at) VALUES(?,?,?)', 'org-other', '另一機構', 0);
+  f.auth.run('UPDATE users SET org_id=? WHERE id=?', 'org-other', outsider.id);
+  assert.deepEqual((await f.request('/api/admin/users', admin)).value.users.map(u => u.id), [admin.id]);
+  assert.equal((await f.request(`/api/admin/users/${outsider.id}`, { method: 'PATCH', ...admin, body: { name: 'pwn' } })).status, 404);
+  assert.equal((await f.request(`/api/admin/users/${outsider.id}/reset`, { method: 'POST', ...admin })).status, 400);
+  // The outsider's own workspace stays separate from this institution's.
+  const snapshot = { schemaVersion: '0.1-demo', isSynthetic: true, notice: '機構一', buildings: [], floors: [], units: [], observations: [] };
+  assert.equal((await f.request('/api/workspace', { method: 'PUT', ...admin, body: { snapshot } })).status, 200);
+  assert.deepEqual((await f.request('/api/workspace', outsider)).value, {});
 });
 
 test('last activated admin cannot be removed even if another invitation is pending', async t => {
@@ -213,8 +227,48 @@ test('simultaneous redemption of the same link succeeds only once', async t => {
 
 test('newer account database schema cannot be silently downgraded', async t => {
   const f = await fixture(t);
-  f.auth.run('PRAGMA user_version=2');
+  f.auth.run('PRAGMA user_version=3');
   assert.throws(() => openAuth(f.path), /拒絕降級/);
+});
+
+test('an existing v1 account database keeps its accounts and adopts the institution workspace', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'atlas-migrate-test-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, 'auth.sqlite');
+  const before = new DatabaseSync(path);
+  before.exec(`PRAGMA user_version=1;
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
+      role TEXT NOT NULL CHECK(role IN ('ADMIN','MEMBER')), disabled INTEGER NOT NULL DEFAULT 0,
+      password_hash TEXT, version INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+    CREATE TABLE workspaces (
+      user_id TEXT PRIMARY KEY, snapshot TEXT NOT NULL, version INTEGER NOT NULL, updated_at INTEGER NOT NULL);`);
+  before.prepare('INSERT INTO users(id,email,name,role,created_at) VALUES(?,?,?,?,?)').run('u1', 'old@example.test', '舊帳號', 'ADMIN', 1);
+  before.prepare('INSERT INTO users(id,email,name,role,created_at) VALUES(?,?,?,?,?)').run('u2', 'older@example.test', '舊成員', 'MEMBER', 2);
+  const older = JSON.stringify({ schemaVersion: '0.1-demo', isSynthetic: true, notice: '較舊' });
+  const newer = JSON.stringify({ schemaVersion: '0.1-demo', isSynthetic: true, notice: '較新' });
+  before.prepare('INSERT INTO workspaces(user_id,snapshot,version,updated_at) VALUES(?,?,?,?)').run('u2', older, 3, 10);
+  before.prepare('INSERT INTO workspaces(user_id,snapshot,version,updated_at) VALUES(?,?,?,?)').run('u1', newer, 9, 20);
+  before.close();
+
+  const auth = openAuth(path);
+  try {
+    assert.equal(auth.get('PRAGMA user_version').user_version, 2);
+    // Both existing accounts belong to the default institution from now on.
+    assert.deepEqual(auth.all('SELECT id, org_id FROM users ORDER BY id').map(u => [u.id, u.org_id]), [['u1', DEFAULT_ORG_ID], ['u2', DEFAULT_ORG_ID]]);
+    // The most recently written account copy is the one the team was using; it seeds the
+    // institution workspace. The v1 rows stay for rollback.
+    const seeded = auth.get('SELECT snapshot, version FROM org_workspaces WHERE org_id=?', DEFAULT_ORG_ID);
+    assert.deepEqual(JSON.parse(seeded.snapshot), JSON.parse(newer));
+    assert.equal(seeded.version, 1);
+    assert.equal(auth.get('SELECT COUNT(*) AS n FROM workspaces').n, 2);
+  } finally { auth.close(); }
+
+  // Re-opening is idempotent: the seed is not later overwritten by an older copy.
+  const again = openAuth(path);
+  try {
+    assert.deepEqual(JSON.parse(again.get('SELECT snapshot FROM org_workspaces WHERE org_id=?', DEFAULT_ORG_ID).snapshot), JSON.parse(newer));
+  } finally { again.close(); }
 });
 
 test('a password link names its account so password managers save the right one', async t => {
@@ -238,8 +292,9 @@ test('a failed login records which existing account it was for, never the passwo
   assert.ok(!JSON.stringify(f.auth.all('SELECT * FROM audit')).includes('wrong passphrase'));
 });
 
-test('the workspace belongs to the signed-in account, is versioned, and refuses a stale write', async t => {
+test('the workspace is shared by the institution, is versioned, and refuses a stale write', async t => {
   const f = await fixture(t);
+  const admin = await f.account('ADMIN', 'admin-workspace@example.test');
   const a = await f.account('MEMBER', 'a@example.test');
   const b = await f.account('MEMBER', 'b@example.test');
   assert.equal((await f.request('/api/workspace')).status, 401);
@@ -247,29 +302,93 @@ test('the workspace belongs to the signed-in account, is versioned, and refuses 
   const snapshot = { schemaVersion: '0.1-demo', isSynthetic: true, notice: '', buildings: [], floors: [], units: [], observations: [] };
   const created = await f.request('/api/workspace', { method: 'PUT', ...a, body: { snapshot } });
   assert.equal(created.status, 200); assert.equal(created.value.version, 1);
-  // Another account never sees it.
-  assert.deepEqual((await f.request('/api/workspace', b)).value, {});
+  // Every member of the same institution sees the copy another member wrote.
+  const seenByB = await f.request('/api/workspace', b);
+  assert.equal(seenByB.value.version, 1); assert.deepEqual(seenByB.value.snapshot, snapshot);
   const read = await f.request('/api/workspace', a);
   assert.equal(read.value.version, 1); assert.deepEqual(read.value.snapshot, snapshot);
   // A write that started from an old version is reported, not applied.
   assert.equal((await f.request('/api/workspace', { method: 'PUT', ...a, body: { snapshot, baseVersion: 0 } })).status, 409);
   const next = { ...snapshot, notice: 'changed' };
-  const updated = await f.request('/api/workspace', { method: 'PUT', ...a, body: { snapshot: next, baseVersion: 1 } });
+  const updated = await f.request('/api/workspace', { method: 'PUT', ...b, body: { snapshot: next, baseVersion: 1 } });
   assert.equal(updated.status, 200); assert.equal(updated.value.version, 2);
   assert.equal((await f.request('/api/workspace', a)).value.snapshot.notice, 'changed');
   // A malformed body is refused and leaves the stored copy exactly as it was.
   assert.equal((await f.request('/api/workspace', { method: 'PUT', ...a, body: { snapshot: { schemaVersion: '0.1-demo' }, baseVersion: 2 } })).status, 400);
   assert.equal((await f.request('/api/workspace', a)).value.snapshot.notice, 'changed');
-  // Clearing removes only this account's document.
-  assert.equal((await f.request('/api/workspace', { method: 'DELETE', ...a })).status, 200);
-  assert.deepEqual((await f.request('/api/workspace', a)).value, {});
+  // Clearing empties the institution's document, so a member cannot do it.
+  assert.equal((await f.request('/api/workspace', { method: 'DELETE', ...a })).status, 403);
+  const cleared = await f.request('/api/workspace', { method: 'DELETE', ...admin });
+  assert.equal(cleared.status, 200); assert.equal(cleared.value.version, 3);
+  // The row stays, holding an empty workspace at a higher version. Deleting it would let a
+  // colleague's stale browser look like the first writer and put the cleared data back.
+  const afterClear = await f.request('/api/workspace', b);
+  assert.equal(afterClear.value.version, 3);
+  assert.deepEqual(afterClear.value.snapshot.observations, []);
+  assert.equal((await f.request('/api/workspace', { method: 'PUT', ...b, body: { snapshot, baseVersion: 2 } })).status, 409);
+  assert.deepEqual((await f.request('/api/workspace', b)).value.snapshot.observations, []);
   /*
    * The demo/production boundary: this store holds the prototype's synthetic workspace only,
    * so a document without the synthetic marker is refused before it is ever stored.
    */
   const production = { ...snapshot, isSynthetic: false };
   assert.equal((await f.request('/api/workspace', { method: 'PUT', ...a, body: { snapshot: production } })).status, 400);
-  assert.deepEqual((await f.request('/api/workspace', a)).value, {});
+  assert.equal((await f.request('/api/workspace', a)).value.version, 3);
+});
+
+test('a member may only withdraw their own records; an administrator may withdraw any', async t => {
+  const f = await fixture(t);
+  const admin = await f.account('ADMIN', 'admin-withdraw@example.test');
+  const member = await f.account('MEMBER', 'member-withdraw@example.test');
+  const base = { schemaVersion: '0.1-demo', isSynthetic: true, notice: '', buildings: [], floors: [], units: [], observations: [], visits: [], followUpEvents: [] };
+  const mine = { id: 'obs-mine', createdBy: { accountId: member.id, name: 'member' }, note: 'own record' };
+  const first = await f.request('/api/workspace', { method: 'PUT', ...member, body: { snapshot: { ...base, observations: [mine] } } });
+  assert.equal(first.status, 200);
+  let version = first.value.version;
+  const stored = async () => (await f.request('/api/workspace', member)).value.snapshot;
+
+  // Withdrawing one's own record is allowed, and names the person acting.
+  const withdrawn = { ...mine, deleted: { at: '2026-10-19T00:00:00.000Z', by: { accountId: member.id, name: 'member' } } };
+  const own = await f.request('/api/workspace', { method: 'PUT', ...member, body: { snapshot: { ...base, observations: [withdrawn] }, baseVersion: version } });
+  assert.equal(own.status, 200); version = own.value.version;
+
+  // The withdrawal marker is the only thing a member may change.
+  assert.equal((await f.request('/api/workspace', { method: 'PUT', ...member, body: { snapshot: { ...base, observations: [{ ...withdrawn, note: 'rewritten' }] }, baseVersion: version } })).status, 403);
+  // A member cannot remove a record outright: that is what a structure delete by a
+  // member would otherwise do to someone else's records.
+  assert.equal((await f.request('/api/workspace', { method: 'PUT', ...member, body: { snapshot: { ...base, observations: [] }, baseVersion: version } })).status, 403);
+
+  // Adding a record is open to both roles; withdrawing someone else's is not.
+  const theirs = { id: 'obs-theirs', createdBy: { accountId: admin.id, name: 'admin' }, note: 'their record' };
+  const add = await f.request('/api/workspace', { method: 'PUT', ...member, body: { snapshot: { ...base, observations: [withdrawn, theirs] }, baseVersion: version } });
+  assert.equal(add.status, 200); version = add.value.version;
+  const withdrawTheirs = { ...theirs, deleted: { at: '2026-10-19T00:00:00.000Z', by: { accountId: member.id, name: 'member' } } };
+  assert.equal((await f.request('/api/workspace', { method: 'PUT', ...member, body: { snapshot: { ...base, observations: [withdrawn, withdrawTheirs] }, baseVersion: version } })).status, 403);
+  // An administrator may withdraw any record.
+  const byAdmin = await f.request('/api/workspace', { method: 'PUT', ...admin, body: { snapshot: { ...base, observations: [withdrawn, withdrawTheirs] }, baseVersion: version } });
+  assert.equal(byAdmin.status, 200); version = byAdmin.value.version;
+
+  /*
+   * Structure is additive for a member: adding a floor or a unit is fine, taking one away
+   * is not — not even a unit they added themselves a moment ago and that holds no records
+   * (2026-10-19 review). The refusal names the action rather than a missing record.
+   */
+  const floor = { id: 'floor-1', buildingId: 'b1', level: 1, label: '1樓' };
+  const unit = { id: 'unit-1', buildingId: 'b1', floorId: 'floor-1', label: '1樓 A室' };
+  const withStructure = await f.request('/api/workspace', { method: 'PUT', ...member, body: { snapshot: { ...base, floors: [floor], units: [unit], observations: [withdrawn, withdrawTheirs] }, baseVersion: version } });
+  assert.equal(withStructure.status, 200); version = withStructure.value.version;
+  // Removing the unit, on its own or with a record, is refused.
+  assert.equal((await f.request('/api/workspace', { method: 'PUT', ...member, body: { snapshot: { ...base, floors: [floor], units: [], observations: [withdrawn, withdrawTheirs] }, baseVersion: version } })).status, 403);
+  assert.equal((await f.request('/api/workspace', { method: 'PUT', ...member, body: { snapshot: { ...base, floors: [floor], units: [], observations: [withdrawTheirs] }, baseVersion: version } })).status, 403);
+  // So is removing the floor, with or without its units.
+  assert.equal((await f.request('/api/workspace', { method: 'PUT', ...member, body: { snapshot: { ...base, floors: [], units: [], observations: [withdrawn, withdrawTheirs] }, baseVersion: version } })).status, 403);
+  assert.equal((await f.request('/api/workspace', { method: 'PUT', ...member, body: { snapshot: { ...base, floors: [], units: [unit], observations: [withdrawn, withdrawTheirs] }, baseVersion: version } })).status, 403);
+  // Nothing the member tried reached the stored copy.
+  assert.deepEqual(await stored(), { ...base, floors: [floor], units: [unit], observations: [withdrawn, withdrawTheirs] });
+  // An administrator may take the structure away.
+  const byAdminStructure = await f.request('/api/workspace', { method: 'PUT', ...admin, body: { snapshot: { ...base, floors: [], units: [], observations: [withdrawn, withdrawTheirs] }, baseVersion: version } });
+  assert.equal(byAdminStructure.status, 200);
+  assert.deepEqual(await stored(), { ...base, floors: [], units: [], observations: [withdrawn, withdrawTheirs] });
 });
 
 test('feature switches start off, only an administrator turns them, and photo intake obeys', async t => {

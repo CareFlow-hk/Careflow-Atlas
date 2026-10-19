@@ -51,4 +51,45 @@ describe("snapshotSchema", () => {
     });
     expect(snapshotSchema.safeParse(snapshot).success).toBe(false);
   });
+
+  it("accepts an author and a withdrawal marker, and refuses a malformed one", () => {
+    const snapshot = copy();
+    const author = { accountId: "account-1", name: "同事" };
+    snapshot.observations[0].createdBy = author;
+    snapshot.observations[1] = { ...snapshot.observations[1], deleted: { at: "2026-10-19T09:00:00.000Z", by: author } };
+    expect(snapshotSchema.safeParse(snapshot).success).toBe(true);
+
+    const broken = copy() as unknown as { observations: Record<string, unknown>[] };
+    broken.observations[0].deleted = { at: "2026-10-19", by: author };
+    expect(snapshotSchema.safeParse(broken).success).toBe(false);
+    const nameless = copy() as unknown as { observations: Record<string, unknown>[] };
+    nameless.observations[0].createdBy = { accountId: "" };
+    expect(snapshotSchema.safeParse(nameless).success).toBe(false);
+  });
+
+  it("lets a withdrawn resolution stop closing the task it named", () => {
+    // The same snapshot validates either way; what changes is that the task is open again.
+    const snapshot = copy();
+    const author = { accountId: "account-1", name: "同事" };
+    snapshot.observations.push({
+      ...snapshot.observations[0],
+      id: "withdrawn-resolution",
+      recordedAt: "2026-09-10T12:00:00+08:00",
+      followUp: { action: "合成：完成", status: "DONE" },
+      resolvesObservationId: "observation-yu-an-5b",
+      createdBy: author,
+      deleted: { at: "2026-10-19T09:00:00.000Z", by: author },
+      visitId: snapshot.observations[0].visitId,
+    });
+    snapshot.observations.push({
+      ...snapshot.observations[0],
+      id: "live-resolution",
+      recordedAt: "2026-09-11T12:00:00+08:00",
+      followUp: { action: "合成：完成", status: "DONE" },
+      resolvesObservationId: "observation-yu-an-5b",
+      visitId: snapshot.observations[0].visitId,
+    });
+    // A withdrawn resolution no longer claims the task, so a later live one is not a duplicate.
+    expect(snapshotSchema.safeParse(snapshot).success).toBe(true);
+  });
 });

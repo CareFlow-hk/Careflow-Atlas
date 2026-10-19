@@ -78,13 +78,19 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
       }
       if (req.method === 'GET' && path === '/api/session') return send(res, 200, view(row));
       /*
-       * The account's business workspace. Scoped to the session's user id, never to an id
-       * in the request, so one account cannot read or write another's snapshot.
+       * The institution's business workspace. Scoped to the session's organisation, never
+       * to an id in the request, so members of another institution cannot read or write it.
+       * Everyone in this organisation sees the same snapshot; a member's changes are
+       * checked against what is stored (server/workspaceAccess.mjs).
        */
       if (path === '/api/workspace') {
-        if (req.method === 'GET') return send(res, 200, workspace.get(user.id) ?? {});
-        if (req.method === 'PUT') return send(res, 200, workspace.put(user.id, body));
-        if (req.method === 'DELETE') return send(res, 200, workspace.remove(user.id) ?? { ok: true });
+        if (req.method === 'GET') return send(res, 200, workspace.get(user.org_id) ?? {});
+        if (req.method === 'PUT') return send(res, 200, workspace.put(user, body));
+        if (req.method === 'DELETE') {
+          // Emptying the workspace empties the whole institution's copy, not one account's.
+          requireValue(user.role === 'ADMIN', 403, '清空機構工作區需要管理員權限。');
+          return send(res, 200, workspace.remove(user));
+        }
       }
       if (req.method === 'POST' && path === '/api/logout') {
         auth.transaction(() => { auth.run('DELETE FROM sessions WHERE hash=?', row.hash); auth.audit(user.id, 'logout'); });
@@ -101,12 +107,14 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
       }
       if (path.startsWith('/api/admin/')) {
         auth.assertSession(row, true);
-        if (req.method === 'GET' && path === '/api/admin/users') return send(res, 200, { users: auth.all('SELECT * FROM users ORDER BY created_at,id').map(publicUser) });
+        if (req.method === 'GET' && path === '/api/admin/users') return send(res, 200, { users: auth.all('SELECT * FROM users WHERE org_id=? ORDER BY created_at,id', user.org_id).map(publicUser) });
         if (req.method === 'PUT' && path === '/api/admin/features') {
           auth.limit(`admin:${user.id}`, 30);
           return send(res, 200, { features: features.set(body.key, body.enabled, user.id) });
         }
-        if (req.method === 'GET' && path === '/api/admin/audit') return send(res, 200, { events: auth.all('SELECT a.*,u.email AS actor_email,t.email AS target_email FROM audit a LEFT JOIN users u ON u.id=a.actor LEFT JOIN users t ON t.id=a.target ORDER BY a.id DESC LIMIT 100') });
+        if (req.method === 'GET' && path === '/api/admin/audit') return send(res, 200, { events: auth.all(`SELECT a.*,u.email AS actor_email,t.email AS target_email FROM audit a
+          LEFT JOIN users u ON u.id=a.actor LEFT JOIN users t ON t.id=a.target
+          WHERE u.org_id=? OR t.org_id=? ORDER BY a.id DESC LIMIT 100`, user.org_id, user.org_id) });
         if (req.method === 'POST' && path === '/api/admin/users') {
           auth.limit(`admin:${user.id}`, 30);
           const result = auth.createUser(body, user.id); return send(res, 201, { user: result.user, link: link(result.token) });
@@ -115,7 +123,8 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
         if (match && req.method === 'PATCH' && !match[2]) return send(res, 200, { user: auth.updateUser(row, match[1], body) });
         if (match && req.method === 'POST' && match[2]) {
           auth.limit(`admin:${user.id}`, 30);
-          const target = auth.userById(match[1]); requireValue(target && !target.disabled, 400, '帳號不存在或已停用。');
+          const target = auth.userById(match[1]);
+          requireValue(target && !target.disabled && target.org_id === user.org_id, 400, '帳號不存在或已停用。');
           const token = auth.transaction(() => auth.grant(target.id, user.id));
           return send(res, 200, { link: link(token) });
         }

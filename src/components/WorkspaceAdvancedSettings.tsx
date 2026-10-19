@@ -23,11 +23,23 @@ export function WorkspaceAdvancedSettings() {
 function ClearWorkspace() {
   const snapshot = useWorkspace(state => state.snapshot);
   const clearWorkspace = useWorkspace(state => state.clearWorkspace);
+  const role = useWorkspace(state => state.role);
   const [confirming, setConfirming] = useState(false);
   const [attempt, setAttempt] = useState<BackupAttempt>('IDLE');
   const [message, setMessage] = useState('');
   const gate = deleteGate(attempt);
   const counts = snapshot ? `${snapshot.buildings.length} 幢大廈、${snapshot.observations.length} 筆記錄` : '';
+  /*
+   * Clearing empties the whole institution's shared workspace, not one person's copy, so
+   * only an administrator is offered it. The server refuses it for anyone else anyway;
+   * hiding the button keeps the screen honest about what this account can do.
+   */
+  if (role === 'MEMBER') return (
+    <section className="cf-settings-advanced">
+      <h3>清空工作區</h3>
+      <p className="cf-custom-options__note">清空會刪除整個機構的大廈、樓層、人員及到訪記錄，只有管理員可以執行。如需移除個別記錄，請在該記錄按「撤回這筆記錄」；撤回會保留歷史。</p>
+    </section>
+  );
   /** Answers whether the browser was handed the file; the answer is what opens the delete. */
   const exportExcel = async (): Promise<boolean> => {
     if (!snapshot) return false;
@@ -46,13 +58,13 @@ function ClearWorkspace() {
   const clear = () => {
     // The gate is enforced here too: a keyboard path must not skip the backup.
     if (!gate.allowed) return;
-    try { clearWorkspace(); setConfirming(false); setAttempt('IDLE'); setMessage('已清空工作區（包括帳號端的副本）。回到地圖後可重新載入示範資料或匯入 Excel。'); }
+    try { clearWorkspace(); setConfirming(false); setAttempt('IDLE'); setMessage('已清空機構工作區（包括帳號端的副本）。所有同事重新整理後都會看到空白工作區。'); }
     catch (error) { setMessage(error instanceof Error ? error.message : '未能清空，原有記錄仍保留。'); }
   };
   return (
     <section className="cf-settings-advanced">
       <h3>清空工作區</h3>
-      <p className="cf-custom-options__note">刪除這個帳號的所有大廈、樓層、人員及到訪記錄：既刪這個瀏覽器裡的副本，也刪帳號端的副本。帳號和常用選項會保留。清空後不能復原，所以要先下載 Excel 備份。</p>
+      <p className="cf-custom-options__note">刪除整個機構的所有大廈、樓層、人員及到訪記錄：既刪瀏覽器裡的共享副本，也刪帳號端的副本。所有同事都會受影響；帳號和常用選項會保留。清空後不能復原，所以要先下載 Excel 備份。</p>
       {!snapshot ? <p className="cf-custom-options__note">工作區目前是空的。</p> : !confirming
         ? <div className="cf-clear-actions"><button type="button" onClick={() => void exportExcel()}>先匯出 Excel</button><button type="button" onClick={() => { setMessage(''); setAttempt('IDLE'); setConfirming(true); }}>清空工作區…</button></div>
         : <div className="cf-clear-confirm" role="alert">

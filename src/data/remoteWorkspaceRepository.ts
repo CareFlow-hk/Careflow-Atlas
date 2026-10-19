@@ -24,5 +24,12 @@ export class RemoteWorkspaceRepository {
   async save(snapshot: OutreachSnapshot, baseVersion?: number): Promise<number> {
     return (await api<{ version: number }>('/workspace', 'PUT', { snapshot, baseVersion })).version;
   }
-  async clear(): Promise<void> { await api('/workspace', 'DELETE'); }
+  /**
+   * Empty the institution's copy. The server keeps an empty version rather than removing the
+   * row, so other browsers cannot mistake their stale copy for the first write. Returns that
+   * version, which the caller must use as the base of its next write.
+   */
+  async clear(): Promise<number | undefined> {
+    return (await api<{ version?: number }>('/workspace', 'DELETE')).version;
+  }
 }

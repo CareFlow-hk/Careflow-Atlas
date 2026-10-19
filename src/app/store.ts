@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { recordFollowUpEvent, tagNode, type FollowUpEventAction, type NodeTag, type Operator, type OutreachSnapshot, type SaveObservationInput } from '../domain/types';
+import { canWithdrawObservation, recordFollowUpEvent, tagNode, withdrawObservation, type FollowUpEventAction, type NodeTag, type Operator, type OutreachSnapshot, type SaveObservationInput } from '../domain/types';
 import { createRecordId } from './recordId';
 import type { CustomOptions } from '../domain/optionPrefs';
 import { LocalStoragePersistenceAdapter, OutreachRepository, PersistenceError } from '../data/repository';
@@ -11,7 +11,7 @@ import { mergeWorkflow } from '../data/workflowMerge';
 import { mergeSync, type SyncChoice, type SyncConflict } from '../data/syncMerge';
 import { addBuilding, type NewBuildingInput } from '../data/newBuilding';
 import { blankSnapshot } from '../data/blankSnapshot';
-import { applyStructureChange, setNoSubdivision, type LocationProposal, type StructureChange } from '../domain/structure';
+import { applyStructureChange, removesStructure, setNoSubdivision, type LocationProposal, type StructureChange } from '../domain/structure';
 import { appendPhotoPages, type PhotoPage } from '../photos/model';
 
 const adapter = new LocalStoragePersistenceAdapter();
@@ -19,6 +19,8 @@ let repository = new OutreachRepository(adapter);
 let baseRepository = new OutreachRepository(adapter, 'careflow-field-outreach.base');
 let prefsRepository = new OptionPrefsRepository(adapter);
 let accountId: string | undefined;
+/** The institution whose shared browser copy is in use, when there is one. */
+let workspaceOrgId: string | undefined;
 /*
  * The browser copy stays the working copy that every domain rule runs against; the
  * account端 is the durable copy. Only a signed-in session with the server enabled turns
@@ -33,22 +35,47 @@ let writes: Promise<void> = Promise.resolve();
 let confirmed = '';
 /** The JSON both sides last agreed on; written once to remember the common ancestor. */
 let savedBase = '';
+/** The signed-in account as the workspace needs it: who acts, and which institution it serves. */
+export interface WorkspaceAccount { id: string; name: string; role?: 'ADMIN' | 'MEMBER'; orgId?: string }
 /**
  * Demo caches only. Never adopt the pre-authentication shared cache.
  * `remote` is set only by the session gate, after the server has confirmed a session.
+ *
+ * Colleagues of one institution share one working copy, so the browser copy is keyed by
+ * institution — that is what makes two accounts see the same records even before the
+ * server copy comes back. Without an institution (tests, demo) the key stays per account.
  */
-export function setWorkspaceAccount(id?: string, name?: string, remote = false) {
+export function setWorkspaceAccount(account?: string | WorkspaceAccount, name?: string, remote = false) {
+  const id = typeof account === 'string' ? account : account?.id;
+  const fullName = typeof account === 'string' ? name : account?.name;
+  const role = typeof account === 'object' ? account?.role : undefined;
+  const orgId = typeof account === 'object' ? account?.orgId : undefined;
   // The operator travels with the account so a closed task names who closed it.
-  useWorkspace.setState({ operator: id ? { accountId: id, name: name ?? id } : undefined });
-  if (id === accountId && remote === !!server) return;
+  useWorkspace.setState({ operator: id ? { accountId: id, name: fullName ?? id } : undefined, role, orgId });
+  if (id === accountId && remote === !!server && orgId === workspaceOrgId) return;
   accountId = id;
-  const suffix = id ? `careflow-atlas.account.${id}` : 'careflow-atlas.signed-out';
+  workspaceOrgId = orgId;
+  const suffix = orgId ? `careflow-atlas.org.${orgId}` : id ? `careflow-atlas.account.${id}` : 'careflow-atlas.signed-out';
   repository = new OutreachRepository(adapter, `${suffix}.demo`);
   baseRepository = new OutreachRepository(adapter, `${suffix}.demo.base`);
   prefsRepository = new OptionPrefsRepository(adapter, `${suffix}.options`);
+  /*
+   * The shared copy starts empty on the first account that adopts it. If that person's
+   * browser already holds their own pre-institution copy, it becomes the shared one —
+   * otherwise the work they had on screen would look erased. Older copies are never
+   * deleted; they stay for export, and the server copy is merged in on load anyway.
+   */
+  if (orgId && id && !readRaw(`${suffix}.demo`)) {
+    const legacy = readRaw(`careflow-atlas.account.${id}.demo`);
+    if (legacy) { try { adapter.write(`${suffix}.demo`, legacy); } catch { /* the copy stays where it was */ } }
+  }
   server = id && remote ? new RemoteWorkspaceRepository() : undefined;
   serverVersion = undefined; confirmed = ''; savedBase = ''; writes = Promise.resolve();
   useWorkspace.setState({ snapshot: undefined, loading: false, storageError: undefined, pendingConflicts: [], conflictsOpen: false, syncBlocked: false, selectedBuildingId: undefined, selectedFloorId: undefined, selectedUnitId: undefined, expanded: false, optionPrefs: prefsRepository.get() });
+}
+/** A stored copy, or nothing: an unreadable store is never overwritten by this migration. */
+function readRaw(key: string): string | null {
+  try { return adapter.read(key); } catch { return null; }
 }
 
 /** This browser's working copy; a corrupt store is reported, not thrown at the caller. */
@@ -65,6 +92,44 @@ function rememberBase(snapshot: OutreachSnapshot) {
   savedBase = json;
   try { baseRepository.replaceSnapshot(snapshot); } catch { /* merges then keep both sides rather than delete */ }
 }
+/**
+ * Put the working copy back to what the server last held.
+ *
+ * Only for a write the server refused outright (a role rule), where keeping the change
+ * locally would make every later write fail the same way. A snapshot the server gave us is
+ * already validated, so the local copy stays a valid one; if it cannot be written, the
+ * banner has already said the change was refused and nothing more is lost.
+ */
+function restoreConfirmed() {
+  if (!confirmed) return;
+  try {
+    const restored = repository.replaceSnapshot(JSON.parse(confirmed));
+    rememberBase(restored);
+    const { selectedUnitId, selectedFloorId } = useWorkspace.getState();
+    useWorkspace.setState({
+      snapshot: restored,
+      ...(selectedUnitId && !restored.units.some(item => item.id === selectedUnitId) ? { selectedUnitId: undefined } : {}),
+      ...(selectedFloorId && !restored.floors.some(item => item.id === selectedFloorId) ? { selectedFloorId: undefined, selectedUnitId: undefined } : {}),
+    });
+  } catch { /* the working copy stays as it was; the refusal is already on screen */ }
+}
+/**
+ * Rows arriving from an import belong to whoever imported them, so they can be withdrawn
+ * the same way a typed record can. Rows already stored keep the author they had: an import
+ * must not take over someone else's record, and must not add an author to legacy rows.
+ */
+function stampArrivals(current: OutreachSnapshot | undefined, incoming: OutreachSnapshot, operator?: Operator): OutreachSnapshot {
+  if (!operator) return incoming;
+  const known = new Set((current?.observations ?? []).map(item => item.id));
+  return { ...incoming, observations: incoming.observations.map(item => known.has(item.id) || item.createdBy ? item : { ...item, createdBy: operator }) };
+}
+/**
+ * Said wherever a member is shown, or refused, a structure delete.
+ *
+ * Export beside the rule so the structure editor's note and the store's refusal say the
+ * same thing: a member may add floors and units, but may not take one away (2026-10-19).
+ */
+export const MEMBER_NO_STRUCTURE_DELETE = '員工不能刪除樓層、單位或劏房，即使是自己新增的也一樣。如需刪除，請聯絡管理員。';
 const conflictMessage = (count: number) =>
   `這個帳號的資料已在其他裝置更新，其中 ${count} 筆記錄兩邊都改過，未有自動決定。本機的版本仍留在這部電腦；請在視窗逐筆選擇保留哪一份，選好之前不會寫上帳號端。`;
 const blockedMessage = '這個帳號的資料已在其他裝置更新，但兩邊的改動在關聯上對不上，未能自動合併。本機版本仍然保留，未寫上帳號端；請先匯出 Excel 核對。';
@@ -173,6 +238,18 @@ async function push(target: RemoteWorkspaceRepository) {
     throw new ApiError(409, '工作區同時被其他裝置更新。');
   } catch (error) {
     if (target !== server) return;
+    /*
+     * A 403 is the server refusing the change itself, not a lost connection. Keeping that
+     * copy here would leave the browser holding something the server will never accept, and
+     * every later write would carry it and be refused again — so the working copy goes back
+     * to the version the two sides last agreed on, and the banner names the permission
+     * instead of sending people to check their network (2026-10-19 review).
+     */
+    if (error instanceof ApiError && error.status === 403) {
+      restoreConfirmed();
+      useWorkspace.setState({ storageError: error.message || MEMBER_NO_STRUCTURE_DELETE });
+      return;
+    }
     const conflict = error instanceof ApiError && error.status === 409;
     useWorkspace.setState({ storageError: conflict
       ? '這個帳號的資料不斷被其他裝置更新，本次改動未寫上帳號端。本機副本仍然保留，請稍後再試。'
@@ -235,6 +312,15 @@ interface WorkspaceState {
   optionPrefs: CustomOptions;
   /** The signed-in account. Recorded as the operator of task actions, never as a field worker. */
   operator?: Operator;
+  /** What this account may do to other people's records. Absent means the demo path. */
+  role?: 'ADMIN' | 'MEMBER';
+  /** The institution whose shared workspace this is. */
+  orgId?: string;
+  /**
+   * Withdraw one record. It stays in history with who withdrew it and when; it leaves
+   * coverage, summaries and follow-ups. A member may only withdraw what they saved.
+   */
+  deleteObservation: (observationId: string) => { error: string } | { message: string };
   selectedBuildingId?: string;
   selectedFloorId?: string;
   selectedUnitId?: string;
@@ -372,6 +458,13 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   changeStructure: change => {
     const current = get().snapshot;
     if (!current) return { error: '請先載入資料。' };
+    /*
+     * Members share the buildings but not the right to take one away: no floor, unit or
+     * 劏房 room can be removed by a member, not even one they added themselves. Refused here,
+     * before the local copy is touched, so the working copy never holds a change the server
+     * will reject — and the refusal is a permission, not a network failure.
+     */
+    if (get().role === 'MEMBER' && removesStructure(current, change)) return { error: MEMBER_NO_STRUCTURE_DELETE };
     const result = applyStructureChange(current, change, { at: new Date().toISOString(), by: get().operator?.name });
     if ('error' in result) return result;
     publish(set, repository.replaceSnapshot(result.snapshot));
@@ -403,9 +496,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
      */
     if (target) writes = writes.then(async () => {
       if (target !== server) return;
-      await target.clear();
+      // The server keeps an empty version; remembering it keeps this browser's next write
+      // from looking like a first write that would race every other colleague's copy.
+      const version = await target.clear();
       if (target !== server) return;
-      serverVersion = undefined; confirmed = '';
+      serverVersion = version; confirmed = '';
       if (useWorkspace.getState().storageError) useWorkspace.setState({ storageError: undefined });
     }).catch(() => {
       if (target !== server) return;
@@ -415,19 +510,36 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     set({ snapshot: undefined, storageError: undefined, pendingConflicts: [], conflictsOpen: false, syncBlocked: false, selectedBuildingId: undefined, selectedFloorId: undefined, selectedUnitId: undefined, expanded: false });
   },
   mergeSnapshot: (incoming, baseline) => {
-    const result = mergeWorkflow(repository.getSnapshot(), incoming, baseline);
+    const current = repository.getSnapshot();
+    const result = mergeWorkflow(current, stampArrivals(current, incoming, get().operator), baseline);
     if (!result.snapshot) throw new Error(result.issues.map(i => i.message).join('\n'));
     publish(set, repository.replaceSnapshot(result.snapshot));
   },
   saveObservation: input => {
-    publish(set, repository.saveObservation(input));
+    const operator = get().operator;
+    publish(set, repository.saveObservation(operator ? { ...input, createdBy: operator } : input));
+  },
+  deleteObservation: observationId => {
+    const current = get().snapshot;
+    const operator = get().operator;
+    if (!current) return { error: '請先載入資料。' };
+    if (!operator) return { error: '請先登入，才能撤回記錄。' };
+    const record = current.observations.find(item => item.id === observationId);
+    if (!record) return { error: '找不到這筆記錄，可能已由其他同事更新，請重新整理。' };
+    if (!canWithdrawObservation(record, operator, get().role === 'ADMIN')) {
+      return { error: record.deleted ? '這筆記錄已經撤回。' : '員工只能撤回自己建立、且內容未被改動的記錄；如需移除其他記錄，請聯絡管理員。' };
+    }
+    const next = { ...current, observations: current.observations.map(item => item.id === observationId ? withdrawObservation(item, operator, new Date().toISOString()) : item) };
+    publish(set, repository.replaceSnapshot(next));
+    return { message: '已撤回這筆記錄。記錄與撤回人仍留在歷史，覆蓋與跟進已按餘下記錄重算。' };
   },
   recordBatch: (inputs, confirmNoSubdivision) => {
     const current = get().snapshot;
     if (!current) throw new PersistenceError('請先載入資料。');
     // The observations land first and in one write; only then is 無劏房 confirmed on the
     // same units, with the same actor the rest of the structure editor records.
-    const written = repository.saveObservations(inputs);
+    const operator = get().operator;
+    const written = repository.saveObservations(operator ? inputs.map(input => ({ ...input, createdBy: operator })) : inputs);
     const unitIds = inputs.map(input => input.unitId).filter((id): id is string => !!id);
     const confirmed = confirmNoSubdivision
       ? setNoSubdivision(written, unitIds, true, { at: new Date().toISOString(), by: get().operator?.name })
