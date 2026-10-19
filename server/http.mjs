@@ -1,9 +1,10 @@
 import { createServer } from 'node:http';
 import { createPhotoService, PHOTO_BODY_LIMIT } from './photos.mjs';
+import { createFeatureStore } from './features.mjs';
 import { createWorkspaceStore, WORKSPACE_BODY_LIMIT } from './workspace.mjs';
 import { HttpError, requireValue, publicUser, SESSION_IDLE_MS } from './auth.mjs';
 
-export function createAuthServer(auth, { origin, secure = true, trustProxy = false, photos = createPhotoService(), workspace = createWorkspaceStore(auth) }) {
+export function createAuthServer(auth, { origin, secure = true, trustProxy = false, photos = createPhotoService(), features = createFeatureStore(auth), workspace = createWorkspaceStore(auth) }) {
   requireValue(new URL(origin).origin === origin, 500, 'APP_ORIGIN 必須是完整 origin，不帶路徑或末尾斜線。');
   requireValue(!secure || origin.startsWith('https://'), 500, '安全 Cookie 需要 HTTPS APP_ORIGIN。');
   const cookieName = secure ? '__Host-atlas_session' : 'atlas_session';
@@ -34,7 +35,11 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
         requireValue(session, 401, '請登入後繼續。');
         requireValue(req.headers['x-csrf-token'] === session.csrf, 403, '請求校驗失敗，請重新整理頁面。');
         const user = auth.assertSession(session);
-        if (photoRequest) auth.limit(`photo:${user.id}`, 40);
+        if (photoRequest) {
+          // Off unless an administrator turned it on: no photo leaves for Azure otherwise.
+          requireValue(features.enabled('photoIntake'), 403, '照片回錄未開啟，請聯絡管理員。');
+          auth.limit(`photo:${user.id}`, 40);
+        }
         if (workspaceRequest) auth.limit(`workspace:${user.id}`, 1200);
       }
       const bodyLimit = workspaceRequest ? WORKSPACE_BODY_LIMIT : photoRequest ? PHOTO_BODY_LIMIT : 8192;
@@ -62,7 +67,8 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
       requireValue(row, 401, '請登入後繼續。');
       if (mutation) requireValue(req.headers['x-csrf-token'] === row.csrf, 403, '請求校驗失敗，請重新整理頁面。');
       const user = auth.assertSession(row);
-      if (req.method === 'GET' && path === '/api/photos/status') return send(res, 200, photos.status());
+      if (req.method === 'GET' && path === '/api/features') return send(res, 200, { features: features.all() });
+      if (req.method === 'GET' && path === '/api/photos/status') return send(res, 200, { ...photos.status(), enabled: features.enabled('photoIntake') });
       if (photoRequest) {
         const controller = new AbortController();
         const abort = () => { if (!res.writableEnded) controller.abort(); };
@@ -96,6 +102,10 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
       if (path.startsWith('/api/admin/')) {
         auth.assertSession(row, true);
         if (req.method === 'GET' && path === '/api/admin/users') return send(res, 200, { users: auth.all('SELECT * FROM users ORDER BY created_at,id').map(publicUser) });
+        if (req.method === 'PUT' && path === '/api/admin/features') {
+          auth.limit(`admin:${user.id}`, 30);
+          return send(res, 200, { features: features.set(body.key, body.enabled, user.id) });
+        }
         if (req.method === 'GET' && path === '/api/admin/audit') return send(res, 200, { events: auth.all('SELECT a.*,u.email AS actor_email,t.email AS target_email FROM audit a LEFT JOIN users u ON u.id=a.actor LEFT JOIN users t ON t.id=a.target ORDER BY a.id DESC LIMIT 100') });
         if (req.method === 'POST' && path === '/api/admin/users') {
           auth.limit(`admin:${user.id}`, 30);

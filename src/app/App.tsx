@@ -15,6 +15,7 @@ import { PaperForm } from '../components/PaperForm';
 import { SyncConflictDialog } from '../components/SyncConflictDialog';
 import { AccountMenu } from '../components/AccountMenu';
 import { features } from './features';
+import { useAccount } from '../auth/accountContext';
 import { stateColors, stateLabels, stateLegendNotes } from '../domain/presentation';
 import { roomFormDefaults } from '../components/observationDefaults';
 import { mergeWorkflow } from '../data/workflowMerge';
@@ -58,6 +59,8 @@ function download(url: string, name: string) {
 
 export default function App() {
   const workspace = useWorkspace();
+  // Photo intake sends pages to Azure, so it only appears once an administrator has turned it on.
+  const photoIntake = useAccount()?.features.photoIntake === true;
   const { snapshot, selectedBuildingId, selectedFloorId, selectedUnitId, expanded } = workspace;
   const [importOpen, setImportOpen] = useState(false);
   const [importReview, setImportReview] = useState<ImportReview>();
@@ -293,7 +296,7 @@ export default function App() {
       <span className="demo-badge"><span />示範資料</span>
       <button ref={helpButtonRef} className="help-button icon-button" aria-label="示範說明" aria-expanded={helpOpen} aria-controls="demo-help" onClick={() => setHelpOpen(!helpOpen)}><CircleHelp size={19} /></button>
       <AccountMenu />
-      {snapshot && <button className="photo-entry" onClick={() => setPhotoOpen(true)}><Camera size={16} />照片回錄</button>}
+      {snapshot && photoIntake && <button className="photo-entry" onClick={() => setPhotoOpen(true)}><Camera size={16} />照片回錄</button>}
     </header>
     <main className={`workspace ${selectedBuildingId ? 'has-selection' : ''}`}>
       {/* On desktop the finder floats over the map: a one-line bar, opened when needed to
@@ -342,7 +345,7 @@ export default function App() {
     <ImportDialog notice={toast.startsWith('Excel 已準備') ? toast : undefined} open={importOpen} review={importReview} loading={importLoading} error={importError} onClose={() => setImportOpen(false)} onFile={loadFile} onLoadDistrict={loadDistrict} onExport={() => void (snapshot ? exportExcel() : exportBlank())} exportLabel={snapshot ? undefined : '下載空白範本'} onPrint={snapshot?.buildings.length ? () => { setImportOpen(false); setPaperOpen(true); } : undefined} onRetry={openImport} onRemap={remapImport} onConfirmReplace={confirmImport} />
     {workspace.conflictsOpen && workspace.pendingConflicts.length > 0 && <SyncConflictDialog conflicts={workspace.pendingConflicts} onResolve={workspace.resolveConflicts} onDefer={workspace.deferConflicts} />}
     {paperOpen && snapshot && <PaperForm snapshot={snapshot} buildingId={selectedBuildingId} onClose={() => setPaperOpen(false)} />}
-    {snapshot && workspace.operator && <PhotoIntake key={workspace.operator.accountId} onApplyProposal={features.structureEditing ? workspace.applyLocationProposal : undefined} open={photoOpen} snapshot={snapshot} operator={workspace.operator} onClose={() => setPhotoOpen(false)} onSave={workspace.savePhotoPages} onView={(buildingId, unitId) => { workspace.selectBuilding(buildingId); if (unitId) workspace.selectUnit(unitId); setFinderOpen(false); }} />}
+    {snapshot && photoIntake && workspace.operator && <PhotoIntake key={workspace.operator.accountId} onApplyProposal={features.structureEditing ? workspace.applyLocationProposal : undefined} open={photoOpen} snapshot={snapshot} operator={workspace.operator} onClose={() => setPhotoOpen(false)} onSave={workspace.savePhotoPages} onView={(buildingId, unitId) => { workspace.selectBuilding(buildingId); if (unitId) workspace.selectUnit(unitId); setFinderOpen(false); }} />}
     {editTarget && <ObservationEditor open targetLabel={editTarget.label} subjectId={editTarget.unitIds ? undefined : editTarget.unitId ?? editTarget.buildingId} subjectType={editTarget.unitId ? 'UNIT' : 'BUILDING'} batch={editTarget.unitIds ? { units: editTarget.unitIds.length } : undefined} optionPrefs={workspace.optionPrefs} defaultCoverage={editDefaults.coverage} defaultAssessment={editDefaults.assessment} onClose={() => setEditTarget(undefined)} onSubmit={saveObservation} />}
   </div>;
 }

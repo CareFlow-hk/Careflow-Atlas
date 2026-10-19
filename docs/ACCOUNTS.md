@@ -118,3 +118,15 @@ VERIFY_BROWSER=1 bash deploy/verify.sh
 ```
 
 `deploy/verify.sh` 仅创建独立临时 Compose 项目和测试账号卷，退出时清理这些测试资源。`deploy/verify-browser.mjs` 现在需要测试账号环境变量 `AUTH_TEST_EMAIL` 和 `AUTH_TEST_PASSWORD`；综合脚本自动提供临时合成账号。
+
+## 功能开关（2026-10-18）
+
+管理员在「设定 › 功能开关」打开或关闭全站功能，不需要 SSH 改 `.env`。状态存在账号库的 `features` 表，默认全部关闭；每次切换都写进操作记录（谁、何时、开或关）。
+
+| 开关 | 关闭时 |
+| --- | --- |
+| `photoIntake` 照片回录（Azure 辨识） | 顶栏不显示入口；`POST /api/photos/recognize` 在读取上传内容之前就返回 403，照片不会送出 |
+
+- 读取：`GET /api/features`（登入即可）。修改：`PUT /api/admin/features`，`{ key, enabled }`，仅管理员。
+- 机密仍放 `.env`：开关不能代替 Azure key。开了但没配 key，设定页会提示无法辨识。
+- 新增开关：在 `server/features.mjs` 的 `FEATURES` 加一项，界面文字加在 `AccountPanel` 的 `featureText`，服务器端在对应接口用 `features.enabled(key)` 拦住。只藏按钮不算关闭。

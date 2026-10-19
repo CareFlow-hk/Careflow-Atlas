@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 import { api, ApiError, SESSION_IDLE_MS, setCsrf, type Session } from './api';
 import { setWorkspaceAccount } from '../app/store';
 import { AccountPanel } from './AccountPanel';
-import { AccountContext } from './accountContext';
+import { AccountContext, type FeatureSwitches } from './accountContext';
 import { WorkspaceAdvancedSettings } from '../components/WorkspaceAdvancedSettings';
 import './accounts.css';
 
@@ -23,6 +23,8 @@ export function SessionGate({ children }: { children: ReactNode }) {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [settings, setSettings] = useState(false);
+  // Off until the server says otherwise: a feature never appears just because a request failed.
+  const [features, setFeatures] = useState<FeatureSwitches>({});
   // The account a password link is for: shown read-only and marked as the username, so a
   // password manager saves this account's password and does not overwrite another one.
   const [grantAccount, setGrantAccount] = useState<{ email: string; name: string }>();
@@ -44,12 +46,13 @@ export function SessionGate({ children }: { children: ReactNode }) {
   }, []);
   const drop = useCallback(() => {
     generation.current++;
-    setCsrf(); setSession(undefined); setSettings(false); setWorkspaceAccount();
+    setCsrf(); setSession(undefined); setSettings(false); setFeatures({}); setWorkspaceAccount();
   }, []);
   // The third argument turns on the account端 copy: only a session the server confirmed
   // reaches this point, so the workspace can be read from and written to that account.
   const accept = useCallback((next: Session) => {
     setCsrf(next.csrf); setWorkspaceAccount(next.user.id, next.user.name, true); setSession(next);
+    void api<{ features: FeatureSwitches }>('/features').then(value => setFeatures(value.features)).catch(() => setFeatures({}));
   }, []);
   const refresh = useCallback(async () => {
     const version = generation.current;
@@ -114,9 +117,9 @@ export function SessionGate({ children }: { children: ReactNode }) {
     <p className="account-note">目前工作台僅用於合成資料示範。示範資料存放在這個帳號，用同一帳號登入其他裝置會看到同一份；但仍不是正式的業務資料庫。</p>
   </section></main>;
   // The workspace header shows the account; this gate only supplies what it needs.
-  const controls = { name: session.user.name, role: session.user.role, busy, openSettings: () => setSettings(true), logout: () => void logout() };
+  const controls = { name: session.user.name, role: session.user.role, busy, features, openSettings: () => setSettings(true), logout: () => void logout() };
   return <AccountContext.Provider value={controls}><div className="authenticated-app">
     {error && <p role="alert" className="account-error">{error}</p>}
-    {settings ? <AccountPanel session={session} onClose={() => setSettings(false)} onSignedOut={signedOut} advanced={<WorkspaceAdvancedSettings />} /> : <div key={session.user.id} className="authenticated-workspace">{children}</div>}
+    {settings ? <AccountPanel session={session} features={features} onFeaturesChanged={setFeatures} onClose={() => setSettings(false)} onSignedOut={signedOut} advanced={<WorkspaceAdvancedSettings />} /> : <div key={session.user.id} className="authenticated-workspace">{children}</div>}
   </div></AccountContext.Provider>;
 }

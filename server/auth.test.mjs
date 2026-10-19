@@ -55,6 +55,7 @@ test('photo endpoints require a session and CSRF; their larger body limit does n
   assert.equal((await f.request('/api/photos/recognize', { method: 'POST' })).status, 401);
   const member = await f.account('MEMBER');
   assert.equal((await f.request('/api/photos/status', member)).status, 200);
+  f.auth.run("INSERT INTO features(key,enabled,updated_at) VALUES('photoIntake',1,0)");
   assert.equal((await f.request('/api/photos/recognize', { method: 'POST', cookie: member.cookie })).status, 403);
   assert.equal((await f.request('/api/photos/recognize', { method: 'POST', ...member, headers: { origin: 'https://evil.test' } })).status, 403);
   assert.equal(calls, 0);
@@ -269,4 +270,30 @@ test('the workspace belongs to the signed-in account, is versioned, and refuses 
   const production = { ...snapshot, isSynthetic: false };
   assert.equal((await f.request('/api/workspace', { method: 'PUT', ...a, body: { snapshot: production } })).status, 400);
   assert.deepEqual((await f.request('/api/workspace', a)).value, {});
+});
+
+test('feature switches start off, only an administrator turns them, and photo intake obeys', async t => {
+  let calls = 0;
+  const photos = { status: () => ({ configured: true, model: 'gpt-6-luna' }), recognize: async () => { calls++; return { rows: [], warnings: [], model: 'gpt-6-luna' }; } };
+  const f = await fixture(t, { photos });
+  const admin = await f.account(), member = await f.account('MEMBER');
+  assert.deepEqual((await f.request('/api/features', member)).value, { features: { photoIntake: false } });
+  assert.equal((await f.request('/api/photos/status', member)).value.enabled, false);
+  // Off: refused before the upload is read, so nothing reaches Azure.
+  assert.equal((await f.request('/api/photos/recognize', { method: 'POST', ...member, body: { image: 'x' } })).status, 403);
+  assert.equal(calls, 0);
+  // A member cannot turn it on; an unknown or malformed switch is refused.
+  assert.equal((await f.request('/api/admin/features', { method: 'PUT', ...member, body: { key: 'photoIntake', enabled: true } })).status, 403);
+  assert.equal((await f.request('/api/admin/features', { method: 'PUT', ...admin, body: { key: 'nope', enabled: true } })).status, 400);
+  assert.equal((await f.request('/api/admin/features', { method: 'PUT', ...admin, body: { key: 'photoIntake', enabled: 'yes' } })).status, 400);
+  const on = await f.request('/api/admin/features', { method: 'PUT', ...admin, body: { key: 'photoIntake', enabled: true } });
+  assert.deepEqual(on.value, { features: { photoIntake: true } });
+  assert.equal((await f.request('/api/photos/recognize', { method: 'POST', ...member, body: { image: 'x' } })).status, 200);
+  assert.equal(calls, 1);
+  // Setting the same value again writes nothing new; each real change is audited with who did it.
+  await f.request('/api/admin/features', { method: 'PUT', ...admin, body: { key: 'photoIntake', enabled: true } });
+  await f.request('/api/admin/features', { method: 'PUT', ...admin, body: { key: 'photoIntake', enabled: false } });
+  const events = f.auth.all("SELECT actor, action, target FROM audit WHERE action LIKE 'feature_%' ORDER BY id").map(row => ({ ...row }));
+  assert.deepEqual(events, [{ actor: admin.id, action: 'feature_enabled', target: 'photoIntake' }, { actor: admin.id, action: 'feature_disabled', target: 'photoIntake' }]);
+  assert.equal((await f.request('/api/photos/recognize', { method: 'POST', ...member, body: { image: 'x' } })).status, 403);
 });
