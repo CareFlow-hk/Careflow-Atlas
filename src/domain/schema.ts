@@ -28,6 +28,10 @@ export const observationSchema = z.object({
   followUp: z.object({ action: id, dueDate: date.optional(), status: z.enum(FOLLOW_UP_STATUSES), category: z.enum(SUPPORT_CATEGORIES).optional(), assignee: id.optional(), timingNote: text.optional() }).optional(), resolvesObservationId: id.optional(),
   paperRef: id.optional(), paperLine: id.optional(), importSource: z.object({ file: id, sheet: id, row: z.number().int().positive() }).optional(),
   correctsObservationId: id.optional(), correctionReason: text.optional(),
+  // Who saved this row. Absent on rows recorded before accounts existed; never invented.
+  createdBy: z.object({ accountId: id, name: id }).optional(),
+  // A withdrawal appends this marker and keeps the row; it is not a removal.
+  deleted: z.object({ at: instantSchema, by: z.object({ accountId: id, name: id }) }).optional(),
   photoSource: z.object({ hash: id, file: id, line: text, model: id, fallback: photoFallbackSchema.optional(), reviewedBy: z.object({ accountId: id, name: id }), reviewedAt: instantSchema, sample: z.boolean() }).optional(),
 }).refine(v => v.followUp?.status !== 'DONE' || !!v.resolvesObservationId, 'Completion must identify the original follow-up');
 
@@ -72,7 +76,8 @@ export const snapshotSchema = z.object({
     if (o.resolvesObservationId) {
       const origin = observations.get(o.resolvesObservationId);
       if (!origin || origin.id === o.id || origin.followUp?.status !== 'OPEN' || origin.buildingId !== o.buildingId || origin.floorId !== o.floorId || origin.unitId !== o.unitId || Date.parse(origin.recordedAt) > Date.parse(o.recordedAt)) bad(['observations', i, 'resolvesObservationId'], 'Resolution must follow an open task at the same location');
-      if (!superseded.has(o.id)) {
+      // A withdrawn resolution closes nothing: the task it named is open again.
+      if (!o.deleted && !superseded.has(o.id)) {
         const target = roots.get(o.resolvesObservationId) ?? o.resolvesObservationId;
         if (resolved.has(target)) bad(['observations', i, 'resolvesObservationId'], 'Follow-up already resolved');
         resolved.add(target);

@@ -2,10 +2,9 @@ import { validateSnapshot } from '../domain/schema';
 import type { Building, Observation, OutreachSnapshot } from '../domain/types';
 import type { WorkbookImportIssue } from './workbookImport';
 import { issue, schemaIssues } from './issueText';
+import { sameValue as same } from './snapshotValue';
 export interface MergeSummary { added: number; updated: number; duplicates: number; retained: number; }
 const collections = ['buildings', 'floors', 'units', 'people', 'households', 'householdMemberships', 'householdResidences', 'memberships', 'visits', 'observations', 'followUpEvents'] as const;
-const normalize = (v: unknown): unknown => Array.isArray(v) ? v.map(normalize) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).filter(([, value]) => value !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([k, value]) => [k, normalize(value)])) : v;
-const same = (a: unknown, b: unknown) => JSON.stringify(normalize(a)) === JSON.stringify(normalize(b));
 export function mergeWorkflow(current: OutreachSnapshot | undefined, incoming: OutreachSnapshot, baseline?: OutreachSnapshot) {
   const summary: MergeSummary = { added: 0, updated: 0, duplicates: 0, retained: 0 };
   const issues: WorkbookImportIssue[] = [];

@@ -5,7 +5,7 @@ import { DeleteConfirm } from "./DeleteConfirm";
 import { StructureBar } from "./StructureBar";
 import { RoomList } from "./RoomSplitPanel";
 import type { StructureChange } from "../domain/structure";
-import { buildingState, clueOf, currentAssessment, followUpEventsFor, getCoverageSummary, getOpenFollowUps, isTagged, latestForUnit, subjectUnitIds, unitState, type ClueLevel, type NodeTag, type OutreachSnapshot, type Unit } from "../domain/types";
+import { buildingState, clueOf, currentAssessment, followUpEventsFor, getCoverageSummary, getOpenFollowUps, isTagged, latestForUnit, subjectUnitIds, unitState, type ClueLevel, type NodeTag, type Observation, type OutreachSnapshot, type Unit } from "../domain/types";
 import { assessmentLabels, clueLabels, clueMarks, coverageLabels, nodeTagLabel, stateColors, stateLabels, supportCategoryLabels, uncategorisedFollowUpLabel } from "../domain/presentation";
 import { ObservationHistory } from "./ObservationHistory";
 import { UnitPickerBar } from "./UnitPickerBar";
@@ -17,7 +17,16 @@ export interface BuildingDetailProps { snapshot: OutreachSnapshot; selectedBuild
   /** Experimental structure editing. Returns a refusal in staff wording, if any. Without it the editor is not offered. */
   onStructureChange?: (change: StructureChange) => string | undefined;
   /** The current workbook, offered to the browser when staff delete records. Answers whether it was taken. */
-  onBackup?: () => Promise<boolean>; }
+  onBackup?: () => Promise<boolean>;
+  /** Withdraw one record. A member may only withdraw their own; the predicate decides. */
+  onWithdrawObservation?: (observationId: string) => void;
+  canWithdraw?: (observation: Observation) => boolean;
+  /**
+   * Whether this account may delete floors, units and 劏房 rooms. Only an administrator may;
+   * a member gets no delete control here, and the structure editor says why instead of
+   * offering a button the server would refuse (2026-10-19).
+   */
+  canDeleteStructure?: boolean; }
 
 const floorLabelOf = (snapshot: OutreachSnapshot, unit: Unit) => snapshot.floors.find(floor => floor.id === unit.floorId)?.label;
 const formatDay = (value: string) => new Intl.DateTimeFormat("zh-HK", { month: "short", day: "numeric" }).format(new Date(value.length === 10 ? `${value}T12:00:00` : value));
@@ -28,7 +37,7 @@ const formatDay = (value: string) => new Intl.DateTimeFormat("zh-HK", { month: "
  * unit's ledger below it.
  */
 export function BuildingDetail(props: BuildingDetailProps) {
-  const { snapshot, selectedBuildingId, selectedFloorId, selectedUnitId, onBack, onSelectFloor, onSelectUnit, onToggleTag, onFollowUpAction, onStartObservation, onStructureChange, onBackup } = props;
+  const { snapshot, selectedBuildingId, selectedFloorId, selectedUnitId, onBack, onSelectFloor, onSelectUnit, onToggleTag, onFollowUpAction, onStartObservation, onStructureChange, onBackup, onWithdrawObservation, canWithdraw, canDeleteStructure = true } = props;
   // Structure editing: a click on a cell sets that unit's 劏房 count instead of opening it.
   const [editing, setEditing] = useState(false);
   /** The unit whose 劏房 panel is open. A room opens its parent, since rooms belong to it. */
@@ -261,7 +270,7 @@ export function BuildingDetail(props: BuildingDetailProps) {
                    * with it. Deleting the floor itself is a different act with a different reach,
                    * so it gets its own mark at the end rather than sharing the minus.
                    */
-                  ? <span key={`${floor.id}-edit`} className="cf-matrix__edit"><button type="button" aria-label={`在${floor.label}加一個單位`} title="加一個單位" onClick={() => runChange({ kind: "addUnit", floorId: floor.id })}><Plus size={11} /></button><button type="button" disabled={!lastUnit} aria-label={lastUnit ? `移除${lastUnit.label}` : `${floor.label}沒有單位可移除`} title={lastUnit ? `移除最後一個單位（${lastUnit.label}）` : "這一層沒有單位"} onClick={() => lastUnit && runChange({ kind: "removeUnits", unitIds: [lastUnit.id] })}><Minus size={11} /></button><button type="button" className="is-danger" aria-label={`刪除${floor.label}`} title="刪除整層（有記錄會先問）" onClick={() => runChange({ kind: "removeFloor", floorId: floor.id })}><X size={11} /></button></span>
+                  ? <span key={`${floor.id}-edit`} className="cf-matrix__edit"><button type="button" aria-label={`在${floor.label}加一個單位`} title="加一個單位" onClick={() => runChange({ kind: "addUnit", floorId: floor.id })}><Plus size={11} /></button>{canDeleteStructure && <><button type="button" disabled={!lastUnit} aria-label={lastUnit ? `移除${lastUnit.label}` : `${floor.label}沒有單位可移除`} title={lastUnit ? `移除最後一個單位（${lastUnit.label}）` : "這一層沒有單位"} onClick={() => lastUnit && runChange({ kind: "removeUnits", unitIds: [lastUnit.id] })}><Minus size={11} /></button><button type="button" className="is-danger" aria-label={`刪除${floor.label}`} title="刪除整層（有記錄會先問）" onClick={() => runChange({ kind: "removeFloor", floorId: floor.id })}><X size={11} /></button></>}</span>
                   : <span key={`${floor.id}-sum`} className="cf-matrix__sum">{scoped.completed}/{list.length}</span>,
               ];
             })}
@@ -271,7 +280,7 @@ export function BuildingDetail(props: BuildingDetailProps) {
               appears once the thing it explains has already been done. Hidden while the
               structure editor is open: there a click sets a 劏房 count instead of picking. */}
           {hasMatrix && !editing && <p className="cf-plate__hint">按住 Ctrl／Command 點色塊，可以一次記錄多個單位。</p>}
-          {editing && onStructureChange && <StructureBar snapshot={snapshot} buildingId={building.id} splitUnitId={splitTarget} onCloseSplit={() => setSplitTarget(undefined)} onChange={runChange} onDeleteUnit={deleteUnit} />}
+          {editing && onStructureChange && <StructureBar snapshot={snapshot} buildingId={building.id} splitUnitId={splitTarget} onCloseSplit={() => setSplitTarget(undefined)} onChange={runChange} onDeleteUnit={canDeleteStructure ? deleteUnit : undefined} canDelete={canDeleteStructure} />}
           {/* Only ever shown for a delete that would take records with it, so the count is on
               screen at the moment staff decide — not after the fact. It sits outside the
               structure editor because a picked set can be deleted without opening it. */}
@@ -287,16 +296,16 @@ export function BuildingDetail(props: BuildingDetailProps) {
             {(selectedUnit.parentUnitId || rooms.length > 0) && <><dt>劏房</dt><dd>{selectedUnit.parentUnitId ? <>劏房間格，屬 <button type="button" className="cf-link" onClick={() => onSelectUnit(selectedUnit.parentUnitId!)}>{buildingUnits.find(unit => unit.id === selectedUnit.parentUnitId)?.label ?? "原單位"}</button>（分拆前的記錄在那裡）</> : <><p className="cf-room-ledger__count">已分拆為 {rooms.length} 間，點一間看它自己的記錄：</p><RoomList snapshot={snapshot} rooms={rooms} labelOf={roomLabel} onSelect={onSelectUnit} onRecord={room => onStartObservation({ buildingId: building.id, floorId: room.floorId, unitId: room.id, label: `${building.name} · ${room.label}` })} /></>}</dd></>}
             {unitTasks > 0 && <><dt>待跟進</dt><dd>{unitTasks} 項</dd></>}
           </dl>
-          <ObservationHistory snapshot={snapshot} subjectId={selectedUnit.id} onFollowUpAction={onFollowUpAction} emptyLabel={selectedUnit.parentUnitId ? "這間房還未有自己的記錄；上面的「最近」是分拆前原單位的記錄。" : undefined} />
+          <ObservationHistory snapshot={snapshot} subjectId={selectedUnit.id} onFollowUpAction={onFollowUpAction} onWithdraw={onWithdrawObservation} canWithdraw={canWithdraw} emptyLabel={selectedUnit.parentUnitId ? "這間房還未有自己的記錄；上面的「最近」是分拆前原單位的記錄。" : undefined} />
         </section> : <section className="cf-plate__sec cf-selected-unit">
           <h3><span className="cf-plate__unit">大廈層面</span><span className="cf-caps">Ledger</span></h3>
-          <ObservationHistory snapshot={snapshot} subjectId={building.id} subjectType="BUILDING" onFollowUpAction={onFollowUpAction} emptyLabel="大廈層面尚未有記錄；在上方選擇單位查看。" />
+          <ObservationHistory snapshot={snapshot} subjectId={building.id} subjectType="BUILDING" onFollowUpAction={onFollowUpAction} onWithdraw={onWithdrawObservation} canWithdraw={canWithdraw} emptyLabel="大廈層面尚未有記錄；在上方選擇單位查看。" />
         </section>}
       </div>
       {chosen.length > 1 ? (
         <UnitPickerBar count={chosen.length} recordCount={pickedImpact?.records ?? 0}
           onClear={() => { setChosen([]); onSelectUnit(undefined); }}
-          onDelete={onStructureChange ? deletePicked : undefined}
+          onDelete={onStructureChange && canDeleteStructure ? deletePicked : undefined}
           onRecord={() => onStartObservation({ buildingId: building.id, label: `${building.name} · 已選 ${chosen.length} 個單位`, unitIds: [...chosen] })} />
       ) : (
         <footer className="cf-record-action"><span>{building.name} · {selectedUnit?.label ?? "大廈層面"}</span><button className="cf-button cf-button--primary cf-button--full" onClick={() => onStartObservation(selectedUnit ? { buildingId: building.id, floorId: selectedUnit.floorId, unitId: selectedUnit.id, label: `${building.name} · ${selectedUnit.label}` } : { buildingId: building.id, label: `${building.name} · 大廈到訪` })}><ClipboardPlus size={18} />{selectedUnit ? "記錄今次結果" : "記錄大廈到訪"}</button></footer>

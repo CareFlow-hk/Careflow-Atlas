@@ -116,6 +116,16 @@ export interface Observation extends SyntheticRecord {
   correctsObservationId?: string;
   /** Why the correction was made. For traceability only; never part of coverage comparison. */
   correctionReason?: string;
+  /**
+   * The signed-in account that pressed save. The operator, not the paper worker; rows
+   * recorded before accounts existed keep this absent rather than gaining a fake name.
+   */
+  createdBy?: Operator;
+  /**
+   * A withdrawal is appended, never a rewrite or a removal: the row stays in history,
+   * leaves the coverage/summary candidates, and keeps who withdrew it and when.
+   */
+  deleted?: { at: string; by: Operator };
 }
 /**
  * What a person did to a task in the app, without a visit: marked it done, cancelled
@@ -160,20 +170,53 @@ export interface SaveObservationInput {
   resolvesObservationId?: string;
   correctsObservationId?: string;
   correctionReason?: string;
+  /** The account pressing save. Absent rows keep no name rather than borrowing the login. */
+  createdBy?: Operator;
 }
 
 /** Ids of events that at least one correction points at. They stay in history, out of coverage. */
 export function supersededObservationIds(observations: Observation[]): Set<string> {
-  const known = new Set(observations.map((item) => item.id));
+  const byId = new Map(observations.map(item => [item.id, item]));
   const superseded = new Set<string>();
-  for (const item of observations) if (item.correctsObservationId && known.has(item.correctsObservationId)) superseded.add(item.correctsObservationId);
+  for (const item of observations) {
+    if (item.deleted || !item.correctsObservationId || !byId.has(item.correctsObservationId)) continue;
+    /*
+     * Walk the whole chain, through links that were themselves withdrawn: a live
+     * correction still replaces the version it names, and everything that version
+     * replaced. Stopping at a withdrawn link would put two versions back in play.
+     */
+    let cursor: string | undefined = item.correctsObservationId;
+    const seen = new Set<string>([item.id]);
+    while (cursor && !seen.has(cursor)) {
+      seen.add(cursor);
+      superseded.add(cursor);
+      cursor = byId.get(cursor)?.correctsObservationId;
+    }
+  }
   return superseded;
 }
 
 /** The candidate set for coverage, summaries and follow-ups: the effective version of each event. */
 export function effectiveObservations(snapshot: OutreachSnapshot): Observation[] {
   const superseded = supersededObservationIds(snapshot.observations);
-  return snapshot.observations.filter((item) => !superseded.has(item.id));
+  return snapshot.observations.filter((item) => !item.deleted && !superseded.has(item.id));
+}
+
+/** Withdrawing appends a marker; repeating it keeps the first one, so re-syncing is stable. */
+export function withdrawObservation<T extends Observation>(observation: T, by: Operator, at: string): T {
+  return observation.deleted ? observation : { ...observation, deleted: { at, by } };
+}
+
+/**
+ * A member may withdraw what they themselves saved; an administrator may withdraw anything.
+ * Rows with no author (recorded before accounts existed) belong to nobody, so only an
+ * administrator can withdraw them. It mirrors what the server accepts, so the button and
+ * the API never disagree about who may remove a record.
+ */
+export function canWithdrawObservation(observation: Observation, operator: Operator, canWithdrawAny: boolean): boolean {
+  if (observation.deleted) return false;
+  if (canWithdrawAny) return true;
+  return observation.createdBy?.accountId === operator.accountId;
 }
 
 export interface CorrectionConflict { observationId: string; correctionIds: string[]; }
@@ -181,7 +224,7 @@ export interface CorrectionConflict { observationId: string; correctionIds: stri
 export function getCorrectionConflicts(snapshot: OutreachSnapshot): CorrectionConflict[] {
   const branches = new Map<string, string[]>();
   for (const item of snapshot.observations) {
-    if (!item.correctsObservationId) continue;
+    if (!item.correctsObservationId || item.deleted) continue;
     branches.set(item.correctsObservationId, [...branches.get(item.correctsObservationId) ?? [], item.id]);
   }
   // A second descendant does not resolve a fork: both branches still have a live tail.

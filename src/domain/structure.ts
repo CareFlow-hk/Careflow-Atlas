@@ -300,6 +300,29 @@ export function structureImpact(s: OutreachSnapshot, change: StructureChange): {
   return plan && plan.records ? { label: plan.places, records: plan.records, confirmation: confirmText(plan) } : undefined;
 }
 
+/**
+ * Whether a change takes a place away rather than adding one.
+ *
+ * Deleting a floor, deleting units and merging 劏房 rooms back all remove rows; adding
+ * floors, adding a unit and splitting into more rooms do not. This is the rule a member's
+ * permission is decided by — not whether records happen to sit there — so a member cannot
+ * delete even an empty unit they added themselves (2026-10-19 review). Written here beside
+ * the kinds it reads, so the store and the server wording cannot drift apart.
+ */
+export function removesStructure(s: OutreachSnapshot, change: StructureChange): boolean {
+  switch (change.kind) {
+    case 'removeFloor': return s.floors.some(f => f.id === change.floorId);
+    case 'removeUnits': return change.unitIds.some(id => s.units.some(u => u.id === id || u.parentUnitId === id));
+    case 'split': {
+      // 1 puts a split unit back together; any count below what it has now drops rooms
+      // from the end (see setRoomCount). The same count or more only adds rooms.
+      const existing = s.units.filter(u => u.parentUnitId === change.unitId).length;
+      return existing > 0 && change.rooms < existing;
+    }
+    default: return false;
+  }
+}
+
 /* ------------------------------------------------------------------------- *
  * The copy a delete waits on.
  *

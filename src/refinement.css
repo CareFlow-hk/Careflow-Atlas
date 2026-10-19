@@ -173,6 +173,22 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .cf-event.is-superseded .cf-event__rail span { background: #c3cfc8; box-shadow: 0 0 0 1px #d8e2dc; }
 .cf-superseded-note { display: flex; align-items: flex-start; gap: 6px; font-size: 13px; line-height: 1.7; color: #6f7f76; }
 .cf-superseded-note svg { margin-top: 4px; flex-shrink: 0; }
+/* A withdrawn record is history too: kept in the timeline, dimmed like a corrected one. */
+.cf-event.is-withdrawn .cf-event__content { opacity: .6; }
+.cf-event.is-withdrawn .cf-event__rail span { background: #d0d7d2; box-shadow: 0 0 0 1px #e0e6e2; }
+.cf-withdraw { display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 12px; }
+.cf-withdraw-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; padding: 10px 12px; border: 1px solid #e3cfae; border-radius: 7px; background: #fff8ec; font-size: 12px; color: #7a5a20; }
+.cf-withdraw-ask span { flex: 1 1 220px; line-height: 1.6; }
+.cf-withdraw__confirm { background: #8c3a2b; color: #fff; border: 1px solid #8c3a2b; }
+.cf-withdraw__confirm:hover { background: #7a3023; }
+/* A task's trail of 標記完成／撤銷／取消跟進 appends with every press, so the lines start
+   folded behind one button rather than pushing the record underneath down the panel. */
+.cf-followup__trail-toggle { display: flex; min-height: 34px; align-items: center; gap: 6px; padding: 0 9px; border: 1px solid #e3d6bb; border-radius: 6px; background: #fffdf8; color: #6d5220; font: inherit; font-size: 12px; font-weight: 600; }
+.cf-followup__trail-toggle:hover { background: #fff7e8; }
+.cf-followup__trail-toggle svg:last-child { margin-left: auto; }
+.cf-followup.is-resolved .cf-followup__trail-toggle { border-color: #dfe9e2; background: #f8fbf9; color: #4d6b5a; }
+.cf-followup__trail-count { font-weight: 500; opacity: .8; }
+.cf-followup-trail[hidden] { display: none; }
 .cf-empty p { font-size: 14px; }
 
 /* Native dialogs retain focus handling; discrete transitions cover open/close. */

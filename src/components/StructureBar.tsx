@@ -14,6 +14,11 @@ interface Props {
   onChange: (change: StructureChange) => string | undefined;
   /** Deletes the unit open under the split form, with the same backup gate as any removal. */
   onDeleteUnit?: (unitId: string) => void;
+  /**
+   * Whether this account may delete structure. Members may add and split but not remove,
+   * so the hint says so in place of operations they will not be offered (2026-10-19).
+   */
+  canDelete?: boolean;
 }
 
 /**
@@ -21,7 +26,7 @@ interface Props {
  * from the matrix above, where they already are — one place per thing, and no selection to
  * keep in step with what the grid shows.
  */
-export function StructureBar({ snapshot, buildingId, splitUnitId, onCloseSplit, onChange, onDeleteUnit }: Props) {
+export function StructureBar({ snapshot, buildingId, splitUnitId, onCloseSplit, onChange, onDeleteUnit, canDelete = true }: Props) {
   const floors = snapshot.floors.filter(f => f.buildingId === buildingId);
   const top = floors.reduce<string | undefined>((a, f) => (!a || f.level > (snapshot.floors.find(x => x.id === a)?.level ?? 0) ? f.id : a), undefined);
   const topUnits = top ? snapshot.units.filter(u => u.floorId === top && !u.parentUnitId).length : 0;
@@ -42,9 +47,11 @@ export function StructureBar({ snapshot, buildingId, splitUnitId, onCloseSplit, 
       {/* Keyed on the unit, so opening another one starts a clean form rather than carrying
           over what was typed or refused for the last. The panel speaks for its own refusals,
           so this row's message is cleared rather than said twice. */}
-      {splitUnitId && <RoomSplitPanel key={splitUnitId} snapshot={snapshot} unitId={splitUnitId} onStructureChange={change => { setProblem(undefined); return onChange(change); }} onClose={onCloseSplit} />}
-      {splitUnitId && onDeleteUnit && <div className="cf-structure__delete"><button type="button" onClick={() => onDeleteUnit(splitUnitId)}><Trash2 size={15} />刪除本單位</button></div>}
-      <p className="cf-structure__hint">點樓層格子設定劏房間數或刪除本單位；每層右邊的 ＋／－ 加減一個單位，✕ 刪除整層。有記錄的會先問一次。</p>
+      {splitUnitId && <RoomSplitPanel key={splitUnitId} snapshot={snapshot} unitId={splitUnitId} onStructureChange={change => { setProblem(undefined); return onChange(change); }} onClose={onCloseSplit} canDelete={canDelete} />}
+      {splitUnitId && onDeleteUnit && canDelete && <div className="cf-structure__delete"><button type="button" onClick={() => onDeleteUnit(splitUnitId)}><Trash2 size={15} />刪除本單位</button></div>}
+      <p className="cf-structure__hint">{canDelete
+        ? "點樓層格子設定劏房間數或刪除本單位；每層右邊的 ＋／－ 加減一個單位，✕ 刪除整層。有記錄的會先問一次。"
+        : "員工可以新增樓層、加單位和分拆劏房，但不能刪除樓層、單位或劏房（即使是自己新增的）。如需刪除，請聯絡管理員。"}</p>
       {problem && <p className="cf-structure__problem" role="alert">{problem}</p>}
     </div>
   );

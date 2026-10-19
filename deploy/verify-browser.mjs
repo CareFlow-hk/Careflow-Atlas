@@ -173,6 +173,18 @@ try {
     assert.ok(await fallback.evaluate(k => JSON.parse(globalThis.localStorage.getItem(k)).buildings.length > 0, key));
     await offline.close();
   });
+  /*
+   * A fresh deployment keeps the workspace in the browser: cross-device sync is off until an
+   * administrator turns it on and sets the institution passphrase (docs/ENCRYPTION.md), and
+   * the server refuses to serve or store a copy before then. The shared, encrypted path is
+   * covered by the unit tests and a manual walkthrough, since it needs that passphrase.
+   */
+  await check('the workspace stays in this browser while cross-device sync is off', async () => {
+    const features = await (await context.request.get(`${base}/api/features`)).json();
+    assert.equal(features.features.workspaceSync, false);
+    assert.equal((await context.request.get(`${base}/api/workspace`)).status(), 403);
+    assert.ok((await snapshot()).buildings.length > 0);
+  });
 } finally { await browser.close(); }
 const failed = results.filter(([status]) => status === 'FAIL').length;
 console.log(`${results.filter(([status]) => status === 'PASS').length} passed, ${failed} failed, ${results.filter(([status]) => status === 'WARN').length} unverified`);

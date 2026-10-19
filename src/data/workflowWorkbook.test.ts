@@ -35,6 +35,21 @@ describe('paper and Excel workflow', () => {
     expect(result.issues).toEqual([]);
     expect(result.snapshot).toEqual(snapshot);
   });
+  it('leaves a withdrawn record off the paper sheet without pretending it never existed', () => {
+    const snapshot = structuredClone(workflowDemo);
+    const author = { accountId: 'account-1', name: '同事' };
+    const target = snapshot.observations[0];
+    snapshot.observations[0] = { ...target, createdBy: author, deleted: { at: '2026-10-19T09:00:00.000Z', by: author } };
+    const rows = workflowSheetsOf(snapshot).find(sheet => sheet.name === '紙本回錄')!.rows;
+    // The sheet is what staff read and fill in; a withdrawn row must not be copied onto it.
+    expect(rows.length).toBe(snapshot.observations.length - 1);
+    expect(rows.some(row => row[0] === target.id)).toBe(false);
+    // The archive still holds it, so re-importing this workbook keeps the row and its marker
+    // rather than restoring it as a live record or dropping the trail.
+    const result = parse(workbook(snapshot));
+    expect(result.issues).toEqual([]);
+    expect(result.snapshot?.observations.find(item => item.id === target.id)).toMatchObject({ createdBy: author, deleted: { at: '2026-10-19T09:00:00.000Z', by: author } });
+  });
   it('imports the styled downloadable mock with no issues', () => {
     const bytes = readFileSync('public/demo/careflow-paper-excel-mock.xlsx');
     const result = parseWorkflowWorkbook(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), 'mock.xlsx');

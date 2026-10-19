@@ -1,9 +1,11 @@
 import { createServer } from 'node:http';
 import { createPhotoService, PHOTO_BODY_LIMIT } from './photos.mjs';
 import { createFeatureStore } from './features.mjs';
+import { createWorkspaceStore, WORKSPACE_BODY_LIMIT } from './workspace.mjs';
+import { createWorkspaceKeyStore } from './workspaceKey.mjs';
 import { HttpError, requireValue, publicUser, SESSION_IDLE_MS } from './auth.mjs';
 
-export function createAuthServer(auth, { origin, secure = true, trustProxy = false, photos = createPhotoService(), features = createFeatureStore(auth) }) {
+export function createAuthServer(auth, { origin, secure = true, trustProxy = false, photos = createPhotoService(), features = createFeatureStore(auth), workspace = createWorkspaceStore(auth), keys = createWorkspaceKeyStore(auth) }) {
   requireValue(new URL(origin).origin === origin, 500, 'APP_ORIGIN 必須是完整 origin，不帶路徑或末尾斜線。');
   requireValue(!secure || origin.startsWith('https://'), 500, '安全 Cookie 需要 HTTPS APP_ORIGIN。');
   const cookieName = secure ? '__Host-atlas_session' : 'atlas_session';
@@ -26,18 +28,25 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
       }
       requireValue(!req.headers['sec-fetch-site'] || ['same-origin', 'none'].includes(req.headers['sec-fetch-site']), 403, '不允許跨站請求。');
       const photoRequest = req.method === 'POST' && path === '/api/photos/recognize';
+      const workspaceRequest = req.method === 'PUT' && path === '/api/workspace';
       // Authorize before allocating the larger upload buffer.
-      if (photoRequest) {
+      if (photoRequest || workspaceRequest) {
         const token = req.headers.cookie?.split(';').map(v => v.trim()).find(v => v.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1);
         const session = auth.session(token);
         requireValue(session, 401, '請登入後繼續。');
         requireValue(req.headers['x-csrf-token'] === session.csrf, 403, '請求校驗失敗，請重新整理頁面。');
         const user = auth.assertSession(session);
-        // Off unless an administrator turned it on: no photo leaves for Azure otherwise.
-        requireValue(features.enabled('photoIntake'), 403, '照片回錄未開啟，請聯絡管理員。');
-        auth.limit(`photo:${user.id}`, 40);
+        if (photoRequest) {
+          // Off unless an administrator turned it on: no photo leaves for Azure otherwise.
+          requireValue(features.enabled('photoIntake'), 403, '照片回錄未開啟，請聯絡管理員。');
+          auth.limit(`photo:${user.id}`, 40);
+        }
+        if (workspaceRequest) {
+          requireValue(features.enabled('workspaceSync'), 403, '跨裝置同步未開啟，資料只存在這部裝置。');
+          auth.limit(`workspace:${user.id}`, 1200);
+        }
       }
-      const bodyLimit = photoRequest ? PHOTO_BODY_LIMIT : 8192;
+      const bodyLimit = workspaceRequest ? WORKSPACE_BODY_LIMIT : photoRequest ? PHOTO_BODY_LIMIT : 8192;
       let body = {};
       if (mutation) {
         requireValue(!req.headers['content-length'] || Number(req.headers['content-length']) <= bodyLimit, 413, '請求過大。');
@@ -72,6 +81,43 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
         finally { res.off('close', abort); }
       }
       if (req.method === 'GET' && path === '/api/session') return send(res, 200, view(row));
+      /*
+       * The institution's business workspace. Scoped to the session's organisation, never
+       * to an id in the request, so members of another institution cannot read or write it.
+       * Everyone in this organisation sees the same snapshot; a member's changes are
+       * checked against what is stored (server/workspaceAccess.mjs).
+       */
+      /*
+       * The institution's key, locked with its passphrase (server/workspaceKey.mjs). Every
+       * member reads it to unlock the workspace in their own browser; only an administrator
+       * sets it, and the server never sees the passphrase or the unlocked key. It can be set
+       * before sync is switched on, so the first copy stored is already encrypted.
+       */
+      if (path === '/api/workspace/key') {
+        if (req.method === 'GET') return send(res, 200, { key: keys.get(user.org_id) ?? null });
+        if (req.method === 'PUT') {
+          auth.limit(`admin:${user.id}`, 30);
+          return send(res, 200, { key: keys.set(user, body) });
+        }
+      }
+      if (path === '/api/workspace' || path === '/api/workspace/version') {
+        // Off unless an administrator turned it on: nothing of the workspace leaves the
+        // browser otherwise, and the server neither serves nor stores a copy.
+        requireValue(features.enabled('workspaceSync'), 403, '跨裝置同步未開啟，資料只存在這部裝置。');
+      }
+      // A few bytes, asked for every half minute: the whole copy is only fetched when it moved.
+      if (req.method === 'GET' && path === '/api/workspace/version') return send(res, 200, { version: workspace.get(user.org_id)?.version ?? null });
+      if (path === '/api/workspace') {
+        if (req.method === 'GET') return send(res, 200, workspace.get(user.org_id) ?? {});
+        // Until there is a key, nothing could be encrypted, so nothing is stored.
+        if (req.method === 'PUT') requireValue(keys.get(user.org_id), 409, '機構尚未設定加密密語。請管理員在「設定」裡設定後再同步。');
+        if (req.method === 'PUT') return send(res, 200, workspace.put(user, body));
+        if (req.method === 'DELETE') {
+          // Emptying the workspace empties the whole institution's copy, not one account's.
+          requireValue(user.role === 'ADMIN', 403, '清空機構工作區需要管理員權限。');
+          return send(res, 200, workspace.remove(user));
+        }
+      }
       if (req.method === 'POST' && path === '/api/logout') {
         auth.transaction(() => { auth.run('DELETE FROM sessions WHERE hash=?', row.hash); auth.audit(user.id, 'logout'); });
         res.setHeader('Set-Cookie', cookie('', 0)); return send(res, 200, { ok: true });
@@ -87,12 +133,14 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
       }
       if (path.startsWith('/api/admin/')) {
         auth.assertSession(row, true);
-        if (req.method === 'GET' && path === '/api/admin/users') return send(res, 200, { users: auth.all('SELECT * FROM users ORDER BY created_at,id').map(publicUser) });
+        if (req.method === 'GET' && path === '/api/admin/users') return send(res, 200, { users: auth.all('SELECT * FROM users WHERE org_id=? ORDER BY created_at,id', user.org_id).map(publicUser) });
         if (req.method === 'PUT' && path === '/api/admin/features') {
           auth.limit(`admin:${user.id}`, 30);
           return send(res, 200, { features: features.set(body.key, body.enabled, user.id) });
         }
-        if (req.method === 'GET' && path === '/api/admin/audit') return send(res, 200, { events: auth.all('SELECT a.*,u.email AS actor_email,t.email AS target_email FROM audit a LEFT JOIN users u ON u.id=a.actor LEFT JOIN users t ON t.id=a.target ORDER BY a.id DESC LIMIT 100') });
+        if (req.method === 'GET' && path === '/api/admin/audit') return send(res, 200, { events: auth.all(`SELECT a.*,u.email AS actor_email,t.email AS target_email FROM audit a
+          LEFT JOIN users u ON u.id=a.actor LEFT JOIN users t ON t.id=a.target
+          WHERE u.org_id=? OR t.org_id=? ORDER BY a.id DESC LIMIT 100`, user.org_id, user.org_id) });
         if (req.method === 'POST' && path === '/api/admin/users') {
           auth.limit(`admin:${user.id}`, 30);
           const result = auth.createUser(body, user.id); return send(res, 201, { user: result.user, link: link(result.token) });
@@ -101,7 +149,8 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
         if (match && req.method === 'PATCH' && !match[2]) return send(res, 200, { user: auth.updateUser(row, match[1], body) });
         if (match && req.method === 'POST' && match[2]) {
           auth.limit(`admin:${user.id}`, 30);
-          const target = auth.userById(match[1]); requireValue(target && !target.disabled, 400, '帳號不存在或已停用。');
+          const target = auth.userById(match[1]);
+          requireValue(target && !target.disabled && target.org_id === user.org_id, 400, '帳號不存在或已停用。');
           const token = auth.transaction(() => auth.grant(target.id, user.id));
           return send(res, 200, { link: link(token) });
         }

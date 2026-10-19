@@ -11,6 +11,8 @@ import { requireValue } from './auth.mjs';
  */
 export const FEATURES = Object.freeze({
   photoIntake: { label: '照片回錄（Azure 辨識）' },
+  // Also needs the institution's passphrase set (server/workspaceKey.mjs) before it stores anything.
+  workspaceSync: { label: '跨裝置同步（加密後存到伺服器）' },
 });
 
 export function createFeatureStore(auth) {

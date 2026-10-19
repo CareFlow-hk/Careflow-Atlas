@@ -68,6 +68,37 @@ describe('a status reads the same wherever it appears', () => {
   });
 });
 
+/*
+ * A task's 標記完成／撤銷／取消跟進 lines append with every press and are rarely what someone
+ * came to the record for, so they start folded behind one button (2026-10-19 review). The
+ * lines stay in the document with `hidden`, ready as soon as it is opened.
+ */
+describe('a task trail is folded behind one button', () => {
+  const followUp = { action: '再訪', status: 'OPEN' as const };
+  const events = [
+    { ...flags, id: 'e1', observationId: 'o1', action: 'DONE' as const, at: '2026-01-05T03:00:00.000Z', operator: { accountId: 'a1', name: '同事甲' } },
+    { ...flags, id: 'e2', observationId: 'o1', action: 'REOPENED' as const, at: '2026-01-05T04:00:00.000Z', operator: { accountId: 'a1', name: '同事甲' } },
+  ];
+  const markup = renderToStaticMarkup(<ObservationHistory snapshot={{ ...scene([observation({ id: 'o1', followUp })]), followUpEvents: events }}
+    subjectId="u1" onFollowUpAction={noop} />);
+
+  it('starts closed and says how many entries there are', () => {
+    expect(markup).toContain('歷史記錄');
+    expect(markup).toContain('2 筆');
+    expect(markup).toContain('aria-expanded="false"');
+    expect(markup).toContain('aria-controls=');
+    expect(markup).toContain('hidden=""');
+  });
+
+  it('keeps the entries in the document for when it is opened', () => {
+    expect(markup).toContain('同事甲');
+    expect(markup).toContain('標記完成');
+    expect(markup).toContain('撤銷');
+    // One trail only: the button names it, and the list is not printed twice.
+    expect(markup.match(/跟進處理記錄/g)).toHaveLength(1);
+  });
+});
+
 describe('history chips keep every axis', () => {
   it('shows every housing judgement that says something, and no chip for 無更新', () => {
     for (const assessment of Object.keys(assessmentLabels) as (keyof typeof assessmentLabels)[]) {

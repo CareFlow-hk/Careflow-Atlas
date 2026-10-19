@@ -33,6 +33,8 @@ export class OutreachRepository {
     catch (error) { throw new PersistenceError('本機資料格式不完整，尚未取代或刪除。', error); }
   }
   replaceSnapshot(snapshot: OutreachSnapshot): OutreachSnapshot { return this.persist(snapshot); }
+  /** The form this repository would store, without writing it. */
+  prepare(value: OutreachSnapshot): OutreachSnapshot { return alignDemoSnapshot(validateSnapshot(value)); }
   /** Delete this workspace from this browser. Only an explicit person action calls this. */
   clear(): void {
     if (!this.adapter.remove) throw new PersistenceError('此儲存方式不支援清空。');
@@ -54,7 +56,7 @@ export class OutreachRepository {
   }
   private persist(value: OutreachSnapshot): OutreachSnapshot {
     let snapshot: OutreachSnapshot;
-    try { snapshot = alignDemoSnapshot(validateSnapshot(value)); }
+    try { snapshot = this.prepare(value); }
     catch (error) { throw new PersistenceError('資料關聯或格式不正確，原有資料未改動。', error); }
     try { this.adapter.write(this.key, JSON.stringify(snapshot)); }
     catch (error) { if (error instanceof PersistenceError) throw error; throw new PersistenceError('本機儲存失敗，原有資料未改動。', error); }

@@ -9,3 +9,27 @@
 .account-page .account-features input[type=checkbox]{width:18px;height:18px;min-height:0;margin:0;padding:0;flex:none}
 .account-page .account-features li p{margin:6px 0 0 26px;font-size:13px;color:#5f716d}
 .account-page .account-features .account-features__warn{color:#8b3e32}
+/* Institution passphrase: the unlock bar above the workspace, and the administrator's panel in 設定. */
+.workspace-unlock{flex-shrink:0;margin:0;padding:10px 16px;background:#fff8e6;border-bottom:1px solid #e6d3a3;color:#4a3a12;font:14px/1.5 system-ui,sans-serif;display:grid;gap:8px}
+.workspace-unlock p{margin:0}.workspace-unlock strong{display:block}
+.workspace-unlock.is-later{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 16px;font-size:13px}
+.workspace-unlock__row{display:flex;gap:8px;flex-wrap:wrap}
+.workspace-unlock input{flex:1 1 220px;min-height:40px;box-sizing:border-box;border:1px solid #c9b47c;border-radius:6px;padding:8px;font:inherit}
+.workspace-unlock button{min-height:36px;border-radius:6px;padding:6px 12px;font:inherit;cursor:pointer;border:1px solid #c9b47c;background:#fffdf6;color:#4a3a12}
+.workspace-unlock button.is-primary{background:#205b45;border-color:#205b45;color:white}
+.workspace-unlock button:disabled{opacity:.55;cursor:wait}
+.workspace-unlock .workspace-unlock__link{justify-self:start;border:0;background:none;padding:0;min-height:0;text-decoration:underline;font-size:13px}
+.workspace-unlock__error{color:#9d2020}
+.account-page .account-key__form{max-width:480px}
+.account-page .account-key__form p{margin:0;font-size:13px;color:#5f716d}
+.account-page .account-key__actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.account-page .account-key__actions .is-primary{background:#205b45;color:white}
+.account-page .account-key__code output{display:block;font:600 18px/1.6 ui-monospace,monospace;letter-spacing:.04em;padding:12px;margin:12px 0;border:1px dashed #8aa495;border-radius:8px;background:#f6faf7;word-break:break-word;user-select:all}
+.account-page .account-key__check{display:flex;align-items:center;gap:8px;font-weight:600}
+.account-page .account-key__check input{width:18px;height:18px;min-height:0;margin:0;padding:0;flex:none}
+.account-page .account-key .account-features__warn{color:#8b3e32}
+@media print{.account-page>*:not(.account-key){display:none}.account-key__actions,.account-key__check{display:none}}
+/* Where the workspace lives, beside the demo marker: a local copy must never pass for a shared one. */
+.app-shell .demo-badge .sync-place{font-weight:600;letter-spacing:.04em;text-transform:none;margin-left:4px;white-space:nowrap}
+.app-shell .demo-badge .sync-place.is-device{color:#8b3e32}
+.app-shell .demo-badge .sync-place.is-shared{color:#205b45}

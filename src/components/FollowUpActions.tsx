@@ -1,5 +1,5 @@
-import { Check, Undo2, X } from "lucide-react";
-import { useState } from "react";
+import { Check, ChevronDown, ChevronUp, History, Undo2, X } from "lucide-react";
+import { useId, useState } from "react";
 import type { FollowUpEvent, FollowUpEventAction } from "../domain/types";
 import { followUpEventLabels } from "../domain/presentation";
 
@@ -12,7 +12,11 @@ function formatInstant(value: string) {
 /**
  * Close a task without inventing a visit. Done is one press; cancelling asks why. The
  * closing event can be undone, which appends a REOPENED event rather than erasing one,
- * so the small trail underneath always shows who did what and when.
+ * so a trail underneath shows who did what and when.
+ *
+ * That trail grows with every press and is rarely what someone came for, so it starts
+ * folded behind one button (2026-10-19 review). It stays in the document with `hidden`,
+ * so the lines are there to read as soon as it is opened.
  */
 export function FollowUpActions({ observationId, open, closure, trail, onAct }: {
   observationId: string;
@@ -26,6 +30,8 @@ export function FollowUpActions({ observationId, open, closure, trail, onAct }: 
   const [cancelling, setCancelling] = useState(false);
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
+  const [trailOpen, setTrailOpen] = useState(false);
+  const trailId = useId();
   const act = (action: FollowUpEventAction, why?: string) => {
     setError("");
     try { onAct(observationId, action, why); setCancelling(false); setReason(""); }
@@ -48,11 +54,16 @@ export function FollowUpActions({ observationId, open, closure, trail, onAct }: 
         <button type="button" className="cf-button cf-button--ghost cf-button--small" onClick={() => act("REOPENED")}><Undo2 size={15} />撤銷{followUpEventLabels[closure.action]}</button>
       </div>}
       {error && <p role="alert" className="cf-error">{error}</p>}
-      {trail.length > 0 && <ol className="cf-followup-trail" aria-label="跟進處理記錄">
-        {trail.map(event => <li key={event.id}>
-          <time dateTime={event.at}>{formatInstant(event.at)}</time> · {event.operator.name} {followUpEventLabels[event.action]}{event.reason ? `：${event.reason}` : ""}
-        </li>)}
-      </ol>}
+      {trail.length > 0 && <>
+        <button type="button" className="cf-followup__trail-toggle" aria-expanded={trailOpen} aria-controls={trailId} onClick={() => setTrailOpen(!trailOpen)}>
+          <History size={14} />歷史記錄<span className="cf-followup__trail-count">{trail.length} 筆</span>{trailOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+        </button>
+        <ol className="cf-followup-trail" id={trailId} aria-label="跟進處理記錄" hidden={!trailOpen}>
+          {trail.map(event => <li key={event.id}>
+            <time dateTime={event.at}>{formatInstant(event.at)}</time> · {event.operator.name} {followUpEventLabels[event.action]}{event.reason ? `：${event.reason}` : ""}
+          </li>)}
+        </ol>
+      </>}
     </div>
   );
 }
