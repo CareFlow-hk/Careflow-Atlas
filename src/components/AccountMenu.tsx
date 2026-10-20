@@ -21,7 +21,7 @@ export function AccountMenu() {
     <details className="account-menu" ref={menu}>
       <summary aria-label="帳號選單"><span className="account-menu__avatar" aria-hidden="true">{account.name.slice(0, 1)}</span><span className="account-menu__name">{account.name}</span><ChevronDown size={15} aria-hidden="true" /></summary>
       <div className="account-menu__list" role="menu">
-        <p>{account.role === "ADMIN" ? "管理員" : "成員"}</p>
+        <p>{account.role === "ADMIN" ? "機構管理員" : "成員"}</p>
         <button type="button" role="menuitem" onClick={() => choose(account.openSettings)}><Settings2 size={16} />設定</button>
         <button type="button" role="menuitem" disabled={account.busy} onClick={() => choose(account.logout)}><LogOut size={16} />登出</button>
       </div>
