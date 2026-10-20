@@ -1,6 +1,7 @@
 import { validateSnapshot } from '../domain/schema';
 import type { OutreachSnapshot } from '../domain/types';
 import { sameValue } from './snapshotValue';
+import { separateCollidingBuildings } from './buildingCollisions';
 
 /**
  * Merge the account端's workspace with this browser's copy, record by record.
@@ -54,6 +55,8 @@ export interface SyncMergeResult {
   keptBoth?: boolean;
   /** Why no snapshot could be produced; only set when `snapshot` is absent. */
   invalid?: string;
+  /** Buildings this device added under an id the account端 already gave another building, now renumbered. */
+  renamed?: { from: string; to: string; name: string }[];
 }
 
 const rowsOf = (snapshot: OutreachSnapshot, collection: SyncCollection): Row[] =>
@@ -134,9 +137,12 @@ function build(remote: OutreachSnapshot, local: OutreachSnapshot, base: Outreach
   return { snapshot: validateSnapshot(next), conflicts };
 }
 
-export function mergeSync(remote: OutreachSnapshot, local: OutreachSnapshot, base?: OutreachSnapshot, choices?: Readonly<Record<string, SyncChoice>>): SyncMergeResult {
+export function mergeSync(remote: OutreachSnapshot, original: OutreachSnapshot, base?: OutreachSnapshot, choices?: Readonly<Record<string, SyncChoice>>): SyncMergeResult {
+  // Two buildings that only share an id are two buildings; renumber this device's one first.
+  const { local, renamed } = separateCollidingBuildings(remote, original, base);
+  const extra = renamed.length ? { renamed } : {};
   try {
-    return build(remote, local, base, choices);
+    return { ...build(remote, local, base, choices), ...extra };
   } catch (error) {
     /*
      * Honouring a deletion can leave a record pointing at the floor, unit or building it
@@ -144,9 +150,9 @@ export function mergeSync(remote: OutreachSnapshot, local: OutreachSnapshot, bas
      * be the silent loss this merge exists to prevent, so keep both sides' rows — the same
      * merge with no ancestor — and say that a deletion was reversed.
      */
-    if (!base) return { conflicts: [], invalid: message(error) };
-    try { return { ...build(remote, local, undefined, choices), keptBoth: true }; }
-    catch (fallback) { return { conflicts: [], invalid: message(fallback) }; }
+    if (!base) return { conflicts: [], invalid: message(error), ...extra };
+    try { return { ...build(remote, local, undefined, choices), keptBoth: true, ...extra }; }
+    catch (fallback) { return { conflicts: [], invalid: message(fallback), ...extra }; }
   }
 }
 

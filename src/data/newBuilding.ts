@@ -13,6 +13,15 @@ export interface NewBuildingInput {
 export type NewBuildingResult = { snapshot: OutreachSnapshot; buildingId: string } | { error: string; field: 'id' | 'name' | 'layout' };
 
 /** The next unused `SYP-001` style id, the same shape the Excel guide suggests. */
+/**
+ * The id prefix for buildings one account adds on the map, e.g. `SYP-3F2A`. Each device
+ * numbers from its own copy, so two colleagues adding buildings at the same time would both
+ * write `SYP-001`; a part of the account id keeps their numbers apart (2026-10-20 trial).
+ */
+export function buildingPrefix(accountId?: string): string {
+  const tag = (accountId ?? '').replace(/[^0-9a-z]/gi, '').slice(0, 4).toUpperCase();
+  return tag ? `SYP-${tag}` : 'SYP';
+}
 export function nextBuildingId(snapshot: OutreachSnapshot | undefined, prefix = 'SYP'): string {
   const taken = new Set(snapshot?.buildings.map(b => b.id) ?? []);
   for (let n = 1; ; n++) {
@@ -28,8 +37,8 @@ export function nextBuildingId(snapshot: OutreachSnapshot | undefined, prefix = 
  * very snapshot — and a layout is only taken when every line reads. Nothing else
  * in the snapshot changes.
  */
-export function addBuilding(snapshot: OutreachSnapshot, input: NewBuildingInput): NewBuildingResult {
-  const id = input.id?.trim() || nextBuildingId(snapshot), name = input.name.trim(), address = input.address.trim();
+export function addBuilding(snapshot: OutreachSnapshot, input: NewBuildingInput, prefix?: string): NewBuildingResult {
+  const id = input.id?.trim() || nextBuildingId(snapshot, prefix), name = input.name.trim(), address = input.address.trim();
   // No "blank id" refusal: a blank one has just been numbered. What a caller did name still has to read.
   if (!/^[\w-]+$/.test(id)) return { error: '大廈編號只可用英文字母、數字、「-」或「_」。', field: 'id' };
   if (snapshot.buildings.some(b => b.id === id)) return { error: `大廈編號「${id}」已經用過，請換一個。`, field: 'id' };
