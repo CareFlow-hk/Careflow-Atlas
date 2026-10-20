@@ -10,7 +10,7 @@ import { outlineCentre } from '../map/footprintGeometry';
 import { OptionPrefsRepository } from '../data/optionPrefsRepository';
 import { mergeWorkflow } from '../data/workflowMerge';
 import { mergeSync, type SyncChoice, type SyncConflict } from '../data/syncMerge';
-import { addBuilding, type NewBuildingInput } from '../data/newBuilding';
+import { addBuilding, buildingPrefix, type NewBuildingInput } from '../data/newBuilding';
 import { blankSnapshot } from '../data/blankSnapshot';
 import { applyStructureChange, removesStructure, setNoSubdivision, type LocationProposal, type StructureChange } from '../domain/structure';
 import { appendPhotoPages, type PhotoPage } from '../photos/model';
@@ -216,10 +216,19 @@ async function reconcile(target: RemoteWorkspaceRepository): Promise<'ok' | 'con
   const stored = repository.replaceSnapshot(result.snapshot);
   // From now on the local changes are relative to what the account端 holds.
   rememberBase(remoteStored);
-  useWorkspace.setState({ snapshot: stored, pendingConflicts: [], conflictsOpen: false, syncBlocked: false, ...(result.keptBoth
+  useWorkspace.setState({ snapshot: stored, pendingConflicts: [], conflictsOpen: false, syncBlocked: false, ...afterRenames(result.renamed), ...(result.keptBoth
     ? { storageError: '這個帳號的資料已在其他裝置更新。兩邊的樓層／單位改動對不上，為免刪錯，已保留兩邊的資料（帳號端刪除的結構可能重新出現），請核對。' }
     : {}) });
   return 'ok';
+}
+/**
+ * Buildings this device added under an id a colleague's building already had were given a
+ * new id in the merge. A selection that still names the old id would now open their
+ * building, so it is let go.
+ */
+function afterRenames(renamed?: { from: string; to: string; name: string }[]): Partial<WorkspaceState> {
+  const { selectedBuildingId } = useWorkspace.getState();
+  return renamed?.some(r => r.from === selectedBuildingId) ? { selectedBuildingId: undefined, selectedFloorId: undefined, selectedUnitId: undefined } : {};
 }
 /**
  * A failed write is reported, never swallowed: the banner says the change is on this
@@ -336,6 +345,8 @@ interface WorkspaceState {
   resolveConflicts: (choices: Readonly<Record<string, SyncChoice>>) => void;
   /** Last resort for a merge that cannot be reconciled: this browser's copy replaces the account端's. */
   forcePushLocal: () => void;
+  /** The other way out: this browser drops its unsynced changes and takes the account端's copy. */
+  adoptRemote: () => void;
   /** Self-defined entry choices for this account. A shortcut list, not a record. */
   optionPrefs: CustomOptions;
   /** The signed-in account. Recorded as the operator of task actions, never as a field worker. */
@@ -429,13 +440,37 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
         }
         const stored = repository.replaceSnapshot(result.snapshot);
         rememberBase(remoteStored);
-        set({ snapshot: stored, pendingConflicts: [], conflictsOpen: false, syncBlocked: false, storageError: undefined });
+        set({ snapshot: stored, pendingConflicts: [], conflictsOpen: false, syncBlocked: false, storageError: undefined, ...afterRenames(result.renamed) });
         scheduleSync();
       } catch (error) {
         if (target !== server) return;
         set({ storageError: error instanceof ApiError && error.status === 401
           ? '登入已過期，未能把選擇寫上帳號端。本機副本仍然保留。'
           : '未能讀取帳號端的資料，選擇未寫上。本機副本仍然保留，請檢查網絡後再試。' });
+      }
+    });
+  },
+  /*
+   * The other way out of a merge that cannot be made: give up this device's unsynced changes
+   * and take the account端 copy as it is. The banner downloads this device's copy as Excel
+   * before offering it, so what is given up can still be read and imported back.
+   */
+  adoptRemote: () => {
+    const target = server;
+    if (!target) return;
+    writes = writes.then(async () => {
+      if (target !== server) return;
+      try {
+        const record = await target.load();
+        if (target !== server || !record) return;
+        const remoteStored = repository.prepare(record.snapshot);
+        const stored = repository.replaceSnapshot(remoteStored);
+        serverVersion = record.version; confirmed = JSON.stringify(remoteStored);
+        rememberBase(stored);
+        set({ snapshot: stored, storageError: undefined, syncBlocked: false, pendingConflicts: [], conflictsOpen: false, selectedBuildingId: undefined, selectedFloorId: undefined, selectedUnitId: undefined });
+      } catch {
+        if (target !== server) return;
+        set({ storageError: '未能讀取帳號端的資料，本機版本仍然保留。請檢查網絡後再試。' });
       }
     });
   },
@@ -477,7 +512,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     publish(set, repository.replaceSnapshot(next));
   },
   addBuilding: input => {
-    const result = addBuilding(get().snapshot ?? blankSnapshot(), input);
+    const result = addBuilding(get().snapshot ?? blankSnapshot(), input, buildingPrefix(get().operator?.accountId));
     if ('error' in result) return result;
     publish(set, repository.replaceSnapshot(result.snapshot));
     get().selectBuilding(result.buildingId);

@@ -52,6 +52,25 @@ function ReplaceRemoteButton() {
   </button>;
 }
 
+/**
+ * The way out that keeps colleagues' work: drop this device's unsynced changes and take the
+ * account端 copy. Like any removal, it waits for a backup (CLAUDE.md §4): the first press
+ * downloads this device's copy as Excel, and only a backup that was handed to the browser
+ * unlocks the second press.
+ */
+function AdoptRemoteButton({ backup }: { backup: () => Promise<boolean> }) {
+  const adoptRemote = useWorkspace(state => state.adoptRemote);
+  const [step, setStep] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle');
+  const press = async () => {
+    if (step === 'saved') { setStep('idle'); adoptRemote(); return; }
+    setStep('saving');
+    setStep(await backup() ? 'saved' : 'failed');
+  };
+  return <button type="button" className="storage-banner__action" disabled={step === 'saving'} onClick={() => void press()}>
+    {step === 'saved' ? '已下載本機備份。再按一次：改用帳號端版本' : step === 'failed' ? '備份下載失敗，請重試' : '下載本機備份，改用帳號端版本'}
+  </button>;
+}
+
 function download(url: string, name: string) {
   const a = document.createElement('a'); a.href = url; a.download = name;
   (document.querySelector('dialog[open]') ?? document.body).append(a); a.click(); a.remove();
@@ -347,7 +366,7 @@ export default function App() {
     {workspace.storageError && <div className="storage-banner" role="alert">
       <span>{workspace.storageError}</span>
       {workspace.pendingConflicts.length > 0 && <button type="button" className="storage-banner__action" onClick={workspace.openConflicts}>立即處理</button>}
-      {workspace.syncBlocked && !workspace.pendingConflicts.length && <ReplaceRemoteButton />}
+      {workspace.syncBlocked && !workspace.pendingConflicts.length && <><AdoptRemoteButton backup={downloadWorkbook} /><ReplaceRemoteButton /></>}
       <button type="button" className="storage-banner__close" aria-label="關閉提示" onClick={workspace.dismissStorageError}><X size={16} /></button>
     </div>}
     {toast && <div className="toast" key={toast} role="status"><Check size={17} /><span>{toast}</span><button aria-label="關閉提示" onClick={() => setToast('')}><X size={16} /></button></div>}

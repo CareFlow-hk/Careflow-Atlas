@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { workflowDemo } from './workflowDemo';
 import { blankSnapshot } from './blankSnapshot';
-import { addBuilding, nextBuildingId } from './newBuilding';
+import { addBuilding, buildingPrefix, nextBuildingId } from './newBuilding';
 import { exportWorkflowWorkbook, parseWorkflowWorkbook } from './workflowWorkbook';
 import { validateSnapshot } from '../domain/schema';
 
@@ -10,6 +10,15 @@ const ring = [[114.14, 22.2867], [114.1401, 22.2867], [114.1401, 22.2868], [114.
 const input = { id: 'SYP-001', name: '新大廈', address: '第三街 1 號', coordinates: at };
 
 describe('adding a building on the map', () => {
+  // Two colleagues adding buildings at once must not both write SYP-001 (2026-10-20 trial).
+  it('numbers each account\'s buildings apart', () => {
+    expect(buildingPrefix('3f2a9c10-0000-4000-8000-000000000000')).toBe('SYP-3F2A');
+    expect(buildingPrefix(undefined)).toBe('SYP');
+    const a = addBuilding(blankSnapshot(), { ...input, id: undefined }, buildingPrefix('aaaa1111'));
+    const b = addBuilding(blankSnapshot(), { ...input, id: undefined }, buildingPrefix('bbbb2222'));
+    expect(a).toMatchObject({ buildingId: 'SYP-AAAA-001' });
+    expect(b).toMatchObject({ buildingId: 'SYP-BBBB-001' });
+  });
   it('suggests the next free id', () => {
     expect(nextBuildingId(undefined)).toBe('SYP-001');
     const once = addBuilding(blankSnapshot(), input);

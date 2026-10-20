@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { demoSnapshot } from '../data/demoFixture';
 import { pullWorkspace, setWorkspaceAccount, useWorkspace } from './store';
 import type { WorkspaceCipher } from '../data/workspaceCipher';
+import { addBuilding } from '../data/newBuilding';
+import { blankSnapshot } from '../data/blankSnapshot';
+import { addFloors } from '../domain/structure';
 
 /** These tests are about syncing, not encryption; workspaceCipher.test.ts covers that. */
 const plain: WorkspaceCipher = { keyId: 'test', seal: async snapshot => snapshot, open: async value => value };
@@ -422,6 +425,28 @@ describe('the workspace the account端 holds', () => {
     await pullWorkspace();
     expect(useWorkspace.getState().snapshot?.people[0].phone).toBe('23456789');
     expect(put(server)).toBeUndefined();
+  });
+
+  /*
+   * The 2026-10-20 trial: this browser added its own SYP-001 (with floors) while a colleague's
+   * SYP-001 was already on the account端. Loading must keep both and write, not stop.
+   */
+  it('keeps a building a colleague numbered the same, instead of stopping the sync', async () => {
+    const server = serverStub();
+    const theirs = addBuilding(blankSnapshot(), { name: 'abc', address: '', coordinates: { lng: 114.14, lat: 22.2867 } });
+    const mine = addBuilding(blankSnapshot(), { name: '明愛大廈', address: '', coordinates: { lng: 114.142, lat: 22.288 } });
+    if ('error' in theirs || 'error' in mine) throw new Error('fixture');
+    const shaped = addFloors(mine.snapshot, 'SYP-001', 2, 2);
+    if ('error' in shaped) throw new Error(shaped.error);
+    server.record = { snapshot: theirs.snapshot, version: 3 };
+    values.set(localKey, JSON.stringify(shaped.snapshot));
+    await start(server);
+    expect(useWorkspace.getState().syncBlocked).toBe(false);
+    await vi.waitFor(() => expect(put(server)).toBeTruthy());
+    const written = put(server)!.body.snapshot as typeof theirs.snapshot;
+    expect(written.buildings.map(b => b.name)).toEqual(['abc', '明愛大廈']);
+    expect(written.floors).toHaveLength(2);
+    expect(written.floors.every(f => f.buildingId !== 'SYP-001')).toBe(true);
   });
 
   it('pushes this browser\'s copy up when the account端 holds nothing yet', async () => {
