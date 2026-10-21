@@ -7,7 +7,7 @@
 - 角色：ADMIN 管理账号、管理整个机构的工作区；MEMBER 参与同一份工作区。没有按人员隔离机构业务的服务端规则。
 - 平台管理员（2026-10-19）：账号上的 `platform_admin` 标记，代表运营整个站点的人（目前是 Oscar）。只有平台管理员能切换全站功能开关；机构管理员不能修改、停用平台管理员的账号，也不能为它生成重设链接。标记只能在服务器命令行设定，见下文「部署」。
 - 2026-10-18 起，演示工作台 snapshot 另存一份到账号端。2026-10-19 起改为**每个机构一份**（`org_workspaces` 表，每个 `org_id` 一行整份 JSON，带单调递增 `version`），同机构的账号读写同一份；这不是业务数据库，不接受未标记合成的资料。旧的无账号缓存仍不自动迁入。详细行为见本节下文「机构工作区与权限」。
-- 跨装置同步由全站开关 `workspaceSync` 控制，**默认关闭**；开启后还要机构设好密语才会存资料。住户姓名、电话、备注、记录文字在浏览器里加密，服务器只存密文，见 [ENCRYPTION.md](ENCRYPTION.md)。
+- 跨装置同步由开关 `workspaceSync` 控制，**按机构分开**（2026-10-21，`org_features` 表），**默认关闭**，只有平台管理员能为某间机构打开；开启后还要机构设好密语才会存资料。住户姓名、电话、备注、记录文字在浏览器里加密，服务器只存密文，见 [ENCRYPTION.md](ENCRYPTION.md)。
 - 账号权限在服务端执行；客户端界面隐藏不作为授权依据。
 
 运行步骤和验证入口如下。
@@ -57,7 +57,7 @@
 | 删除住户、人员、居住关系、会员关系等任何资料 | 可以 | 拒绝（`403`） |
 | 修改已有的到访或跟进事件 | 可以 | 拒绝（`403`），请新增更正记录 |
 | 管理账号、查看审计、设定机构密语 | 可以 | 拒绝（`403`） |
-| 切换全站功能开关（照片回录、跨装置同步） | 只限平台管理员；机构管理员看得到但改不了（`403`） | 拒绝（`403`） |
+| 切换功能开关（照片回录是全站的；跨装置同步按机构） | 只限平台管理员，在「設定 › 機構」逐间开关；机构管理员看得到本机构的状态，改不了（`403`） | 拒绝（`403`） |
 
 - **结构对员工只增不减**：员工可以新增楼层、加单位、把单位分拆成多间劏房（都是新增），但不能删楼层、删单位、或把劏房合并回更少间——判定依据是「这次改动有没有移走某个位置」（`removesStructure`，`src/domain/structure.ts`），与那里有没有记录、是不是自己刚加的无关。界面上员工的删除按钮不出现，结构编辑器改说这条规则；即使绕过界面，服务端也会以 `403` 拒绝，并把原因写在横幅里，不会说成网络问题。
 - **撤回不是删除**：记录保留在原处，加一个 `deleted: { at, by }` 标记。它离开覆盖、摘要、待跟进与 Excel「紙本回錄」页，但仍留在历史、`關聯封存` 与巡检记录中。撤回只发生一次，重复撤回不改变第一次的标记。
@@ -121,6 +121,12 @@ docker compose exec auth node server/manage.mjs recover-admin admin@example.org
 # 平台管理员：只能在这里设定或取消，API 和界面都改不了；该账号要重新登录。
 # bootstrap 建立的第一位管理员自动是平台管理员；旧账号库升级时，最早建立的已启用管理员自动获得。
 docker compose exec auth node server/manage.mjs platform-admin admin@example.org on
+# 机构（2026-10-21）：只能在这里建立、改名、移动帐号，没有 API。
+docker compose exec auth node server/manage.mjs list-orgs
+docker compose exec auth node server/manage.mjs create-org org-careflow CareFlow
+docker compose exec auth node server/manage.mjs rename-org org-default 明愛西營盤社區客廳
+# 移动帐号会撤销它的登录；会让原机构没有已启用机构管理员时拒绝执行。帐号到了新机构看到的是新机构的（空）工作区，记录不会跟着搬。
+docker compose exec auth node server/manage.mjs move-user someone@example.org org-careflow
 # 当前运行状态与代理健康检查
 docker compose ps
 curl -fsS http://127.0.0.1:8081/api/health

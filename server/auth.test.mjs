@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { backup, DatabaseSync } from 'node:sqlite';
 import { DEFAULT_ORG_ID, openAuth, SESSION_IDLE_MS } from './auth.mjs';
 import { createAuthServer } from './http.mjs';
+import { createFeatureStore } from './features.mjs';
+import { createOrg, listOrgs, moveUser, renameOrg } from './orgs.mjs';
 import { config } from './config.mjs';
 
 const password = 'Careflow test passphrase 2026!';
@@ -37,7 +39,7 @@ async function fixture(t, settings = {}) {
    * any well-formed one will do here.
    */
   function openWorkspace(orgId = DEFAULT_ORG_ID) {
-    auth.run("INSERT OR IGNORE INTO features(key,enabled,updated_at) VALUES('workspaceSync',1,0)");
+    auth.run("INSERT OR IGNORE INTO org_features(org_id,key,enabled,updated_at) VALUES(?,'workspaceSync',1,0)", orgId);
     auth.run('INSERT OR REPLACE INTO org_keys(org_id,key_id,salt,iterations,wrapped,updated_at) VALUES(?,?,?,?,?,0)', orgId, testKey.keyId, testKey.salt, testKey.iterations, testKey.wrapped);
   }
   /** The site's platform administrator: set on the server's command line, never through the API. */
@@ -119,7 +121,7 @@ test('an administrator only sees and manages their own institution', async t => 
   assert.equal((await f.request(`/api/admin/users/${outsider.id}`, { method: 'PATCH', ...admin, body: { name: 'pwn' } })).status, 404);
   assert.equal((await f.request(`/api/admin/users/${outsider.id}/reset`, { method: 'POST', ...admin })).status, 400);
   // The outsider's own workspace stays separate from this institution's.
-  f.openWorkspace();
+  f.openWorkspace(); f.openWorkspace('org-other');
   const snapshot = { schemaVersion: '0.1-demo', isSynthetic: true, notice: '機構一', buildings: [], floors: [], units: [], observations: [] };
   assert.equal((await f.request('/api/workspace', { method: 'PUT', ...admin, body: { snapshot } })).status, 200);
   assert.deepEqual((await f.request('/api/workspace', outsider)).value, {});
@@ -438,7 +440,7 @@ test('feature switches start off, only the platform administrator turns them, an
   assert.equal((await f.request('/api/admin/features', { method: 'PUT', ...admin, body: { key: 'nope', enabled: true } })).status, 400);
   assert.equal((await f.request('/api/admin/features', { method: 'PUT', ...admin, body: { key: 'photoIntake', enabled: 'yes' } })).status, 400);
   const on = await f.request('/api/admin/features', { method: 'PUT', ...admin, body: { key: 'photoIntake', enabled: true } });
-  assert.deepEqual(on.value, { features: { photoIntake: true, workspaceSync: false } });
+  assert.deepEqual(on.value.features, { photoIntake: true, workspaceSync: false });
   assert.equal((await f.request('/api/photos/recognize', { method: 'POST', ...member, body: { image: 'x' } })).status, 200);
   assert.equal(calls, 1);
   // Setting the same value again writes nothing new; each real change is audited with who did it.
@@ -580,4 +582,73 @@ test('an institution administrator cannot take the platform administrator accoun
   assert.equal(f.auth.userById(orgAdmin.id).platform_admin, 0);
   const actions = f.auth.all("SELECT action FROM audit WHERE action LIKE 'platform_admin_%'").map(row => row.action);
   assert.deepEqual(actions, ['platform_admin_granted']);
+});
+
+test('cross-device sync is switched per institution, and only by the platform administrator', async t => {
+  const f = await fixture(t);
+  const owner = await f.platform(await f.account('ADMIN', 'owner@example.test'));
+  const partnerAdmin = await f.account('ADMIN', 'partner-admin@example.test');
+  createOrg(f.auth, 'org-careflow', 'CareFlow');
+  moveUser(f.auth, owner.email, 'org-careflow');
+  const ours = await f.platform(owner);
+  const theirs = await f.account('MEMBER', 'partner-staff@example.test');
+  const snapshot = { schemaVersion: '0.1-demo', isSynthetic: true, notice: '', buildings: [], floors: [], units: [], observations: [] };
+  // On for our own institution: our workspace syncs, the partner's stays on its devices.
+  assert.equal((await f.request('/api/admin/features', { method: 'PUT', ...ours, body: { key: 'workspaceSync', enabled: true } })).status, 200);
+  assert.equal((await f.request('/api/features', ours)).value.features.workspaceSync, true);
+  assert.equal((await f.request('/api/features', theirs)).value.features.workspaceSync, false);
+  assert.equal((await f.request('/api/workspace', theirs)).status, 403);
+  assert.equal((await f.request('/api/workspace', ours)).status, 200);
+  // Turned on for the partner by name; an institution that does not exist is refused.
+  assert.equal((await f.request('/api/admin/features', { method: 'PUT', ...ours, body: { key: 'workspaceSync', enabled: true, orgId: 'org-nope' } })).status, 400);
+  const opened = await f.request('/api/admin/features', { method: 'PUT', ...ours, body: { key: 'workspaceSync', enabled: true, orgId: DEFAULT_ORG_ID } });
+  assert.equal(opened.status, 200);
+  assert.equal(opened.value.orgs[DEFAULT_ORG_ID].workspaceSync, true);
+  assert.equal((await f.request('/api/features', theirs)).value.features.workspaceSync, true);
+  // The partner's administrator neither switches it nor lists the institutions, but sees in
+  // their own log that it was opened for them.
+  assert.equal((await f.request('/api/admin/features', { method: 'PUT', ...partnerAdmin, body: { key: 'workspaceSync', enabled: false } })).status, 403);
+  assert.equal((await f.request('/api/admin/orgs', partnerAdmin)).status, 403);
+  const log = (await f.request('/api/admin/audit', partnerAdmin)).value.events.map(e => [e.action, e.target]);
+  assert.ok(log.some(([action, target]) => action === 'feature_enabled' && target === `workspaceSync@${DEFAULT_ORG_ID}`));
+  const orgs = (await f.request('/api/admin/orgs', ours)).value.orgs;
+  assert.deepEqual(orgs.map(o => [o.id, o.admins, o.members, o.features.workspaceSync]), [[DEFAULT_ORG_ID, 1, 1, true], ['org-careflow', 1, 0, true]]);
+  // A site-wide switch stays site-wide.
+  await f.request('/api/admin/features', { method: 'PUT', ...ours, body: { key: 'photoIntake', enabled: true } });
+  assert.equal((await f.request('/api/features', theirs)).value.features.photoIntake, true);
+  void snapshot;
+});
+
+test('a site-wide sync switch from before becomes every institution\'s own', async t => {
+  const f = await fixture(t);
+  createOrg(f.auth, 'org-careflow', 'CareFlow');
+  f.auth.run("INSERT INTO features(key,enabled,updated_at) VALUES('workspaceSync',1,5)");
+  const features = createFeatureStore(f.auth);
+  assert.equal(features.enabled('workspaceSync', DEFAULT_ORG_ID), true);
+  assert.equal(features.enabled('workspaceSync', 'org-careflow'), true);
+  assert.equal(f.auth.get("SELECT COUNT(*) AS n FROM features WHERE key='workspaceSync'").n, 0);
+  // Opening the store again moves nothing twice.
+  createFeatureStore(f.auth);
+  assert.equal(f.auth.get('SELECT COUNT(*) AS n FROM org_features').n, 2);
+});
+
+test('institutions are created, renamed and joined from the command line, never leaving one without an administrator', async t => {
+  const f = await fixture(t);
+  const admin = await f.account('ADMIN', 'only-admin@example.test');
+  const member = await f.account('MEMBER', 'member@example.test');
+  assert.throws(() => createOrg(f.auth, 'careflow', 'CareFlow'), /org-/);
+  assert.throws(() => createOrg(f.auth, 'org-careflow', '  '), /名稱/);
+  assert.equal(createOrg(f.auth, 'org-careflow', 'CareFlow').name, 'CareFlow');
+  assert.throws(() => createOrg(f.auth, 'org-careflow', 'again'), /已經存在/);
+  assert.equal(renameOrg(f.auth, DEFAULT_ORG_ID, '明愛西營盤社區客廳').name, '明愛西營盤社區客廳');
+  // The only administrator cannot leave: nobody would be left to manage the institution.
+  assert.throws(() => moveUser(f.auth, admin.email, 'org-careflow'), /機構管理員/);
+  assert.throws(() => moveUser(f.auth, 'nobody@example.test', 'org-careflow'), /不存在/);
+  assert.throws(() => moveUser(f.auth, member.email, 'org-nope'), /沒有這個機構/);
+  // A member moves; their sessions end and they sign in to the new institution's workspace.
+  assert.equal((await f.request('/api/session', member)).status, 200);
+  assert.deepEqual(moveUser(f.auth, member.email, 'org-careflow'), { email: member.email, from: DEFAULT_ORG_ID, to: 'org-careflow' });
+  assert.equal((await f.request('/api/session', member)).status, 401);
+  assert.deepEqual(listOrgs(f.auth).map(o => [o.id, o.name, o.admins, o.members]), [[DEFAULT_ORG_ID, '明愛西營盤社區客廳', 1, 0], ['org-careflow', 'CareFlow', 0, 1]]);
+  assert.deepEqual(f.auth.all("SELECT action FROM audit WHERE action IN ('org_created','org_renamed','user_moved') ORDER BY id").map(r => r.action), ['org_created', 'org_renamed', 'user_moved']);
 });
