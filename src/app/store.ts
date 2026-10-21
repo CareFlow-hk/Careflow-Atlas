@@ -285,10 +285,16 @@ async function push(target: RemoteWorkspaceRepository) {
       useWorkspace.setState({ storageError: error.message || MEMBER_NO_STRUCTURE_DELETE });
       return;
     }
-    const conflict = error instanceof ApiError && error.status === 409;
-    useWorkspace.setState({ storageError: conflict
+    // Only a request that got no answer is a network problem; any status the server or its
+    // proxy sent is named, so nobody goes checking their wifi over a refused write.
+    const status = error instanceof ApiError ? error.status : undefined;
+    useWorkspace.setState({ storageError: status === 409
       ? '這個帳號的資料不斷被其他裝置更新，本次改動未寫上帳號端。本機副本仍然保留，請稍後再試。'
-      : '本次改動已儲存在本機，但未能同步到帳號端。請檢查網絡；本機副本仍然保留，稍後可再儲存。' });
+      : status === 413
+        ? '本次改動已儲存在本機，但工作區資料超過帳號服務接受的大小（HTTP 413），未能同步到帳號端。本機副本仍然保留；請通知負責部署的同事。'
+        : status
+          ? `本次改動已儲存在本機，但帳號服務未能接收（HTTP ${status}），未能同步到帳號端。本機副本仍然保留，稍後可再儲存。`
+          : '本次改動已儲存在本機，但未能同步到帳號端。請檢查網絡；本機副本仍然保留，稍後可再儲存。' });
   }
 }
 /**
