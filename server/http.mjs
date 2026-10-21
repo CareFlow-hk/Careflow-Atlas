@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { createPhotoService, PHOTO_BODY_LIMIT } from './photos.mjs';
 import { createFeatureStore } from './features.mjs';
+import { listOrgs } from './orgs.mjs';
 import { createWorkspaceStore, WORKSPACE_BODY_LIMIT } from './workspace.mjs';
 import { createWorkspaceKeyStore } from './workspaceKey.mjs';
 import { HttpError, requireValue, publicUser, SESSION_IDLE_MS } from './auth.mjs';
@@ -42,7 +43,7 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
           auth.limit(`photo:${user.id}`, 40);
         }
         if (workspaceRequest) {
-          requireValue(features.enabled('workspaceSync'), 403, '跨裝置同步未開啟，資料只存在這部裝置。');
+          requireValue(features.enabled('workspaceSync', user.org_id), 403, '跨裝置同步未開啟，資料只存在這部裝置。');
           auth.limit(`workspace:${user.id}`, 1200);
         }
       }
@@ -71,7 +72,7 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
       requireValue(row, 401, '請登入後繼續。');
       if (mutation) requireValue(req.headers['x-csrf-token'] === row.csrf, 403, '請求校驗失敗，請重新整理頁面。');
       const user = auth.assertSession(row);
-      if (req.method === 'GET' && path === '/api/features') return send(res, 200, { features: features.all() });
+      if (req.method === 'GET' && path === '/api/features') return send(res, 200, { features: features.all(user.org_id) });
       if (req.method === 'GET' && path === '/api/photos/status') return send(res, 200, { ...photos.status(), enabled: features.enabled('photoIntake') });
       if (photoRequest) {
         const controller = new AbortController();
@@ -103,7 +104,7 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
       if (path === '/api/workspace' || path === '/api/workspace/version') {
         // Off unless an administrator turned it on: nothing of the workspace leaves the
         // browser otherwise, and the server neither serves nor stores a copy.
-        requireValue(features.enabled('workspaceSync'), 403, '跨裝置同步未開啟，資料只存在這部裝置。');
+        requireValue(features.enabled('workspaceSync', user.org_id), 403, '跨裝置同步未開啟，資料只存在這部裝置。');
       }
       // A few bytes, asked for every half minute: the whole copy is only fetched when it moved.
       if (req.method === 'GET' && path === '/api/workspace/version') return send(res, 200, { version: workspace.get(user.org_id)?.version ?? null });
@@ -135,15 +136,23 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
         auth.assertSession(row, true);
         if (req.method === 'GET' && path === '/api/admin/users') return send(res, 200, { users: auth.all('SELECT * FROM users WHERE org_id=? ORDER BY created_at,id', user.org_id).map(publicUser) });
         if (req.method === 'PUT' && path === '/api/admin/features') {
-          // Site-wide: every institution's data goes where these send it, so an institution's
-          // administrator sees them but does not turn them.
+          // Where data goes is decided by whoever runs the site, so an institution's
+          // administrator sees the switches but does not turn them. A per-institution switch
+          // names its institution; without one it is the administrator's own.
           auth.assertSession(row, 'platform');
           auth.limit(`admin:${user.id}`, 30);
-          return send(res, 200, { features: features.set(body.key, body.enabled, user.id) });
+          const orgId = body.orgId === undefined ? user.org_id : body.orgId;
+          return send(res, 200, { features: features.set(body.key, body.enabled, user.id, orgId), orgs: features.byOrg() });
+        }
+        // Every institution with its people counted and its own switches, for the platform administrator only.
+        if (req.method === 'GET' && path === '/api/admin/orgs') {
+          auth.assertSession(row, 'platform');
+          const switches = features.byOrg();
+          return send(res, 200, { orgs: listOrgs(auth).map(org => ({ ...org, features: switches[org.id] ?? {} })) });
         }
         if (req.method === 'GET' && path === '/api/admin/audit') return send(res, 200, { events: auth.all(`SELECT a.*,u.email AS actor_email,t.email AS target_email FROM audit a
           LEFT JOIN users u ON u.id=a.actor LEFT JOIN users t ON t.id=a.target
-          WHERE u.org_id=? OR t.org_id=? ORDER BY a.id DESC LIMIT 100`, user.org_id, user.org_id) });
+          WHERE u.org_id=? OR t.org_id=? OR a.target=? OR a.target LIKE '%@' || ? ORDER BY a.id DESC LIMIT 100`, user.org_id, user.org_id, user.org_id, user.org_id) });
         if (req.method === 'POST' && path === '/api/admin/users') {
           auth.limit(`admin:${user.id}`, 30);
           const result = auth.createUser(body, user.id); return send(res, 201, { user: result.user, link: link(result.token) });
