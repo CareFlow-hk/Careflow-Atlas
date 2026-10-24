@@ -12,11 +12,17 @@ import { requireValue } from './auth.mjs';
  *
  * Secrets stay in .env. A switch never replaces a missing key: photo intake still needs the
  * Azure key configured, and an enabled switch without it does nothing.
+ *
+ * `who` says which administrator may turn it. Sending data off this deployment is the
+ * platform's call (`platform`, the default); an institution's own AI assistant is its own
+ * administrator's (`admin`, 2026-10-23), and they may only turn their own institution's.
  */
 export const FEATURES = Object.freeze({
-  photoIntake: { label: '照片回錄（Azure 辨識）', scope: 'site' },
+  photoIntake: { label: '照片回錄（Azure 辨識）', scope: 'site', who: 'platform' },
   // Also needs the institution's passphrase set (server/workspaceKey.mjs) before it stores anything.
-  workspaceSync: { label: '跨裝置同步（加密後存到伺服器）', scope: 'org' },
+  workspaceSync: { label: '跨裝置同步（加密後存到伺服器）', scope: 'org', who: 'platform' },
+  // Needs the institution's AI key set (server/orgAi.mjs); off for everyone until then.
+  aiAssistant: { label: 'AI 助手（欄位建議）', scope: 'org', who: 'admin' },
 });
 const keysOf = scope => Object.keys(FEATURES).filter(key => FEATURES[key].scope === scope);
 

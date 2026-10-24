@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { detectWorkbook, fieldsNeedingReview, mergeOverride, recognitionBlocker, type DetectionResult, type MappingOverride } from './detector';
 import { REGRESSION_SAMPLES, sampleBuffer, type SampleKind } from './samples';
-import { DETECTOR_VERSION, FORMAT_PROFILES, normalizeHeader, type CanonicalField } from './profiles';
+import { DETECTOR_VERSION, FORMAT_PROFILES, SYSTEM_COLUMNS, normalizeHeader, type CanonicalField } from './profiles';
 import { paperHeaders } from '../data/workflowFormat';
 
 const sampleOf = (id: string) => {
@@ -47,7 +47,7 @@ describe('W0 candidate format recognition', () => {
     expect(mappedHeader(result, 'coverage')).toBe('覆蓋結果');
     expect(mappedHeader(result, 'recordId')).toBe('記錄編號');
     expect(mappedHeader(result, 'resolvesObservationId')).toBe('結束跟進編號');
-    expect(result.fields.filter((field) => field.status === 'KNOWN')).toHaveLength(paperHeaders.length);
+    expect(result.fields.filter((field) => field.status === 'KNOWN')).toHaveLength(paperHeaders.filter((header) => !SYSTEM_COLUMNS.includes(header)).length);
   });
 
   it('reports ambiguity instead of picking a column when two headers claim one field', () => {

@@ -93,6 +93,15 @@ export interface PhotoFallback {
   reason: 'LOW_LEGIBILITY' | 'UNREADABLE' | 'INVALID_OUTPUT';
   outcome: 'used' | 'failed' | 'kept_primary';
 }
+/**
+ * How an AI assistant helped produce a row, stamped by the browser that saved it.
+ *
+ * Plain text on purpose: an administrator has to read it, and it describes the tool,
+ * not a person. The server checks the shape only — it cannot know whether an assistant
+ * was really used, so this is a disclosure, never a permission or an approval
+ * (`docs/AI_ASSISTANT.md` 6.3).
+ */
+export interface AiAssist { at: string; provider: string; model: string }
 export interface Observation extends SyntheticRecord {
   id: string; visitId: string; buildingId: string; floorId?: string; unitId?: string;
   occurredAt: string; recordedAt: string; workerName: string; coverage: CoverageStatus;
@@ -121,6 +130,11 @@ export interface Observation extends SyntheticRecord {
    * recorded before accounts existed keep this absent rather than gaining a fake name.
    */
   createdBy?: Operator;
+  /**
+   * Set when an AI assistant proposed what became this row and a person confirmed it.
+   * Written once and never rewritten; it never stands in for `createdBy`.
+   */
+  aiAssist?: AiAssist;
   /**
    * A withdrawal is appended, never a rewrite or a removal: the row stays in history,
    * leaves the coverage/summary candidates, and keeps who withdrew it and when.
@@ -170,8 +184,18 @@ export interface SaveObservationInput {
   resolvesObservationId?: string;
   correctsObservationId?: string;
   correctionReason?: string;
+  /** Paper wording the row came from, when it came from a transcribed sheet. */
+  paperRef?: string;
+  paperLine?: string;
+  /** Which file, sheet and row the row was read from. Kept for later re-checks. */
+  importSource?: { file: string; sheet: string; row: number };
   /** The account pressing save. Absent rows keep no name rather than borrowing the login. */
   createdBy?: Operator;
+  /**
+   * Set only when an assistant proposed this row and a person confirmed it. The caller
+   * supplies it, the same way it supplies `createdBy`: the assistant never writes here.
+   */
+  aiAssist?: AiAssist;
 }
 
 /** Ids of events that at least one correction points at. They stay in history, out of coverage. */

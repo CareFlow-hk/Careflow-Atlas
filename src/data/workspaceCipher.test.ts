@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { demoSnapshot } from './demoFixture';
-import { createCipher, deriveKeys, SEALED_PREFIX, SENSITIVE_FIELDS, WorkspaceKeyError } from './workspaceCipher';
+import { createCipher, deriveKeys, openSecret, sealSecret, SEALED_PREFIX, SENSITIVE_FIELDS, WorkspaceKeyError } from './workspaceCipher';
 import { createOrgKey, keysFor, lock, PassphraseError, readRecoveryCode, recoveryCode, unlockMaster } from './orgKey';
 import { validateSnapshot } from '../domain/schema';
 import type { OutreachSnapshot } from '../domain/types';
@@ -121,5 +121,17 @@ describe('the institution key', () => {
   it('derives the same key fingerprint from the same data key', async () => {
     const master = crypto.getRandomValues(new Uint8Array(32));
     expect((await deriveKeys(master)).keyId).toBe((await deriveKeys(master.slice())).keyId);
+  });
+
+  it('seals the AI credential with the institution key, and only that key opens it', async () => {
+    const mine = await keys();
+    const sealed = await sealSecret(mine, 'sk-live-do-not-log-this');
+    // The server only ever sees the marker and base64, never the key itself.
+    expect(sealed.startsWith(SEALED_PREFIX)).toBe(true);
+    expect(sealed).not.toContain('sk-live');
+    expect(await openSecret(mine, sealed)).toBe('sk-live-do-not-log-this');
+    // Another institution's key does not open it.
+    const stranger = await deriveKeys(crypto.getRandomValues(new Uint8Array(32)));
+    await expect(openSecret(stranger, sealed)).rejects.toBeInstanceOf(WorkspaceKeyError);
   });
 });

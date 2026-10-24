@@ -1,0 +1,236 @@
+import * as XLSX from 'xlsx';
+import { describe, expect, it } from 'vitest';
+import { demoSnapshot } from '../data/demoFixture';
+import { floorNumber } from '../domain/structure';
+import type { CanonicalField } from './profiles';
+import { parseGenericRows } from './genericRows';
+
+const building = demoSnapshot.buildings[0];
+const unit = demoSnapshot.units.find(item => item.buildingId === building.id && !item.parentUnitId)!;
+const floor = demoSnapshot.floors.find(item => item.id === unit.floorId)!;
+
+const HEADERS = ['大廈', '到訪日期', '樓層', '單位', '工作員', '覆蓋結果', '備註'];
+const MAPPING: { key: CanonicalField; columnIndex: number }[] = [
+  { key: 'buildingName', columnIndex: 0 }, { key: 'occurredAt', columnIndex: 1 }, { key: 'floor', columnIndex: 2 },
+  { key: 'unit', columnIndex: 3 }, { key: 'worker', columnIndex: 4 }, { key: 'coverage', columnIndex: 5 }, { key: 'note', columnIndex: 6 },
+];
+
+const row = (over: Partial<Record<number, unknown>> = {}): unknown[] => {
+  const values: unknown[] = [building.name, '2026-10-09', floor.label, unit.label, '陳同事', '已嘗試接觸', '門外有水電單'];
+  for (const [index, value] of Object.entries(over)) values[Number(index)] = value;
+  return values;
+};
+
+const book = (rows: unknown[][]): ArrayBuffer => {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([HEADERS, ...rows]), '探訪');
+  return XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer;
+};
+
+let counter = 0;
+const parse = (rows: unknown[][], over: Partial<Parameters<typeof parseGenericRows>[0]> = {}) =>
+  parseGenericRows({
+    buffer: book(rows), sheetName: '探訪', headerRow: 1, mapping: MAPPING, snapshot: demoSnapshot,
+    fileName: '回錄.xlsx', now: '2026-10-23T02:00:00.000Z', newId: () => `test-${++counter}`,
+    ...over,
+  });
+
+describe('a row that can be written', () => {
+  it('carries the values the sheet holds, and stamps neither the operator nor the AI', () => {
+    const result = parse([row()]);
+    const [first] = result.rows;
+    expect(first.status).toBe('READY');
+    expect(first.issues).toEqual([]);
+    expect(first.input).toMatchObject({
+      buildingId: building.id, floorId: floor.id, unitId: unit.id,
+      occurredAt: '2026-10-09', workerName: '陳同事', coverage: 'ATTEMPTED', note: '門外有水電單',
+      recordedAt: '2026-10-23T02:00:00.000Z', importSource: { file: '回錄.xlsx', sheet: '探訪', row: 2 },
+    });
+    expect(first.input!.createdBy).toBeUndefined();
+    expect(first.input!.aiAssist).toBeUndefined();
+    expect(first.occurredAt).toBe('2026-10-09');
+  });
+
+  it('keeps a time when the sheet has one, at Hong Kong offset', () => {
+    const result = parse([[building.name, '2026-10-09 19:05', floor.label, unit.label, '陳同事', '已嘗試接觸', '']]);
+    expect(result.rows[0].input!.occurredAt).toBe('2026-10-09');
+    const timed = parseGenericRows({
+      buffer: (() => {
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([['大廈', '到訪日期', '到訪時間', '工作員', '覆蓋結果'], [building.name, '2026-10-09', '19:05', '陳同事', '已嘗試接觸']]), '探訪');
+        return XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer;
+      })(),
+      sheetName: '探訪', headerRow: 1, snapshot: demoSnapshot, fileName: '回錄.xlsx',
+      mapping: [{ key: 'buildingName', columnIndex: 0 }, { key: 'occurredAt', columnIndex: 1 }, { key: 'occurredTime', columnIndex: 2 }, { key: 'worker', columnIndex: 3 }, { key: 'coverage', columnIndex: 4 }],
+      newId: () => `timed-${++counter}`,
+    });
+    expect(timed.rows[0].input!.occurredAt).toBe('2026-10-09T19:05:00+08:00');
+  });
+
+  it('reads an Excel date serial rather than leaving a number in the record', () => {
+    const serial = XLSX.SSF.parse_date_code(46295)!;
+    const result = parse([row({ 1: 46295 })]);
+    expect(result.rows[0].occurredAt).toBe(`${serial.y}-${String(serial.m).padStart(2, '0')}-${String(serial.d).padStart(2, '0')}`);
+  });
+});
+
+describe('rows that need a person', () => {
+  it('does not fill a missing date, worker or coverage', () => {
+    const result = parse([row({ 1: '', 4: '', 5: '' })]);
+    const [first] = result.rows;
+    expect(first.status).toBe('NEEDS_REVIEW');
+    expect(first.input).toBeUndefined();
+    expect(first.issues.map(issue => issue.code)).toEqual(expect.arrayContaining(['MISSING_DATE', 'MISSING_WORKER', 'MISSING_COVERAGE']));
+  });
+
+  it('refuses an unreadable date instead of guessing the day order', () => {
+    const result = parse([row({ 1: '9/10/2026' })]);
+    expect(result.rows[0].status).toBe('INVALID');
+    expect(result.rows[0].issues.map(issue => issue.code)).toContain('DATE');
+  });
+
+  it('will not place a row in a building that is not on record', () => {
+    const result = parse([row({ 0: '不存在大廈' })]);
+    expect(result.rows[0].status).toBe('INVALID');
+    expect(result.rows[0].issues[0].message).toContain('AI 不會代為建立');
+  });
+
+  it('will not keep a floor without a unit', () => {
+    const result = parse([row({ 3: '' })]);
+    expect(result.rows[0].status).toBe('INVALID');
+    expect(result.rows[0].issues.map(issue => issue.code)).toContain('LOCATION');
+  });
+
+  it('offers a floor and unit the file names but the workspace does not have', () => {
+    const result = parse([row({ 2: '9F', 3: '9F A室' })]);
+    expect(result.rows[0].status).toBe('NEEDS_REVIEW');
+    expect(result.rows[0].input).toBeUndefined();
+    expect(result.rows[0].issues[0].message).toContain('系統還沒有');
+    expect(result.pending).toEqual([
+      { buildingId: building.id, buildingName: building.name, floorLabel: '9F', newFloor: true, unitLabel: '9F A室', rowNumbers: [2] },
+    ]);
+  });
+
+  it('offers only the missing unit when the floor is already there', () => {
+    const result = parse([row({ 3: 'E室' })]);
+    expect(result.rows[0].status).toBe('NEEDS_REVIEW');
+    expect(result.pending).toEqual([
+      { buildingId: building.id, buildingName: building.name, floorLabel: floor.label, newFloor: false, unitLabel: 'E室', rowNumbers: [2] },
+    ]);
+  });
+
+  it('gathers the rows that name the same missing place instead of offering it twice', () => {
+    const result = parse([row({ 2: '9F', 3: '9F A室' }), row({ 2: '9樓', 3: 'A室' })]);
+    expect(result.pending).toHaveLength(1);
+    expect(result.pending[0].rowNumbers).toEqual([2, 3]);
+    expect(result.counts.NEEDS_REVIEW).toBe(2);
+  });
+
+  it('still refuses a missing building, without offering to create it', () => {
+    const result = parse([row({ 0: '不存在大廈', 2: '9F', 3: '9F A室' })]);
+    expect(result.rows[0].status).toBe('INVALID');
+    expect(result.pending).toEqual([]);
+  });
+
+  it('still refuses wording the structure rules cannot read', () => {
+    const result = parse([row({ 2: '頂樓', 3: '頂樓 A室' })]);
+    expect(result.rows[0].status).toBe('INVALID');
+    expect(result.pending).toEqual([]);
+  });
+
+  it('will not keep a correction without a reason', () => {
+    const result = parse([row({ 7: 'obs-1', 8: '' })], { mapping: [...MAPPING, { key: 'correctsObservationId', columnIndex: 7 }, { key: 'correctionReason', columnIndex: 8 }] });
+    expect(result.rows[0].status).toBe('INVALID');
+  });
+});
+
+describe('columns nobody mapped', () => {
+  const withoutNote = MAPPING.filter(field => field.key !== 'note');
+
+  it('keeps their content in the note instead of dropping it', () => {
+    const result = parse([row()], { mapping: withoutNote, extraColumns: [{ header: '備註', columnIndex: 6 }] });
+    expect(result.rows[0].status).toBe('READY');
+    expect(result.rows[0].input?.note).toBe('原表「備註」：門外有水電單');
+  });
+
+  it('adds them after a note the sheet already has', () => {
+    const headers = [...HEADERS, '電話'];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([headers, [...row(), '2111 1111']]), '探訪');
+    const result = parseGenericRows({
+      buffer: XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer,
+      sheetName: '探訪', headerRow: 1, mapping: MAPPING, snapshot: demoSnapshot, fileName: '回錄.xlsx',
+      now: '2026-10-23T02:00:00.000Z', newId: () => `extra-${++counter}`,
+      extraColumns: [{ header: '電話', columnIndex: 7 }],
+    });
+    expect(result.rows[0].input?.note).toBe('門外有水電單；原表「電話」：2111 1111');
+  });
+
+  it('ignores a column the caller lists but has mapped after all', () => {
+    const result = parse([row()], { extraColumns: [{ header: '備註', columnIndex: 6 }] });
+    expect(result.rows[0].input?.note).toBe('門外有水電單');
+  });
+});
+
+describe('a floor the sheet spells differently', () => {
+  const five = demoSnapshot.floors.find(item => item.buildingId === building.id && floorNumber(item.label) === 5)!;
+  const fiveB = demoSnapshot.units.find(item => item.floorId === five.id && item.label === '5F B室')!;
+
+  it('reads 「5」 as the floor labelled 5F instead of calling it missing', () => {
+    const result = parse([row({ 2: '5', 3: 'B' })]);
+    expect(result.rows[0].status).toBe('READY');
+    expect(result.rows[0].input?.floorId).toBe(five.id);
+    expect(result.rows[0].input?.unitId).toBe(fiveB.id);
+    expect(result.pending).toEqual([]);
+  });
+
+  it('reads 「5樓」 the same way', () => {
+    const result = parse([row({ 2: '5樓', 3: 'B室' })]);
+    expect(result.rows[0].status).toBe('READY');
+    expect(result.rows[0].input?.unitId).toBe(fiveB.id);
+  });
+
+  it('does not guess when two floors carry the same number', () => {
+    const twin = { ...five, id: 'dup-5f', label: '5/F' };
+    const result = parse([row({ 2: '5', 3: 'B' })], { snapshot: { ...demoSnapshot, floors: [...demoSnapshot.floors, twin] } });
+    expect(result.rows[0].status).toBe('INVALID');
+    expect(result.rows[0].issues[0].message).toContain('對應到多層');
+    expect(result.pending).toEqual([]);
+  });
+});
+
+describe('rows that look like a repeat', () => {
+  it('points at the earlier row in the same file instead of merging', () => {
+    const result = parse([row(), row()]);
+    expect(result.rows[0].suspectedDuplicateOfRow).toBeUndefined();
+    expect(result.rows[1].suspectedDuplicateOfRow).toBe(2);
+    expect(result.rows[1].input).toBeDefined();
+  });
+
+  it('points at an existing record when one matches', () => {
+    const twin = { ...demoSnapshot.observations[0], id: 'twin', buildingId: building.id, floorId: floor.id, unitId: unit.id, occurredAt: '2026-10-09', workerName: '陳同事', coverage: 'ATTEMPTED' as const, deleted: undefined };
+    const result = parse([row()], { snapshot: { ...demoSnapshot, observations: [...demoSnapshot.observations, twin] } });
+    expect(result.rows[0].suspectedDuplicateOf).toBe('twin');
+  });
+});
+
+describe('the sheet as a whole', () => {
+  it('reports blank rows instead of counting them as data', () => {
+    const result = parse([row(), ['', '', '', '', '', '', ''], row({ 4: '另一位' })]);
+    expect(result.rows).toHaveLength(2);
+    expect(result.blankRows).toBe(1);
+    expect(result.counts.READY).toBe(2);
+  });
+
+  it('says which whole-sheet mapping is missing, without dropping rows silently', () => {
+    const result = parse([row()], { mapping: [{ key: 'occurredAt', columnIndex: 1 }] });
+    expect(result.notes[0]).toContain('大廈');
+    expect(result.rows[0].status).toBe('INVALID');
+  });
+
+  it('classifies every row, so the counts add up to what the sheet holds', () => {
+    const result = parse([row(), row({ 1: '' }), row({ 0: '不存在大廈' })]);
+    const total = result.counts.READY + result.counts.NEEDS_REVIEW + result.counts.INVALID;
+    expect(total).toBe(3);
+  });
+});

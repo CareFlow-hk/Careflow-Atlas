@@ -1,6 +1,7 @@
 import { effectiveObservations, getCoverageSummary, getOpenFollowUps, type OutreachSnapshot, type Observation } from '../domain/types';
 import { layoutSummary, UNDECLARED_LAYOUT } from './layoutSummary';
 import { exportAssessmentLabels, exportContactLabels, exportCoverageLabels, exportSourceLabels, followUpEventLabels, supportCategoryLabels } from '../domain/presentation';
+import { providerSpec } from '../ai/providers';
 
 export const WORKFLOW_VERSION = 'careflow-paper-excel-v1';
 /*
@@ -33,9 +34,13 @@ export interface WorkflowSheet { name: string; note: string; headers: string[]; 
 export const followUpEventHeaders = ['處理時間', '操作人', '處理', '原因', '原記錄編號', '大廈', '樓層／單位', '跟進行動'];
 export const buildingHeaders = ['大廈編號', '大廈名稱', '地址', '樓層單位摘要', '覆蓋概況', '最近到訪', '待跟進數', '經度', '緯度'];
 export const personHeaders = ['個人編號', '姓名／稱呼', '電話', '住址原文', '接觸備註', '會員狀態（參考）', '家庭編號（參考）'];
-export const paperHeaders = ['記錄編號', '紙本編號', '紙本行號', '外出編號', '到訪日期', '到訪時間', '工作員', '大廈編號', '樓層', '單位', '覆蓋結果', '接觸結果', '住房判斷', '紙本原話／備註', '依據', '資料來源', '跟進類別', '跟進行動', '負責人', '確定跟進日期', '時間原話／待確認', '結束跟進編號', '更正原記錄編號', '更正原因'];
-/** Added after v1 shipped, so older exports stay importable: absent means "not a correction". */
-export const optionalPaperHeaders = ['更正原記錄編號', '更正原因'];
+export const paperHeaders = ['記錄編號', '紙本編號', '紙本行號', '外出編號', '到訪日期', '到訪時間', '工作員', '大廈編號', '樓層', '單位', '覆蓋結果', '接觸結果', '住房判斷', '紙本原話／備註', '依據', '資料來源', '跟進類別', '跟進行動', '負責人', '確定跟進日期', '時間原話／待確認', '結束跟進編號', '更正原記錄編號', '更正原因', 'AI 協助'];
+/**
+ * Added after v1 shipped, so older exports stay importable: absent means "not a correction".
+ * 「AI 協助」 is written by the system, never by the person filling the sheet; an import
+ * ignores whatever it holds.
+ */
+export const optionalPaperHeaders = ['更正原記錄編號', '更正原因', 'AI 協助'];
 export function hkParts(value: string): [string, string] {
   if (value.length === 10) return [value, ''];
   const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Hong_Kong', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(value));
@@ -51,7 +56,8 @@ export function observationRow(snapshot: OutreachSnapshot, o: Observation): Cell
     o.note ?? '', o.evidence.join('\n'), o.sourceType ? sourceLabels[o.sourceType] : '',
     o.followUp?.category ? supportCategoryLabels[o.followUp.category] : '', o.followUp?.action ?? '', o.followUp?.assignee ?? '',
     o.followUp?.dueDate ? excelDate(o.followUp.dueDate) : '', o.followUp?.timingNote ?? '', o.resolvesObservationId ?? '',
-    o.correctsObservationId ?? '', o.correctionReason ?? ''];
+    o.correctsObservationId ?? '', o.correctionReason ?? '',
+    o.aiAssist ? `${providerSpec(o.aiAssist.provider)?.label ?? o.aiAssist.provider} · ${o.aiAssist.model} · ${hkParts(o.aiAssist.at).join(' ')}` : ''];
 }
 export function workflowSheets(snapshot: OutreachSnapshot): WorkflowSheet[] {
   const followUps = getOpenFollowUps(snapshot);
@@ -84,7 +90,7 @@ export function workflowSheets(snapshot: OutreachSnapshot): WorkflowSheet[] {
       const membership = snapshot.memberships.filter(m => m.personId === p.id).at(-1);
       return [p.id, p.displayName, p.phone ?? '', p.addressNote ?? addresses.join('\n'), p.contactNote ?? '', membershipLabels[membership?.status ?? 'UNKNOWN'], households.join('、')];
     }) },
-    { name: '紙本回錄', note: '每行是一處的本次記錄；新增行回錄，既有行保留。更正請新增行並填「更正原記錄編號」。日期必填，時間未知可留空。', headers: paperHeaders, widths: [29, 21, 13, 28, 16, 15, 20, 23, 13, 17, 25, 20, 23, 62, 45, 22, 19, 48, 20, 20, 48, 30, 29, 40], editable: paperHeaders, dates: ['到訪日期', '確定跟進日期'], choices: { '覆蓋結果': Object.values(coverageLabels), '接觸結果': Object.values(contactLabels), '住房判斷': Object.values(assessmentLabels), '資料來源': Object.values(sourceLabels), '跟進類別': Object.values(supportCategoryLabels), '大廈編號': snapshot.buildings.map(b => b.id) }, rows: effective.map(o => observationRow(snapshot, o)) },
+    { name: '紙本回錄', note: '每行是一處的本次記錄；新增行回錄，既有行保留。更正請新增行並填「更正原記錄編號」。日期必填，時間未知可留空。', headers: paperHeaders, widths: [29, 21, 13, 28, 16, 15, 20, 23, 13, 17, 25, 20, 23, 62, 45, 22, 19, 48, 20, 20, 48, 30, 29, 40, 52], editable: paperHeaders, dates: ['到訪日期', '確定跟進日期'], choices: { '覆蓋結果': Object.values(coverageLabels), '接觸結果': Object.values(contactLabels), '住房判斷': Object.values(assessmentLabels), '資料來源': Object.values(sourceLabels), '跟進類別': Object.values(supportCategoryLabels), '大廈編號': snapshot.buildings.map(b => b.id) }, rows: effective.map(o => observationRow(snapshot, o)) },
     { name: '待跟進', note: '由未結束跟進產生的閱讀清單；結果請新增到紙本回錄，再填結束跟進編號。', headers: ['原記錄編號', '大廈', '樓層／單位', '跟進類別', '跟進行動', '負責人', '確定日期', '時間原話／待確認'], widths: [29, 18, 20, 19, 58, 20, 18, 48], dates: ['確定日期'], rows: followUps.map(f => { const o = snapshot.observations.find(o => o.id === f.observationId)!; return [o.id, snapshot.buildings.find(b => b.id === f.buildingId)?.name ?? f.buildingId, snapshot.units.find(u => u.id === f.unitId)?.label ?? snapshot.floors.find(l => l.id === f.floorId)?.label ?? '大廈層面', o.followUp?.category ? supportCategoryLabels[o.followUp.category] : '一般跟進', f.action, o.followUp?.assignee ?? '', f.dueDate ? excelDate(f.dueDate) : '', o.followUp?.timingNote ?? '']; }) },
     { name: '跟進處理', note: '在工作台按「標記完成」「取消跟進」「撤銷」的記錄，只供閱讀；修改不會套用。操作人是登入帳號，不是紙本工作員。', headers: followUpEventHeaders, widths: [22, 18, 12, 40, 29, 18, 20, 58], rows: (snapshot.followUpEvents ?? []).map(e => {
       const o = snapshot.observations.find(o => o.id === e.observationId);

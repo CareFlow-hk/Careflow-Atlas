@@ -1,4 +1,5 @@
 import { requireValue } from './auth.mjs';
+import { PROVIDERS } from './orgAi.mjs';
 
 /**
  * Who may change what inside the institution's shared snapshot.
@@ -84,6 +85,28 @@ function isOwnWithdrawal(change, user) {
 
 const hasRecords = snapshot => WORKSPACE_COLLECTIONS.some(collection => rowsOf(snapshot, collection).length > 0);
 
+const AI_ASSIST_KEYS = new Set(['at', 'provider', 'model']);
+/** The same model-name shape the AI key settings accept (`server/orgAi.mjs`). */
+const AI_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/;
+
+/**
+ * The AI disclosure a record carries, checked for shape only.
+ *
+ * The server cannot know whether an assistant was really used, so this is a disclosure,
+ * not a proof, and it never decides who may write (`docs/AI_ASSISTANT.md` 6.3). It stays
+ * plain text — a sealed value would be unreadable to the administrator who must see it —
+ * which is also why the whitelist check rejects anything the browser wrapped.
+ */
+function assertAiAssist(row) {
+  const value = row?.aiAssist;
+  if (value === undefined) return;
+  requireValue(value && typeof value === 'object' && !Array.isArray(value), 400, 'AI 協助標記格式不正確。');
+  requireValue(Object.keys(value).every(key => AI_ASSIST_KEYS.has(key)), 400, 'AI 協助標記含有多餘的欄位。');
+  requireValue(typeof value.provider === 'string' && Object.hasOwn(PROVIDERS, value.provider), 400, 'AI 協助標記的供應商不在允許清單內。');
+  requireValue(typeof value.model === 'string' && AI_MODEL.test(value.model), 400, 'AI 協助標記的型號格式不正確。');
+  requireValue(typeof value.at === 'string' && value.at.length <= 40 && Number.isFinite(Date.parse(value.at)), 400, 'AI 協助標記的時間格式不正確。');
+}
+
 /**
  * The signatures both roles must get right. Skipped only when an administrator fills an
  * empty workspace — loading the demo, or putting a backup back after a clear — where the
@@ -98,8 +121,12 @@ function assertSigned(user, change) {
       if (next.createdBy !== undefined || user.role !== 'ADMIN') {
         requireValue(actsAs(next.createdBy, user), 403, '新增的記錄必須以登入的帳號名義儲存，不能用其他人的名字。');
       }
-    } else if (kind === 'changed' && next.deleted && canonical(next.deleted) !== canonical(previous.deleted)) {
-      requireValue(ownMarker(next.deleted, user), 403, '撤回記錄必須以登入的帳號名義進行。');
+    } else if (kind === 'changed') {
+      // How the row was produced is history: rewriting it later would falsify the trace.
+      requireValue(canonical(next.aiAssist) === canonical(previous.aiAssist), 403, 'AI 協助標記寫入後不能修改；如需更正，請新增一筆更正記錄。');
+      if (next.deleted && canonical(next.deleted) !== canonical(previous.deleted)) {
+        requireValue(ownMarker(next.deleted, user), 403, '撤回記錄必須以登入的帳號名義進行。');
+      }
     }
   }
   if (collection === 'followUpEvents' && kind === 'added') {
@@ -113,6 +140,9 @@ function assertSigned(user, change) {
  * unchanged costs nothing.
  */
 export function assertWorkspaceWrite(user, previous, next) {
+  // Checked on every write, including the first one: a marker that never passed the
+  // whitelist would otherwise sit in the store with nothing able to correct it.
+  for (const row of rowsOf(next, 'observations')) assertAiAssist(row);
   if (!previous) return;
   const seeding = user.role === 'ADMIN' && !hasRecords(previous);
   for (const change of diffSnapshots(previous, next)) {

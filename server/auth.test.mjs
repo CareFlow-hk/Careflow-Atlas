@@ -421,6 +421,41 @@ test('a member may only withdraw their own records; an administrator may withdra
   assert.deepEqual(await stored(), { ...base, floors: [], units: [], observations: [withdrawn, adminWithdrew] });
 });
 
+test('an AI-assisted record carries a readable marker, and the administrator can audit it', async t => {
+  const f = await fixture(t);
+  const admin = await f.account('ADMIN', 'admin-ai@example.test');
+  const member = await f.account('MEMBER', 'member-ai@example.test');
+  f.openWorkspace();
+  const base = { schemaVersion: '0.1-demo', isSynthetic: true, notice: '', buildings: [], floors: [], units: [], observations: [], visits: [], followUpEvents: [] };
+  const marker = { at: '2026-10-23T14:05:00+08:00', provider: 'deepseek', model: 'deepseek-flash' };
+  const record = { id: 'obs-ai', createdBy: { accountId: member.id, name: 'member' }, note: sealed('ai helped'), aiAssist: marker };
+  // The first write has no earlier version to compare with, and is still checked.
+  const first = await f.request('/api/workspace', { method: 'PUT', ...member, body: { snapshot: { ...base, observations: [record] } } });
+  assert.equal(first.status, 200); const version = first.value.version;
+  // The marker stays readable and only a count reaches the audit table, never the record.
+  const aiAudit = f.auth.all("SELECT target FROM audit WHERE action='ai_assisted_write'");
+  assert.equal(aiAudit.length, 1);
+  assert.equal(aiAudit[0].target, '1 筆記錄');
+  const stored = () => f.request('/api/workspace', member).then(result => result.value.snapshot);
+  assert.deepEqual((await stored()).observations[0].aiAssist, marker);
+
+  // Only the providers this build can actually call may appear in a marker.
+  const put = (snapshot, who = member) => f.request('/api/workspace', { method: 'PUT', ...who, body: { snapshot, baseVersion: version } });
+  assert.equal((await put({ ...base, observations: [{ ...record, aiAssist: { ...marker, provider: 'some-vendor' } }] })).status, 400);
+  // A sealed value would be unreadable to the administrator who has to see it.
+  assert.equal((await put({ ...base, observations: [{ ...record, aiAssist: { ...marker, provider: sealed('deepseek') } }] })).status, 400);
+  assert.equal((await put({ ...base, observations: [{ ...record, aiAssist: { ...marker, note: 'extra' } }] })).status, 400);
+  assert.equal((await put({ ...base, observations: [{ ...record, aiAssist: { ...marker, at: 'today' } }] })).status, 400);
+  // Changing how a row was produced after the fact would falsify the trace, for either role.
+  assert.equal((await put({ ...base, observations: [{ ...record, aiAssist: { ...marker, model: 'deepseek-v4-pro' } }] }, admin)).status, 403);
+  // A withdrawal keeps the marker: the record still says how it was produced.
+  const withdrawn = { ...record, deleted: { at: '2026-10-23T06:00:00.000Z', by: { accountId: member.id, name: 'member' } } };
+  assert.equal((await put({ ...base, observations: [withdrawn] })).status, 200);
+  assert.deepEqual((await stored()).observations[0].aiAssist, marker);
+  // Re-sending an unchanged record is not a new AI-assisted write.
+  assert.equal(f.auth.all("SELECT id FROM audit WHERE action='ai_assisted_write'").length, 1);
+});
+
 test('feature switches start off, only the platform administrator turns them, and photo intake obeys', async t => {
   let calls = 0;
   const photos = { status: () => ({ configured: true, model: 'gpt-6-luna' }), recognize: async () => { calls++; return { rows: [], warnings: [], model: 'gpt-6-luna' }; } };
@@ -430,7 +465,7 @@ test('feature switches start off, only the platform administrator turns them, an
   const orgAdmin = await f.account('ADMIN', 'org-admin@example.test');
   assert.equal((await f.request('/api/admin/features', { method: 'PUT', ...orgAdmin, body: { key: 'photoIntake', enabled: true } })).status, 403);
   assert.equal((await f.request('/api/features', orgAdmin)).value.features.photoIntake, false);
-  assert.deepEqual((await f.request('/api/features', member)).value, { features: { photoIntake: false, workspaceSync: false } });
+  assert.deepEqual((await f.request('/api/features', member)).value, { features: { photoIntake: false, workspaceSync: false, aiAssistant: false } });
   assert.equal((await f.request('/api/photos/status', member)).value.enabled, false);
   // Off: refused before the upload is read, so nothing reaches Azure.
   assert.equal((await f.request('/api/photos/recognize', { method: 'POST', ...member, body: { image: 'x' } })).status, 403);
@@ -440,7 +475,7 @@ test('feature switches start off, only the platform administrator turns them, an
   assert.equal((await f.request('/api/admin/features', { method: 'PUT', ...admin, body: { key: 'nope', enabled: true } })).status, 400);
   assert.equal((await f.request('/api/admin/features', { method: 'PUT', ...admin, body: { key: 'photoIntake', enabled: 'yes' } })).status, 400);
   const on = await f.request('/api/admin/features', { method: 'PUT', ...admin, body: { key: 'photoIntake', enabled: true } });
-  assert.deepEqual(on.value.features, { photoIntake: true, workspaceSync: false });
+  assert.deepEqual(on.value.features, { photoIntake: true, workspaceSync: false, aiAssistant: false });
   assert.equal((await f.request('/api/photos/recognize', { method: 'POST', ...member, body: { image: 'x' } })).status, 200);
   assert.equal(calls, 1);
   // Setting the same value again writes nothing new; each real change is audited with who did it.
