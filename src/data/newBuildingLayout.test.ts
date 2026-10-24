@@ -7,6 +7,7 @@ import { buildingHeaders, excelDate, paperHeaders } from './workflowFormat';
 import type { OutreachSnapshot } from '../domain/types';
 
 const now = '2026-10-05T04:00:00Z';
+const flags = { isSynthetic: true, provisional: true } as const;
 const LAYOUT = '1 樓：1樓 A室、1樓 B室、1樓 C室\n2 樓：2樓 A室、2樓 B室、2樓 C室';
 const workbook = (snapshot: OutreachSnapshot = workflowDemo) => XLSX.read(exportWorkflowWorkbook(snapshot), { type: 'array' });
 const parse = (wb: XLSX.WorkBook) => parseWorkflowWorkbook(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }), 'test.xlsx', now)!;
@@ -95,6 +96,22 @@ describe('adding a building with its floors from Excel', () => {
     expect(result.layouts).toEqual([]);
     expect(result.snapshot!.floors).toEqual(workflowDemo.floors);
     expect(result.issues).toEqual([expect.objectContaining({ field: '樓層單位摘要', severity: 'warning' })]);
+  });
+  it('adopts a declaration the file did not change, instead of adding its floors without one', () => {
+    // 另一部裝置為德昌樓聲明了 1 樓、2 樓，之後匯出 Excel；這個檔案裡的「關聯封存」因此
+    // 已經帶着這個聲明，檔案本身沒有改過這幢大廈。而這部裝置（例如無痕視窗）從未收到它，
+    // 德昌樓在這裡仍然未有樓層。只把新樓層加進去、不接收聲明，樓層就會沒有所屬聲明
+    // （DATA_RELATION，2026-10-23）。
+    const exported = structuredClone(workflowDemo);
+    Object.assign(exported.buildings.find(b => b.id === 'bldg-duk-cheong')!, { layoutDeclared: true, floorCount: 2 });
+    exported.floors.push(
+      { ...flags, id: 'bldg-duk-cheong-f1', buildingId: 'bldg-duk-cheong', level: 1, label: '1 樓' },
+      { ...flags, id: 'bldg-duk-cheong-f2', buildingId: 'bldg-duk-cheong', level: 2, label: '2 樓' },
+    );
+    const result = mergeWorkflow(workflowDemo, exported, structuredClone(exported));
+    expect(result.issues).toEqual([]);
+    expect(result.snapshot!.buildings.find(b => b.id === 'bldg-duk-cheong')).toMatchObject({ layoutDeclared: true, floorCount: 2 });
+    expect(result.snapshot!.floors.filter(f => f.buildingId === 'bldg-duk-cheong').map(f => f.id)).toEqual(['bldg-duk-cheong-f1', 'bldg-duk-cheong-f2']);
   });
   it('warns when a new row fills columns the system calculates', () => {
     const wb = workbook();

@@ -26,6 +26,9 @@ export const SEALED_PREFIX = 'enc:v1:';
 export interface WorkspaceCipher {
   /** Fingerprint of the key in use; the server's copy names the one it was locked with. */
   readonly keyId: string;
+  /** Seal one string at a named place. Small values outside the workspace use this. */
+  sealValue(text: string, where: string): Promise<string>;
+  openValue(text: string, where: string): Promise<string>;
   seal(snapshot: OutreachSnapshot): Promise<unknown>;
   open(value: unknown): Promise<unknown>;
 }
@@ -137,7 +140,25 @@ export function createCipher(keys: WorkspaceKeys): WorkspaceCipher {
   };
   return {
     keyId: keys.keyId,
+    sealValue: seal,
+    openValue: open,
     seal: snapshot => eachSensitive(snapshot, seal),
     open: value => eachSensitive(value, open),
   };
+}
+
+/**
+ * Where the institution's AI credential sits. There is one per institution, so the place is a
+ * constant; do not change it without a migration, because the location is bound into the
+ * ciphertext as associated data and old copies would stop opening.
+ */
+const AI_CREDENTIAL = 'ai credential';
+
+/** Seal a small secret (the AI provider key) with the institution keys. */
+export function sealSecret(keys: WorkspaceKeys, text: string): Promise<string> {
+  return createCipher(keys).sealValue(text, AI_CREDENTIAL);
+}
+/** Open what `sealSecret` wrote. Throws `WorkspaceKeyError` if this is not the key. */
+export function openSecret(keys: WorkspaceKeys, text: string): Promise<string> {
+  return createCipher(keys).openValue(text, AI_CREDENTIAL);
 }

@@ -21,11 +21,15 @@ export function mergeWorkflow(current: OutreachSnapshot | undefined, incoming: O
       if (key === 'observations' && 'paperRef' in candidate && candidate.paperRef && paperRecordEqual(rows[index] as Observation, candidate as Observation)) { summary.duplicates++; continue; }
       if (key === 'visits' && candidate.id.startsWith('paper-visit:') && same({ ...rows[index], recordedAt: '' }, { ...candidate, recordedAt: '' })) { summary.duplicates++; continue; }
       const original = baseline?.[key]?.find(row => row.id === candidate.id);
-      if (original && same(candidate, original)) { summary.retained++; continue; }
-      if (['buildings', 'people'].includes(key) && original && same(rows[index], original)) { rows[index] = candidate; summary.updated++; continue; }
       // A file can declare floors or an outline for a building that has neither here, even when the
       // file predates the building: nothing else may differ, and nothing local can be overwritten.
+      // This runs before the "the file did not change this row" shortcut: the file declares the
+      // floors in its own archive too, so it did not change the building either — yet this device
+      // never got that declaration, and taking only the new floors would leave them without one
+      // (DATA_RELATION, 2026-10-23). Adding floors is only allowed together with the declaration.
       if (key === 'buildings' && declaresLayoutOnly(next, rows[index] as Building, candidate as Building)) { rows[index] = candidate; summary.updated++; continue; }
+      if (original && same(candidate, original)) { summary.retained++; continue; }
+      if (['buildings', 'people'].includes(key) && original && same(rows[index], original)) { rows[index] = candidate; summary.updated++; continue; }
       issues.push(conflictIssue(key, candidate, rows[index]));
     }
   }

@@ -1,7 +1,11 @@
 import { createContext, useContext } from 'react';
 
-/** Site-wide switches an administrator turns on in 設定; anything missing counts as off. */
-export type FeatureSwitches = Partial<Record<'photoIntake' | 'workspaceSync', boolean>>;
+/**
+ * Switches an administrator turns on in 設定; anything missing counts as off. Keys match
+ * `FEATURES` in server/features.mjs: the first two are the platform administrator's, the last
+ * is the institution's own.
+ */
+export type FeatureSwitches = Partial<Record<'photoIntake' | 'workspaceSync' | 'aiAssistant', boolean>>;
 /** What the workspace header needs from the signed-in account: its name, settings, switches and sign-out. */
 /**
  * Where the workspace lives right now: `shared` once sync is on and this device unlocked the

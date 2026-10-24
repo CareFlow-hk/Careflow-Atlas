@@ -30,6 +30,9 @@ export const observationSchema = z.object({
   correctsObservationId: id.optional(), correctionReason: text.optional(),
   // Who saved this row. Absent on rows recorded before accounts existed; never invented.
   createdBy: z.object({ accountId: id, name: id }).optional(),
+  // The AI disclosure stays plain text so it can be read back; the provider whitelist is
+  // enforced on the server, which is the only side that can refuse a whole write.
+  aiAssist: z.object({ at: instantSchema, provider: id, model: id }).optional(),
   // A withdrawal appends this marker and keeps the row; it is not a removal.
   deleted: z.object({ at: instantSchema, by: z.object({ accountId: id, name: id }) }).optional(),
   photoSource: z.object({ hash: id, file: id, line: text, model: id, fallback: photoFallbackSchema.optional(), reviewedBy: z.object({ accountId: id, name: id }), reviewedAt: instantSchema, sample: z.boolean() }).optional(),

@@ -188,10 +188,19 @@ export function parseWorkflowWorkbook(buffer: ArrayBuffer, file: string, now = n
     if (typeof v['到訪時間'] === 'number' && v['到訪時間'] >= 0 && v['到訪時間'] < 1) { const seconds = Math.round(v['到訪時間'] * 86400); time = `${pad(Math.floor(seconds / 3600))}:${pad(Math.floor(seconds / 60) % 60)}:${pad(seconds % 60)}`; }
     // Untouched history is reused verbatim, including precise timestamps and provenance.
     const oldRow = old ? observationRow(baseline, old) : undefined;
+    // 「AI 協助」 is written by the system, so a typed value is reported and ignored rather
+    // than read as an edit to history.
+    const aiCell = paperHeaders.indexOf('AI 協助');
+    if (!(oldRow && str(v['AI 協助']) === str(oldRow[aiCell]))) {
+      if (optional(v['AI 協助'])) add(sheet, row, 'AI 協助', 'SYSTEM_FILLED', '「AI 協助」由系統按記錄的來源填寫，不接受手動修改；這一格的內容不會套用。', undefined, 'warning');
+    }
     const sameCell = (h: string, i: number) => h === '到訪日期' ? day === hkParts(old!.occurredAt)[0] : h === '確定跟進日期' ? dueDate === old!.followUp?.dueDate : h === '到訪時間' ? (time?.length === 5 ? time + ':00' : time ?? '') === (str(oldRow![i]).length === 5 ? str(oldRow![i]) + ':00' : str(oldRow![i])) : str(v[h]) === str(oldRow![i]);
-    if (oldRow && paperHeaders.every(sameCell)) continue;
+    // The AI column is derived from the stored record, so it never counts as an edit.
+    const compared = paperHeaders.filter(h => h !== 'AI 協助');
+    const unchanged = (h: string) => sameCell(h, paperHeaders.indexOf(h));
+    if (oldRow && compared.every(unchanged)) continue;
     if (old) {
-      const changed = paperHeaders.filter((h, i) => !sameCell(h, i));
+      const changed = compared.filter(h => !unchanged(h));
       add(sheet, row, changed.join('／'), 'HISTORY_EDITED', `這是之前已經錄入的記錄，「${changed.join('」「')}」被改動了。舊記錄不能直接改：請把這一行改回原樣，然後在最底新增一行，「更正原記錄編號」填 ${id}，並寫上更正原因。`, changed.map(h => `${h}: ${JSON.stringify(oldRow![paperHeaders.indexOf(h)])} → ${JSON.stringify(v[h])}`).join('; ')); continue;
     }
     if (time && !/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/.test(time)) add(sheet, row, '到訪時間', 'INVALID_TIME', `「${time}」看不懂。請寫成 24 小時制，例如 19:05；不知道時間就留空，系統不會估。`, `value=${JSON.stringify(v['到訪時間'])}`);

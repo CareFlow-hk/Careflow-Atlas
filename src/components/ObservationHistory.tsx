@@ -4,6 +4,7 @@ import { compareObservationTime, followUpClosures, followUpEventsFor, followUpRe
 import { assessmentLabels, contactLabels, coverageLabels, followUpClosedLabels, sourceLabels, supportCategoryLabels } from "../domain/presentation";
 import { impliedByCoverage } from "../domain/optionPrefs";
 import { FollowUpActions, type FollowUpActionHandler } from "./FollowUpActions";
+import { providerSpec } from "../ai/providers";
 
 export interface ObservationHistoryProps {
   snapshot: OutreachSnapshot; subjectId: string; subjectType?: "UNIT" | "BUILDING"; emptyLabel?: string;
@@ -76,6 +77,8 @@ export function ObservationHistory({ snapshot, subjectId, subjectType = "UNIT", 
         {isSuperseded && <p className="cf-superseded-note"><History size={14} />此記錄已被 {correctedBy?.id ?? "後續更正"} 取代，不再計入覆蓋，保留作追溯。</p>}
         {/* The operator who saved the row is not the paper worker; both are named, never merged. */}
         {observation.createdBy && <p className="cf-event__recorded">由 {observation.createdBy.name} 儲存{observation.deleted ? ` · ${formatDate(observation.deleted.at)} 由 ${observation.deleted.by.name} 撤回` : ''}</p>}
+        {/* The tool is named beside, never instead of, the person who confirmed the row. */}
+        {observation.aiAssist && <p className="cf-event__recorded">由 AI 協助（{providerSpec(observation.aiAssist.provider)?.label ?? observation.aiAssist.provider} · {observation.aiAssist.model} · {formatDate(observation.aiAssist.at)}）</p>}
         {isWithdrawn && <p className="cf-superseded-note"><Undo2 size={14} />此記錄已撤回，不再計入覆蓋與跟進，保留作追溯。</p>}
         {onWithdraw && canWithdraw?.(observation) && (asking === observation.id
           ? <div className="cf-withdraw-ask" role="group" aria-label="確認撤回記錄"><span>撤回後這筆記錄不再計入覆蓋與跟進，但仍留在歷史。確定撤回？</span><button type="button" className="cf-button cf-withdraw__confirm" onClick={() => { setAsking(undefined); onWithdraw(observation.id); }}>確定撤回</button><button type="button" className="cf-button cf-button--ghost" onClick={() => setAsking(undefined)}>取消</button></div>

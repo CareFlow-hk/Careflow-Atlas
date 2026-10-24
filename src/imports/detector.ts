@@ -9,7 +9,7 @@
 import * as XLSX from 'xlsx';
 import { readWorkbook } from '../data/readWorkbook';
 import {
-  DETECTOR_VERSION, FORMAT_PROFILES, normalizeHeader, profileById,
+  DETECTOR_VERSION, FORMAT_PROFILES, SYSTEM_COLUMNS, normalizeHeader, profileById,
   type CanonicalField, type DetectionStatus, type FieldSpec, type FieldStatus,
   type FormatProfile, type ProfileId,
 } from './profiles';
@@ -266,7 +266,7 @@ function finalize(profile: FormatProfile, sheet: SheetMatrix, evaluation: RowEva
   const unmatchedColumns: UnmatchedColumn[] = headers
     .map((sourceHeader, index) => ({ columnIndex: index, sourceHeader, candidateFor: candidateFor.get(index),
       hasData: sheet.matrix.slice(evaluation.row + 1).some(line => !isBlank(line[index])) }))
-    .filter(column => !claimed.has(column.columnIndex) && (column.sourceHeader !== '' || column.hasData));
+    .filter(column => !claimed.has(column.columnIndex) && !SYSTEM_COLUMNS.includes(column.sourceHeader) && (column.sourceHeader !== '' || column.hasData));
 
   // Counted after the person in charge's corrections, and counting ambiguity:
   // a field with several candidate columns is recognised, not absent — it just

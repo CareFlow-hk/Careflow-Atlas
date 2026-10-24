@@ -73,11 +73,21 @@ export function createWorkspaceStore(auth) {
        */
       requireValue(current === undefined ? baseVersion === undefined : baseVersion === current, 409,
         current === undefined ? '資料已在其他裝置建立，請重新載入。' : '資料已在其他裝置更新，請重新載入。');
-      assertWorkspaceWrite(user, parse(row), snapshot);
+      const previous = parse(row);
+      assertWorkspaceWrite(user, previous, snapshot);
       const version = (current ?? 0) + 1;
       if (current === undefined) auth.run('INSERT INTO org_workspaces(org_id,snapshot,version,updated_at) VALUES(?,?,?,?)', user.org_id, json, version, Date.now());
       else auth.run('UPDATE org_workspaces SET snapshot=?,version=?,updated_at=? WHERE org_id=?', json, version, Date.now(), user.org_id);
       auth.audit(user.id, 'workspace_saved', user.id);
+      /*
+       * One audit row per write that added AI-assisted records, carrying the count and
+       * nothing else: the records themselves hold the detail, and the audit table is not a
+       * second copy of residents' data. A marker is a disclosure, not a proof, so the row
+       * says what the client declared, not what the server verified.
+       */
+      const known = new Set((previous?.observations ?? []).map(record => record?.id));
+      const aiAssisted = snapshot.observations.filter(record => record?.aiAssist && !known.has(record.id)).length;
+      if (aiAssisted) auth.audit(user.id, 'ai_assisted_write', `${aiAssisted} 筆記錄`);
       return { version };
     });
   };

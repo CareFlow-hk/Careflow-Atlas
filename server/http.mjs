@@ -1,12 +1,13 @@
 import { createServer } from 'node:http';
 import { createPhotoService, PHOTO_BODY_LIMIT } from './photos.mjs';
-import { createFeatureStore } from './features.mjs';
+import { createFeatureStore, FEATURES } from './features.mjs';
 import { listOrgs } from './orgs.mjs';
 import { createWorkspaceStore, WORKSPACE_BODY_LIMIT } from './workspace.mjs';
 import { createWorkspaceKeyStore } from './workspaceKey.mjs';
+import { createOrgAiStore } from './orgAi.mjs';
 import { HttpError, requireValue, publicUser, SESSION_IDLE_MS } from './auth.mjs';
 
-export function createAuthServer(auth, { origin, secure = true, trustProxy = false, photos = createPhotoService(), features = createFeatureStore(auth), workspace = createWorkspaceStore(auth), keys = createWorkspaceKeyStore(auth) }) {
+export function createAuthServer(auth, { origin, secure = true, trustProxy = false, photos = createPhotoService(), features = createFeatureStore(auth), workspace = createWorkspaceStore(auth), keys = createWorkspaceKeyStore(auth), ai = createOrgAiStore(auth) }) {
   requireValue(new URL(origin).origin === origin, 500, 'APP_ORIGIN 必須是完整 origin，不帶路徑或末尾斜線。');
   requireValue(!secure || origin.startsWith('https://'), 500, '安全 Cookie 需要 HTTPS APP_ORIGIN。');
   const cookieName = secure ? '__Host-atlas_session' : 'atlas_session';
@@ -119,6 +120,31 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
           return send(res, 200, workspace.remove(user));
         }
       }
+      /*
+       * The institution's AI credential (server/orgAi.mjs). The server holds only the sealed
+       * copy, so it can neither read, log nor leak it; every member of the institution may
+       * fetch that copy to use the assistant, and only an administrator sets or removes it.
+       * Scoped to the session's organisation, never to an id in the request.
+       */
+      if (path === '/api/org/ai' || path === '/api/org/ai/key') {
+        if (path === '/api/org/ai/key') {
+          // Off unless this institution turned it on: the copy is what actually calls the provider.
+          requireValue(features.enabled('aiAssistant', user.org_id), 403, 'AI 助手未開啟，請聯絡機構管理員。');
+          requireValue(req.method === 'GET', 405, '不支援這個請求方式。');
+          auth.limit(`aikey:${user.id}`, 240);
+          const value = ai.sealed(user.org_id);
+          requireValue(value, 404, '尚未設定 AI 密鑰，請聯絡機構管理員。');
+          return send(res, 200, value);
+        }
+        // The status carries no part of the key, so it stays visible even while the switch is
+        // off: an administrator sets the key first, then opens the assistant.
+        if (req.method === 'GET') return send(res, 200, ai.status(user.org_id));
+        if (req.method === 'PUT' || req.method === 'DELETE') {
+          auth.limit(`admin:${user.id}`, 30);
+          return send(res, 200, req.method === 'PUT' ? ai.put(user, body) : ai.remove(user));
+        }
+        throw new HttpError(405, '不支援這個請求方式。');
+      }
       if (req.method === 'POST' && path === '/api/logout') {
         auth.transaction(() => { auth.run('DELETE FROM sessions WHERE hash=?', row.hash); auth.audit(user.id, 'logout'); });
         res.setHeader('Set-Cookie', cookie('', 0)); return send(res, 200, { ok: true });
@@ -137,12 +163,17 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
         if (req.method === 'GET' && path === '/api/admin/users') return send(res, 200, { users: auth.all('SELECT * FROM users WHERE org_id=? ORDER BY created_at,id', user.org_id).map(publicUser) });
         if (req.method === 'PUT' && path === '/api/admin/features') {
           // Where data goes is decided by whoever runs the site, so an institution's
-          // administrator sees the switches but does not turn them. A per-institution switch
-          // names its institution; without one it is the administrator's own.
-          auth.assertSession(row, 'platform');
+          // administrator sees those switches but does not turn them. Its own AI assistant is
+          // the exception (2026-10-23): that one is the institution's call, for its own
+          // institution only. Naming another institution is refused, never silently rewritten.
+          // A per-institution switch names its institution; without one it is the caller's own.
+          requireValue(Object.hasOwn(FEATURES, body.key), 400, '沒有這個功能開關。');
           auth.limit(`admin:${user.id}`, 30);
           const orgId = body.orgId === undefined ? user.org_id : body.orgId;
-          return send(res, 200, { features: features.set(body.key, body.enabled, user.id, orgId), orgs: features.byOrg() });
+          if (FEATURES[body.key].who === 'platform') auth.assertSession(row, 'platform');
+          else requireValue(orgId === user.org_id || user.platform_admin === 1, 403, '機構管理員只可以切換本機構的功能開關。');
+          // The list of every institution is the platform administrator's view only.
+          return send(res, 200, { features: features.set(body.key, body.enabled, user.id, orgId), orgs: user.platform_admin ? features.byOrg() : [] });
         }
         // Every institution with its people counted and its own switches, for the platform administrator only.
         if (req.method === 'GET' && path === '/api/admin/orgs') {

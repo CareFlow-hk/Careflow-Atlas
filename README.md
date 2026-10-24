@@ -2,43 +2,43 @@
 
 # CareFlow Atlas
 
-> 西營盤社區客廳「洗樓」外展工作台 —— 用合成資料砌出嚟嘅前端原型。
+> 西营盘社区客厅「洗樓」外展工作台 —— 用合成资料砌出嚟嘅前端原型。
 
-呢個 repo 係一個**示範原型**同前端基礎，**唔係**已經上線嘅 NGO 系統。已加入独立账号后端与登录；仍无共享业务数据库、多租户、离线同步或审批流程；亦都**唔可以**入任何真實居民資料。
+呢个 repo 系一个**示范原型**同前端基础，**唔系**已经上线嘅 NGO 系统。已加入独立账号后端与登录；仍无共享业务数据库、多租户、离线同步或审批流程；亦都**唔可以**入任何真实居民资料。
 
 ## 而家做得到啲乜
 
-**紙本／Excel**
+**纸本／Excel**
 
-- **照片回錄**：支援多張洗樓紙本照片，經 Azure `gpt-6-luna` 辨識後，在原圖旁逐筆核對，再追加到訪與待跟進記錄。包括草稿恢復、逐張重試、手動補錄、相同檔案重複保護，以及桌面／手機介面。API key 只在伺服器配置。見 [照片回錄與 Azure 配置](docs/PHOTO_INTAKE.md)。
+- **照片回录**：支援多张洗楼纸本照片，经 Azure `gpt-6-luna` 辨识后，在原图旁逐笔核对，再追加到访与待跟进记录。包括草稿恢复、逐张重试、手动补录、相同文件重复保护，以及桌面／手机界面。API key 只在服务器配置。见 [照片回录与 Azure 配置](docs/PHOTO_INTAKE.md)。
 
-- 格式識別與欄位對應只供預覽。改動對應後會撤銷舊的待匯入資料，請整理原檔再重新載入；三種推測格式尚不支援寫入。
+- 格式识别与字段对应只供预览。改动对应后会撤销旧的待导入资料，请整理原档再重新载入；三种推测格式尚不支援写入。
 
-- 喺瀏覽器直接解析合成 `.xlsx`，逐行列出驗證問題，唔會靜靜哋丟咗有問題嘅行。
-- 匯出／合併中文六表工作簿，有歷史保護同行級覆核。
-- **追加式更正**：錯嘅記錄唔改唔刪。另開一行，喺「更正原記錄編號」填返要更正嗰條，更正鏈鏈尾生效；被更正嘅原行退出覆蓋計算，但保留喺歷史度兼標明「已被更正」。同一條原記錄有兩條並行更正就報衝突，要人手揀；修改跟進或結案關係必須寫明更正原因。
+- 喺浏览器直接解析合成 `.xlsx`，逐行列出验证问题，唔会静静哋丢咗有问题嘅行。
+- 导出／合并中文六表工作簿，有历史保护同行级复核。
+- **追加式更正**：错嘅记录唔改唔删。另开一行，喺「更正原記錄編號」填返要更正𠮶条，更正链链尾生效；被更正嘅原行退出覆盖计算，但保留喺历史度兼标明「已被更正」。同一条原记录有两条并行更正就报冲突，要人手拣；修改跟进或结案关系必须写明更正原因。
 
-**地圖同外展**
+**地图同外展**
 
-- 喺真實 OpenStreetMap 西營盤底圖上面睇合成樓宇，揀樓 → 俯衝視角 → 展開樓層堆疊。
-- 睇樓層／單位狀態：明確否定結果、不確定判斷、接觸結果、待跟進。
-- 追加新觀察，唔會覆蓋舊歷史。
-- 載入 20 幢樓嘅街區 mock（123 層、362 個單位、56 個合成人物、多次探訪紀錄），合併時保留現有記錄。
-- 底板或者 WebGL 唔得嘅時候，樓宇清單同表單一樣行得到。
+- 喺真实 OpenStreetMap 西营盘底图上面睇合成楼宇，拣楼 → 俯冲视角 → 展开楼层堆叠。
+- 睇楼层／单位状态：明确否定结果、不确定判断、接触结果、待跟进。
+- 追加新观察，唔会覆盖旧历史。
+- 载入 20 幢楼嘅街区 mock（123 层、362 个单位、56 个合成人物、多次探访纪录），合并时保留现有记录。
+- 底板或者 WebGL 唔得嘅时候，楼宇清单同表单一样行得到。
 
 **其他**
 
-- 整份合成 snapshot 經 repository + `localStorage` 存喺呢個瀏覽器，亦可以匯出做 JSON。
+- 整份合成 snapshot 经 repository + `localStorage` 存喺呢个浏览器，亦可以导出做 JSON。
 
-## 唔好當真嘅嘢
+## 唔好当真嘅嘢
 
-- 所有業務記錄、人物、地址、層數、單位間隔**全部係合成**。地圖圖磚同周邊樓宇係真實地理資料，高亮嘅 CareFlow 目標係示意。
-- **未做**：共享业务数据库、租戶隔離、離線同步、審批、任何自動醫療或法律判斷。
-- 照片辨識需由使用者按「開始辨識」，將處理後的照片傳送至配置的 Azure OpenAI 服務；請只使用合成或獲准的測試樣本。沒有新增模型訓練流程。
+- 所有业务记录、人物、地址、层数、单位间隔**全部系合成**。地图图砖同周边楼宇系真实地理资料，高亮嘅 CareFlow 目标系示意。
+- **未做**：共享业务数据库、租户隔离、离线同步、审批、任何自动医疗或法律判断。
+- 照片辨识需由使用者按「開始辨識」，将处理后的照片传送至配置的 Azure OpenAI 服务；请只使用合成或获准的测试样本。没有新增模型训练流程。
 
-## 本機運行
+## 本机运行
 
-實測環境：**Node.js v24.15.0 / npm 11.12.1**。
+实测环境：**Node.js v24.15.0 / npm 11.12.1**。
 
 ```bash
 npm ci
@@ -50,52 +50,52 @@ npm run build
 npm run dev             # vite --host 127.0.0.1
 ```
 
-请先按 [账号开发步骤](docs/ACCOUNTS.md#本机开发) 配置 `.env`、初始化管理员并启动 `npm run auth:dev`。登入後揀 **載入示範資料**；想睇 Excel 核對流程，就揀 **紙本與 Excel** → **重新載入示範資料**。生产验证请使用 Docker 同源双服务部署。
+请先按 [账号开发步骤](docs/ACCOUNTS.md#本机开发) 配置 `.env`、初始化管理员并启动 `npm run auth:dev`。登入后拣 **載入示範資料**；想睇 Excel 核对流程，就拣 **紙本與 Excel** → **重新載入示範資料**。生产验证请使用 Docker 同源双服务部署。
 
-| 檔案 | 用途 |
+| 文件 | 用途 |
 | --- | --- |
-| [docs/EXCEL_WORKFLOW.md](docs/EXCEL_WORKFLOW.md) | 中文六表流程同更正規則 |
-| [public/demo/careflow-paper-excel-mock.xlsx](public/demo/careflow-paper-excel-mock.xlsx) | 手造範本。入面有 14 個下拉選單同凍結窗格，SheetJS 讀唔到呢啲格式資訊 —— **唔好**用 SheetJS 重寫佢，會靜靜哋拆走 |
-| [public/demo/careflow-field-outreach-demo.xlsx](public/demo/careflow-field-outreach-demo.xlsx) | 舊英文工作簿，一樣支援 |
+| [docs/EXCEL_WORKFLOW.md](docs/EXCEL_WORKFLOW.md) | 中文六表流程同更正规则 |
+| [public/demo/careflow-paper-excel-mock.xlsx](public/demo/careflow-paper-excel-mock.xlsx) | 手造范本。入面有 14 个下拉选单同冻结窗格，SheetJS 读唔到呢啲格式资讯 —— **唔好**用 SheetJS 重写佢，会静静哋拆走 |
+| [public/demo/careflow-field-outreach-demo.xlsx](public/demo/careflow-field-outreach-demo.xlsx) | 旧英文工作簿，一样支援 |
 
-## 設定
+## 设定
 
-預設底圖係 OpenFreeMap Positron，要連網先攞到圖磚、glyph 同 style 資源。
+预设底图系 OpenFreeMap Positron，要连网先攞到图砖、glyph 同 style 资源。
 
 ```bash
 VITE_MAP_STYLE_URL=https://example.org/style.json npm run dev
 ```
 
-`VITE_` 開頭嘅嘢會入到瀏覽器 bundle，**唔好**放密碼，見 [.env.example](.env.example)。應用程式碼唔會將業務記錄送去地圖供應商；供應商收到嘅係正常請求地圖資源時附帶嘅網絡資訊。
+`VITE_` 开头嘅嘢会入到浏览器 bundle，**唔好**放密码，见 [.env.example](.env.example)。应用程序码唔会将业务记录送去地图供应商；供应商收到嘅系正常请求地图资源时附带嘅网络资讯。
 
 ## VPS 部署
 
-现在必须运行 Nginx 前端和 Node 账号服务。复制 `.env.example` 为 `.env` 并设置实际 HTTPS 域名与空闲端口，然后运行：
+现在必须运行 Nginx 前端和 Node 账号服务。复制 `.env.example` 为 `.env` 并设定实际 HTTPS 域名与空闲端口，然后运行：
 
 ```bash
 docker compose up -d --build --wait
 docker compose exec auth node server/manage.mjs bootstrap admin@example.org 管理员
 ```
 
-使用命令输出的一次性链接设置密码。完整的 HTTPS 反代、邀请、备份与恢复步骤见 [docs/ACCOUNTS.md](docs/ACCOUNTS.md)。只上传 `dist/` 或使用 `.openai/hosting.json` 的旧静态托管目标无法运行账号系统。
+使用命令输出的一次性链接设定密码。完整的 HTTPS 反代、邀请、备份与恢复步骤见 [docs/ACCOUNTS.md](docs/ACCOUNTS.md)。只上传 `dist/` 或使用 `.openai/hosting.json` 的旧静态托管目标无法运行账号系统。
 
-## 專案結構
+## 专案结构
 
 - [`server/`](server/) — 账号 API、SQLite、会话、审计及运维脚本
 - [`src/auth/`](src/auth/) — 登录、激活、账号管理界面
-- [`src/domain/`](src/domain/) — 領域記錄同覆蓋摘要（瀏覽器無關）
-- [`src/data/`](src/data/) — 工作簿適配、repository 邊界、本機持久化、合成 fixtures
-- [`src/app/`](src/app/) — Zustand 工作區狀態同應用組裝
-- [`src/map/`](src/map/) — MapLibre 場景同與 renderer 無關嘅空間 view model
-- [`src/components/`](src/components/) — 匯入、樓宇、觀察、歷史流程
-- [`scripts/generate-demo.ts`](scripts/generate-demo.ts) — 確定性合成工作簿生成器
-- [`docs/`](docs/) — 來源評審、架構、決策、示範劇本
-- [`public/demo/`](public/demo/) — 應用會 fetch 嘅工作簿；[`samples/`](samples/) — 歸檔用嘅重複副本，build 唔會用到
+- [`src/domain/`](src/domain/) — 领域记录同覆盖摘要（浏览器无关）
+- [`src/data/`](src/data/) — 工作簿适配、repository 边界、本机持久化、合成 fixtures
+- [`src/app/`](src/app/) — Zustand 工作区状态同应用组装
+- [`src/map/`](src/map/) — MapLibre 场景同与 renderer 无关嘅空间 view model
+- [`src/components/`](src/components/) — 导入、楼宇、观察、历史流程
+- [`scripts/generate-demo.ts`](scripts/generate-demo.ts) — 确定性合成工作簿生成器
+- [`docs/`](docs/) — 来源评审、架构、决策、示范剧本
+- [`public/demo/`](public/demo/) — 应用会 fetch 嘅工作簿；[`samples/`](samples/) — 归档用嘅重复副本，build 唔会用到
 
-邊啲係原始碼、邊啲係生成、點重建，睇 [INDEX.md](INDEX.md)；證據邊界睇 [docs/SOURCE_REVIEW.md](docs/SOURCE_REVIEW.md)；已實作設計睇 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+边啲系源代码、边啲系生成、点重建，睇 [INDEX.md](INDEX.md)；证据边界睇 [docs/SOURCE_REVIEW.md](docs/SOURCE_REVIEW.md)；已实作设计睇 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
-## 真正試點之前
+## 真正试点之前
 
-要攞到同核實：真實紙本表格、人物層／樓宇層工作簿、覆蓋同重訪定義、成員同住戶規則、裝置同網絡條件，仲有機構嘅存取、保留、刪除、備份同外部供應商政策。合成適配器要逐步換走，**唔好**將真實記錄上傳入呢個原型。
+要攞到同核实：真实纸本表格、人物层／楼宇层工作簿、覆盖同重访定义、成员同住户规则、装置同网络条件，仲有机构嘅存取、保留、删除、备份同外部供应商政策。合成适配器要逐步换走，**唔好**将真实记录上传入呢个原型。
 
-自動檢查、瀏覽器驗證同未測試嘅運行條件見 [docs/VALIDATION.md](docs/VALIDATION.md)。
+自动检查、浏览器验证同未测试嘅运行条件见 [docs/VALIDATION.md](docs/VALIDATION.md)。

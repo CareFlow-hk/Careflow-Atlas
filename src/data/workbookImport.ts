@@ -61,6 +61,23 @@ function parseSheet(workbook: XLSX.WorkBook, name: string, issues: WorkbookImpor
 function unique<T extends { id: string }>(items: T[], sheet: string, issues: WorkbookImportIssue[]) { const ids = new Set<string>(); items.forEach((item, index) => { if (ids.has(item.id)) issue(issues, "error", "DUPLICATE_ID", sheet, index + 2, "id", `Duplicate id '${item.id}'.`); ids.add(item.id); }); }
 function requireValue(row: Row, key: string, sheet: string, rowIndex: number, issues: WorkbookImportIssue[]): string | undefined { const value = text(row[key]); if (!value) issue(issues, "error", "REQUIRED_VALUE", sheet, rowIndex, key, "A non-blank value is required."); return value; }
 
+/**
+ * Whether a workbook is even meant for this importer.
+ *
+ * It speaks one layout only — the old English demo export — and `parseWorkbook` reports a
+ * missing sheet as a fixable error. Run on any other file, that turned one unrecognised
+ * table into five "required sheet ... is missing" errors: an accurate description of the
+ * importer, and a false accusation about the person's file (`CLAUDE.md` 3.1 — an off-list
+ * format is refused with a reason, not blamed for missing sheets it never had). The two
+ * sheets are the marker: the row sheet and the sheet that marks the file synthetic.
+ */
+export function isLegacySnapshot(buffer: ArrayBuffer): boolean {
+  try {
+    const names = new Set(readWorkbook(buffer).SheetNames);
+    return names.has('Observations') || names.has('Metadata');
+  } catch { return false; }
+}
+
 /** Parses only the deliberately designed synthetic workbook layout. Unknown sheets and unmapped data block import. */
 export function parseWorkbook(buffer: ArrayBuffer): WorkbookImportResult {
   const issues: WorkbookImportIssue[] = []; let workbook: XLSX.WorkBook;

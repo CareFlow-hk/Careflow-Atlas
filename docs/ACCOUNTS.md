@@ -176,10 +176,30 @@ VERIFY_BROWSER=1 bash deploy/verify.sh
 
 管理员在「设定 › 功能开关」打开或关闭全站功能，不需要 SSH 改 `.env`。状态存在账号库的 `features` 表，默认全部关闭；每次切换都写进操作记录（谁、何时、开或关）。
 
-| 开关 | 关闭时 |
-| --- | --- |
-| `photoIntake` 照片回录（Azure 辨识） | 顶栏不显示入口；`POST /api/photos/recognize` 在读取上传内容之前就返回 403，照片不会送出 |
+| 开关 | 范围 | 谁能切换 | 关闭时 |
+| --- | --- | --- | --- |
+| `photoIntake` 照片回录（Azure 辨识） | 全站 | 平台管理员 | 顶栏不显示入口；`POST /api/photos/recognize` 在读取上传内容之前就返回 403，照片不会送出 |
+| `workspaceSync` 跨装置同步 | 按机构 | 平台管理员 | `GET`／`PUT`／`DELETE /api/workspace` 一律 403，资料只留在各自装置 |
+| `aiAssistant` AI 助手（Excel 栏位建议） | 按机构 | **机构管理员**（只限本机构） | `GET /api/org/ai/key` 返回 403，不能调用 AI；`GET /api/org/ai`（状态，不含密钥）仍可读，方便管理员先设好再开 |
 
-- 读取：`GET /api/features`（登入即可）。修改：`PUT /api/admin/features`，`{ key, enabled }`，仅管理员。
+- 读取：`GET /api/features`（登入即可）。修改：`PUT /api/admin/features`，`{ key, enabled, orgId? }`，仅管理员。
+- `orgId` 只对按机构的开关有意义；不给就是调用者自己的机构。机构管理员指定别的机构返回 `403`（不会静默改成本机构），平台管理员可以代任何机构切换。
 - 机密仍放 `.env`：开关不能代替 Azure key。开了但没配 key，设定页会提示无法辨识。
 - 新增开关：在 `server/features.mjs` 的 `FEATURES` 加一项，界面文字加在 `AccountPanel` 的 `featureText`，服务器端在对应接口用 `features.enabled(key)` 拦住。只藏按钮不算关闭。
+
+## 机构的 AI 密钥（2026-10-23，阶段 1）
+
+AI 助手的供应商密钥由**机构管理员**设定，存放在账号库的 `org_ai_settings`（每个机构一行）。**服务器只存浏览器加密后的密文**：密钥用机构密语的资料钥匙封装（与工作区同一套 `enc:v1:` 格式，`src/data/workspaceCipher.ts` 的 `sealSecret`），服务器读不到原文，也写不进日志。
+
+| 接口 | 谁能调用 | 说明 |
+| --- | --- | --- |
+| `GET /api/org/ai` | 同机构任何已登入账号 | 状态：是否已设定、供应商、型号、最后修改人与时间。**不含密钥任何部分**（没有遮罩尾数，也没有长度） |
+| `GET /api/org/ai/key` | 同机构任何已登入账号，且 `aiAssistant` 已开 | 返回封好的密文 `{ provider, model, sealedKey }`，浏览器用本机已解锁的机构钥匙打开后调用供应商。未设定返回 `404`，开关关闭返回 `403` |
+| `PUT /api/org/ai` | **仅机构管理员**（员工 `403`） | `{ provider, model, sealedKey }`。`sealedKey` 必须是 `enc:v1:` 形态，送明文一律 `400` |
+| `DELETE /api/org/ai` | **仅机构管理员** | 移除该机构的密钥，重复调用不报错 |
+
+- 供应商白名单写死在 `server/orgAi.mjs` 的 `PROVIDERS`（Azure OpenAI、OpenAI、Anthropic、DeepSeek），**不接受自订 base URL**。
+- 写入与移除都会记操作记录：`ai_key_set`／`ai_key_changed`／`ai_key_removed`，对象是 `供应商@机构ID`。**密钥本身永不进审计**。
+- 浏览器要持有机构钥匙才能储存：没有机构资料钥匙就没有东西可封装，界面会直接说不，不会退而求其次把密钥留在分页里。同步开关**不影响**这一步，只要这部装置设定或解锁过机构密语即可；换装置或清了浏览器资料就要重新输入密语。
+- 接口按会话里的 `user.org_id` 取资料，请求里没有机构 ID；其他机构既读不到也改不了。
+- 员工能在开发者工具里取到密钥，这是**已经接受的取舍**，理由见 [AI_ASSISTANT.md](AI_ASSISTANT.md) 第 2、3 节。

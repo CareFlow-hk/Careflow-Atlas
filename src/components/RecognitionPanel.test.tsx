@@ -4,6 +4,7 @@ import { RecognitionPanel } from './RecognitionPanel';
 import { columnChoice, detectWorkbook, recognitionBlocker } from '../imports/detector';
 import { REGRESSION_SAMPLES, sampleBuffer } from '../imports/samples';
 import { paperHeaders } from '../data/workflowFormat';
+import { SYSTEM_COLUMNS } from '../imports/profiles';
 
 const render = (id: string, override?: Parameters<typeof detectWorkbook>[1]) => {
   const sample = REGRESSION_SAMPLES.find((entry) => entry.id === id);
@@ -19,7 +20,7 @@ describe('recognition preview', () => {
     expect(html).toContain('已識別');
     expect(html).toContain('紙本回錄');
     // One select per field, plus the format picker.
-    expect(html.match(/<select/g)).toHaveLength(paperHeaders.length + 1);
+    expect(html.match(/<select/g)).toHaveLength(paperHeaders.filter((header) => !SYSTEM_COLUMNS.includes(header)).length + 1);
     expect(html).toContain('大廈編號 對應欄位');
   });
 

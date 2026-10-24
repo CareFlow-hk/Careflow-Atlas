@@ -7,7 +7,7 @@ import { blankSnapshot } from '../data/blankSnapshot';
 import { addFloors } from '../domain/structure';
 
 /** These tests are about syncing, not encryption; workspaceCipher.test.ts covers that. */
-const plain: WorkspaceCipher = { keyId: 'test', seal: async snapshot => snapshot, open: async value => value };
+const plain: WorkspaceCipher = { keyId: 'test', sealValue: async text => text, openValue: async text => text, seal: async snapshot => snapshot, open: async value => value };
 
 describe('building focus', () => {
   beforeEach(() => useWorkspace.setState({ snapshot: demoSnapshot, expanded: false, selectedBuildingId: undefined, selectedFloorId: undefined, selectedUnitId: undefined }));

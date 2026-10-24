@@ -144,3 +144,79 @@
 .cf-recognition__detail>summary{cursor:pointer;font-size:13px;font-weight:600;color:#315049;margin:6px 0}
 .cf-issue-list{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:8px;max-height:min(46vh,420px);overflow:auto}.cf-issue{border:1px solid #e3e8e4;border-left:4px solid #a34f43;border-radius:8px;padding:10px 12px;background:#fff}.cf-issue.is-warning{border-left-color:#c58726;background:#fffdf7}.cf-issue__where{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:12px;color:#5f716d}.cf-issue__badge{display:inline-flex;align-items:center;gap:4px;font-weight:700;color:#8b3e32}.cf-issue.is-warning .cf-issue__badge{color:#85520c}.cf-issue__message{margin:6px 0 4px;font-size:14px;line-height:1.7;color:#203b36}.cf-issue__tech summary{cursor:pointer;font-size:11px;color:#7a8a85;width:max-content}.cf-issue__tech dl{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;margin:6px 0 0;font-size:11px;color:#4f625d}.cf-issue__tech dt{color:#7a8a85}.cf-issue__tech dd{margin:0;min-width:0;overflow-wrap:anywhere}.cf-issue__tech pre{margin:0;white-space:pre-wrap;font:11px/1.5 ui-monospace,Menlo,monospace}.cf-issues h3 span{font-size:12px;font-weight:500;color:#8b3e32;margin-left:6px}
 .excel-record-preview article.needs-check{border-left:3px solid #c58726;padding-left:10px}
+
+/* The standalone assistant dialog (`docs/AI_ASSISTANT.md` 6.1). */
+.cf-dialog--ai{width:min(860px,calc(100vw - 28px))}
+.cf-ai{padding:22px}
+.cf-ai h3{display:flex;align-items:center;gap:6px;margin:0 0 8px;font-size:15px;font-weight:550}
+.cf-ai__label{display:block;margin:14px 0 6px;font-size:13px;font-weight:550}
+.cf-ai__text{width:100%;box-sizing:border-box;border:1px solid #cad8d4;border-radius:9px;padding:10px;font:inherit;font-size:14px;resize:vertical}
+.cf-ai__send{display:flex;justify-content:flex-end;margin:8px 0 14px}
+.cf-ai__note{margin:8px 0;font-size:12px;line-height:1.7;color:#5e6d63}
+.cf-ai__busy{display:flex;align-items:center;gap:8px;padding:26px 4px;font-size:14px;color:#315049}
+.cf-ai__preview{margin-top:14px}
+.cf-ai__preview>p{margin:6px 0;font-size:13px;line-height:1.7}
+.cf-ai__preview pre{white-space:pre-wrap;background:#f4f8f6;border-radius:9px;padding:12px;font:13px/1.7 ui-monospace,Menlo,monospace;max-height:220px;overflow:auto}
+.cf-ai__file{margin-top:14px;border:1px solid #dde6e3;border-radius:10px;padding:12px;background:#fbfdfc}
+.cf-ai__extras{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:4px}
+.cf-ai__extras li{display:flex;align-items:center;gap:8px;font-size:12px}
+.cf-ai__extras b{font-size:10px;font-weight:550;background:#fff2da;color:#85520c;border-radius:999px;padding:1px 6px}
+.cf-ai__extras b:last-child{margin-left:auto;background:#eaf2ee;color:#126455}
+.cf-ai__mapping{width:100%;border-collapse:collapse;font-size:12px}
+.cf-ai__mapping th,.cf-ai__mapping td{padding:5px 6px;border-bottom:1px solid #e6ece9;text-align:left;vertical-align:top}
+.cf-ai__mapping thead th{font-size:11px;color:#6d7b72;font-weight:550}
+.cf-ai__mapping tbody th{font-weight:550}
+.cf-ai__mapping tr.is-mapped{background:#f4fbf7}
+.cf-ai__mapping select{max-width:100%;border:1px solid #cad8d4;border-radius:7px;padding:6px;font:inherit;font-size:12px;background:#fff}
+.cf-ai__required{margin-left:6px;font-size:10px;font-weight:550;background:#eaf2ee;color:#126455;border-radius:999px;padding:1px 6px}
+.cf-ai__folded td{padding:8px 0 0;border-bottom:0}
+.cf-ai__folded summary{cursor:pointer;font-size:12px;color:#126455}
+.cf-ai__folded table{margin-top:8px}
+.cf-ai__unmapped{margin-top:14px;border-top:1px solid #e1e9e6;padding-top:12px}
+.cf-ai__warnings{margin:10px 0 0;padding-left:20px;font-size:12px;color:#7d5310}
+.cf-ai__actions{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:6px;max-height:min(46vh,430px);overflow:auto}
+.cf-ai__actions li{display:grid;grid-template-columns:20px 1fr;gap:8px;border:1px solid #e3e8e4;border-left:4px solid #c58726;border-radius:8px;padding:8px 10px;background:#fff;font-size:12px}
+.cf-ai__actions li.is-record{border-left-color:#126455}
+.cf-ai__actions strong{display:block;font-size:13px;font-weight:550}
+.cf-ai__actions small{color:#637570}
+.cf-ai__skipped{margin-top:12px;border-top:1px solid #e1e9e6;padding-top:10px}
+.cf-ai__skipped summary{cursor:pointer;font-size:12px;color:#8b3e32}
+.cf-ai__skipped ul{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:6px}
+.cf-ai__skipped li{font-size:12px;border-left:3px solid #e3c7c3;padding-left:8px}
+.cf-ai__skipped strong{display:block;font-size:12px;font-weight:550}
+.cf-ai__skipped small{color:#8b3e32}
+.cf-ai__mapping-details{margin-top:12px;border-top:1px solid #e1e9e6;padding-top:10px}
+.cf-ai__mapping-details>summary{cursor:pointer;font-size:12px;color:#126455}
+.cf-ai__rowmark{display:grid;place-items:center;width:18px;height:18px;border-radius:50%;background:#fff0ed;color:#8b3e32;font-size:11px}
+.cf-ai__form{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.cf-ai__form label{display:flex;flex-direction:column;gap:5px;font-size:12px;font-weight:550}
+.cf-ai__form .is-wide{grid-column:1/-1}
+.cf-ai__form input,.cf-ai__form select,.cf-ai__form textarea{min-height:40px;border:1px solid #cad8d4;border-radius:8px;padding:8px;font:inherit;font-size:13px;box-sizing:border-box}
+@media(max-width:760px){.cf-ai__form{grid-template-columns:1fr}.cf-ai__form .is-wide{grid-column:auto}}
+
+/* Task reminders (`docs/AI_ASSISTANT.md` 8): computed on this device, never sent away. */
+.reminder-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#8b3e32;color:#fff;font-size:11px;font-weight:550}
+.cf-dialog--reminder{width:min(720px,calc(100vw - 28px))}
+.cf-reminder-dialog{padding:22px}
+.cf-reminder-dialog__windows{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0 4px}
+.cf-reminder-dialog__windows button{min-height:32px;padding:5px 12px;border:1px solid #cad8d4;border-radius:999px;background:#fff;color:#315049;font:inherit;font-size:12px}
+.cf-reminder-dialog__windows button.is-active{background:#126455;border-color:#126455;color:#fff}
+.cf-reminder__summary{margin:12px 0 4px;font-size:14px;line-height:1.7;color:#203b36}
+.cf-reminder__summary strong{font-weight:600}
+.cf-reminder__note{margin:0 0 6px;font-size:12px;color:#5e6d63}
+.cf-reminder__group h4{display:flex;align-items:center;gap:6px;margin:16px 0 6px;font-size:12px;font-weight:600;color:#617671}
+.cf-reminder__group h4 span{background:#fff2da;color:#85520c;border-radius:999px;padding:0 6px;font-size:11px;font-weight:550}
+.cf-reminder__group ul{list-style:none;margin:0;padding:0;display:grid;gap:6px;max-height:min(52vh,460px);overflow:auto}
+.cf-reminder__task{border:1px solid #e3e8e4;border-left:4px solid #c58726;border-radius:8px;padding:9px 11px;background:#fff}
+.cf-reminder__task.is-overdue{border-left-color:#8b3e32}
+.cf-reminder__task.is-unscheduled{border-left-color:#7a8a85}
+.cf-reminder__where strong{display:block;font-size:13px;font-weight:550}
+.cf-reminder__where p{margin:3px 0 0;font-size:13px;line-height:1.7;color:#203b36}
+.cf-reminder__meta{display:flex;flex-wrap:wrap;align-items:center;gap:5px 10px;margin-top:6px;font-size:11px;color:#5f716d}
+.cf-reminder__who{background:#edf3f1;border-radius:999px;padding:1px 7px}
+.cf-reminder__who.is-none{background:#fff2da;color:#85520c}
+.cf-reminder__open{display:inline-flex;align-items:center;gap:2px;margin-left:auto;border:0;background:none;padding:2px;color:#126455;font:inherit;font-size:11px}
+.cf-reminder__spoken{display:block;margin-top:5px;font-size:11px;line-height:1.6;color:#8a7350}
+.cf-reminder__hidden{display:flex;gap:6px;margin:14px 0 0;padding:9px 10px;border-radius:8px;background:#fff6e8;color:#76501a;font-size:12px;line-height:1.6}
+.cf-reminder__hidden svg{flex:none;margin-top:2px}
+@media(max-width:650px){.cf-reminder-dialog{padding:16px}.cf-reminder__group ul{max-height:none}}
