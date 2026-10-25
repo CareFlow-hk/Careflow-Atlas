@@ -114,12 +114,12 @@ export function AccountPanel({ session, features = {}, onFeaturesChanged, onKeyC
         <button disabled={busy} onClick={() => void perform(async () => { await api('/sessions/revoke-others', 'POST'); await reload(); setMessage('其他裝置已登出。'); })}>登出其他裝置</button>
       </section>
     </div>
-    {/* Every member sees whether the assistant is set up; only an administrator changes it. */}
-    <AiSettingsPanel orgId={session.user.orgId ?? session.user.id} admin={admin} />
+    {/* Every member sees whether the assistant is set up; since phase 5 nobody sets a key here. */}
+    <AiSettingsPanel />
     {admin && <>
       <section className="account-features"><h2>功能開關</h2><p>{platform
-        ? '照片回錄影響全站；跨裝置同步和 AI 助手按機構分開，這裡是本機構的，其他機構的同步在下面「機構」裡開關，AI 助手由各機構自己的管理員開關。預設全部關閉，每次開關都記在操作記錄裡。'
-        : '照片回錄和跨裝置同步由平台管理員（CareFlow 團隊）設定；AI 助手是本機構的事，由你在下面開關。'}</p>
+        ? '照片回錄影響全站；跨裝置同步和 AI 助手按機構分開，這裡是本機構的，其他機構的開關在下面「機構」裡。三項都由平台管理員決定，預設全部關閉，每次開關都記在操作記錄裡。'
+        : '這三項都由平台管理員（CareFlow 團隊）設定，你在這裡看到的是本機構目前的狀態；需要開啟請聯絡平台管理員。'}</p>
         <ul>{(Object.keys(featureText) as (keyof FeatureSwitches)[]).map(key => <li key={key}>
           <label><input type="checkbox" checked={features[key] === true} disabled={busy || !mayTurn()} onChange={e => toggle(key, e.target.checked)} /><strong>{featureText[key].label}</strong>{!mayTurn() && <span className="account-features__state">{features[key] ? '已開啟' : '已關閉'}</span>}</label>
           <p>{featureText[key].detail}</p>
