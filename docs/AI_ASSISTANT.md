@@ -25,7 +25,12 @@
 > 换掉的是「谁持有 key、请求走哪条路、谁有权开关」。见第 2 节决策 16–21、第 4、5、9 节。
 > **AI 本身仍然不会写入资料**：它只产生提案与栏位建议，写入必须由人看过目标清单、按下确认，
 > 记录上带 `aiAssist` 与登录者印记（第 6.1、6.3 节）。
-> 最后修订：2026-10-24。本文档与其他文档一律用简体中文；界面文案仍用繁体，见 `CLAUDE.md` 第 8 节。
+> **2026-10-25 动工前自检**：阶段 5 原稿只写了「代理要做什么」，没写接口形状、上限与几处会
+> 反过来锁死既有资料的细节。本次补齐了 `POST /api/ai/assist` 的请求边界与限流（第 5.2 节）、
+> 状态接口 `GET /api/ai/status`（第 5.2 节）、`requestId` **只在新增记录时核对**（第 6.3 节第 5 点）、
+> 历史 `aiAssist.provider` 白名单必须保留（第 5.3 节）、反向代理的超时与 body 上限（附录 A 第 6 项）。
+> 这些改动都是「不补就不能上」的，理由写在各节里。
+> 最后修订：2026-10-25。本文档与其他文档一律用简体中文；界面文案仍用繁体，见 `CLAUDE.md` 第 8 节。
 
 ## 0. 给读者：使用规则与限制（先读这一节）
 
@@ -256,6 +261,31 @@ POST /api/ai/assist
   9. 审计只记元数据；返回 proposal ＋ aiAssist 元数据
 ```
 
+**请求形状与上限（2026-10-25 补定）**：上面写的是步骤，没写接口。实施前先钉住这几条：
+
+- **一次请求只送一个分块**。`suggestFileMapping` 本来就是逐块调用（第 6.1 节的「分 K 次送出」
+  由前端循环完成），服务器不需要在一次请求里处理多块。所以审计里的 `chunks` 是**这份文件的
+  总块数**（前端声明，服务器校验为 `1..N` 的整数），不是一次请求的块数。
+- **请求体**只有三类：`kind`（`mapping`／`draft`／`patch`）、该模式的资料、可选的一段 `context`
+  文字。字段名与现有 `src/ai/suggest.ts` 的入参一一对应，不加别的。
+- **上限**：请求体 ≤ 512 KiB（`AI_BODY_LIMIT`；`http.mjs` 现在的默认 8 KiB 不够，见附录 A 第 6 项）；
+  单块 ≤ 300 行且 ≤ 80 000 字符（与 `src/ai/preview.ts` 的 `CHUNK_ROWS`／`CHUNK_CHARS` 相同，
+  但要由服务器再判一次，不能只信前端）；`draft` 的 `text` ≤ 8 000 字符；
+  `patch` 的 `rows` ≤ 500（`PATCH_ROW_LIMIT`）。超出回 `413`／`400` 并写明要拆档或分块，
+  **不静默截断**。
+- **限流**：每人 `auth.limit('ai:<user.id>', 30)`（15 分钟窗口）；同一机构**同时进行中**的请求
+  ≤ 2。并发数是进程内计数，重启即清零——这是限流，不是配额，不落库也不进审计。
+  超出 `429`，且**不再调用 Azure**。
+- **逾时**：单次上游 60 秒，最多两次调用（主模型 ＋ 备用一次），总上限 120 秒。
+  反向代理必须给这条路径留同样的余量（附录 A 第 6 项）。
+- **状态接口**：`GET /api/ai/status`，需登录、只读、不限流，回
+  `{ provider: 'azure-openai', configured, enabled, model, fallbackModel }`。
+  `configured` 按第 5.1 节校验 `.env` 得出；`enabled` 是本机构的 `aiAssistant` 开关。
+  **不回 key 的任何形式**——不回复明文、不回复密文、也不回遮罩、长度或指纹。
+  第 5.3 节说的「`GET /api/org/ai` 的状态并入新接口」就是这一条。
+- 客户端若送来 `model`／`store`／`endpoint`／`system`／`schema`／`timeout`／`retry` 任何一个字段，
+  一律 `400`，**不是「忽略」**：静默忽略会让绕过前端的人以为自己的设置生效了。
+
 **前端不能决定的事**：端点、模型、`store`、system prompt、JSON schema、超时、是否重试。
 前端只能送「模式 + 资料」（第 6.1 节）。
 
@@ -280,6 +310,15 @@ POST /api/ai/assist
 - `PUT`／`DELETE /api/org/ai`（设定密钥）**移除**；`GET /api/org/ai` 的「状态」并入新的状态接口。
 - `org_ai_settings` 表**先停用、不立即 drop**，留到 PR6 清理；清理前不得再读写 `sealed_key`。
 - 旧的 `sealed_key` 是历史资料，不是业务资料；审计记录保留，密钥值不再使用。
+- **`server/orgAi.mjs` 的 `PROVIDERS` 白名单不能跟着文件一起删**（2026-10-25 补定）。
+  `server/workspaceAccess.mjs` 用它校验每条记录的 `aiAssist.provider`（第 6.3 节），
+  而工作区是**整份 snapshot** 保存的：历史上带 `deepseek`／`openai`／`anthropic` 标记的记录，
+  会在每一次保存时被重新校验。把这些历史值从白名单里去掉，那些机构的工作区从此**再也存不回去**
+  ——和 3.2「同键内容没变不算改动」踩的是同一类坑。
+  所以 PR2 先把白名单搬到 `server/aiAssist.mjs`（`AI_ASSIST_PROVIDERS`，保留全部历史值），
+  `workspaceAccess.mjs` 与 `orgAi.mjs` 都从那里取；PR6 删 `orgAi.mjs` 时白名单不受影响。
+  这份白名单管的是「**历史标记仍然合法**」，不是「还能选哪家供应商」：阶段 5 之后**只有代理会写**
+  `azure-openai`，其余值不再由任何代码产生。
 
 ## 6. AI 入口
 
@@ -617,6 +656,14 @@ POST /api/ai/assist
    未过期、属同一机构、模型在服务器允许清单内。对不上 → 整批 `400`，不静默丢弃。
 4. 同一机构内的同事可以共用提案例外**不开放**：`requestId` 与发起请求的账号绑定；
    管理员代录时仍须自己发起一次请求（或在阶段 5 实现前明确按「已声明」处理，见第 12 节）。
+5. **只在新增记录时核对 `requestId`**（2026-10-25 补定）。工作区保存是整份 snapshot，
+   `assertAiAssist` 会对**所有**记录跑一遍。如果每次保存都对全部记录核对，一条 8 天前
+   带 `requestId` 的记录过期后，这份工作区就再也存不回去了——员工每次保存都整批 `400`，
+   而且他什么也没改。所以核对只发生在该记录**本次是新增**（`diffSnapshots` 的 `added`）时；
+   已存在的记录按本节「写进去之后不能修改」原样带过，过期不影响保存。
+   已撤回的记录同理不核：软删除不是新增。
+   代价说清楚：伪造的 `requestId` 只能在**写入那一刻**被抓住；写进去之后它就成了历史，
+   和「AI 真的用过但员工没标」一样，只剩抽检。
 
 **这是披露机制，不是审批机制**：带标记的记录照样有效，不额外要求管理员批准；
 它现在能防的是「说了但没发生」（伪造／过期／跨机构的 requestId），
@@ -779,9 +826,11 @@ careflow-atlas.org.<orgId>.<userId>.reminders
   而仓库是公开的。**应用运行时的 AI 日志**与**开发时的 prompt 日志**是两件事：
   前者默认关闭；后者若贴入了真实个人资料，一样是泄漏。开发与排障只能用合成资料；
   是否把 `log/` 移出版本库或改为脱敏摘要，列在第 12 节待定，不要单方面改掉现有约定。
-- **CSP**：`deploy/nginx.conf` 目前没有 `Content-Security-Policy`。阶段 5 起浏览器只连自家服务器，
-  加 CSP 时 `connect-src` **只需要 `'self'`**，不用再列任何供应商端点；服务器出站到 Azure
-  不受浏览器 CORS 与 CSP 限制。旧的 CORS 注解要随之改写（附录 A 第 6 项）。
+- **CSP 与反向代理上限**：`deploy/nginx.conf` 目前没有 `Content-Security-Policy`。阶段 5 起
+  浏览器只连自家服务器，加 CSP 时 `connect-src` **只需要 `'self'`**，不用再列任何供应商端点；
+  服务器出站到 Azure 不受浏览器 CORS 与 CSP 限制。旧的 CORS 注解要随之改写。
+  同一处还要给 `/api/ai/assist` 单独放开 body 与读超时，否则服务器设的上限根本到不了
+  （附录 A 第 6 项）。
 - **key 泄漏后的处置**：轮换 `.env` 并重启即可，所有机构立即改用新 key。
   这比旧的「逐机构换密文」简单，但也意味着一次事故影响所有机构。
 
@@ -862,6 +911,10 @@ careflow-atlas.org.<orgId>.<userId>.reminders
 | 合成资料端到端（mapping／draft 各一次，mock Azure） | 目标清单 → 确认 → 写入；记录带 `aiAssist.provider`／实际 `model`／`requestId` |
 | 伪造 `requestId` | 整批 `400` |
 | 过期或别的机构的 `requestId` | 整批 `400` |
+| 已存过的记录带过期 `requestId`，原样再保存 | `200`：未改动的记录不核对（第 6.3 节第 5 点），否则过期后整份工作区再也存不回去 |
+| 历史 `aiAssist.provider: 'deepseek'` 的记录随工作区保存 | 仍然接受；白名单管历史标记，不等于还能选这家供应商（第 5.3 节） |
+| `GET /api/ai/status` | 只回 `configured`／`enabled`／`model`／`fallbackModel`；断言响应里没有 key 的任何形式（含遮罩、长度、指纹） |
+| 反向代理上限（附录 A 第 6 项） | `/api/ai/assist` 的 `client_max_body_size` ≥ 服务器 `AI_BODY_LIMIT`、`proxy_read_timeout` ≥ 服务器总上限；部署检查里实测一次，不能只看配置文本 |
 | 主备切换后的记录 | `aiAssist.model` 记**实际使用**的备用模型，不是主模型 |
 | 员工写入带 `aiAssist` 的记录 | `createdBy` 是员工；员工不能删除它（现有 403 不变） |
 | 管理员端 | 记录详情看得到「由 AI 協助（Azure OpenAI · 模型 · 时间）」；可筛选；`ai_assisted_write` 不含内容 |
@@ -900,9 +953,11 @@ careflow-atlas.org.<orgId>.<userId>.reminders
 ## 13. 预计的改动拆分（阶段 5）
 
 1. **PR1 文档**：本节所述变更、阶段 5 验收、附录 A 的待定项；不改代码，不改 `CLAUDE.md`。
-2. **PR2 服务器代理与开关**：`server/aiProxy.mjs`、`.env.example`、`features.mjs` 的 `who` 改
-   `platform`、`http.mjs` 的 `POST /api/ai/assist`、限流、模型白名单、`store:false`、
-   主备切换、审计元数据、删除 `GET /api/org/ai/key`。
+2. **PR2 服务器代理与开关**：`server/aiProxy.mjs`、`server/aiAssist.mjs`（搬 `AI_ASSIST_PROVIDERS`，
+   见第 5.3 节）、`features.mjs` 的 `who` 改 `platform`、`http.mjs` 的 `POST /api/ai/assist`
+   与 `GET /api/ai/status`、限流与并发上限、模型白名单、`store:false`、主备切换、审计元数据、
+   删除 `GET /api/org/ai/key`。`.env.example` 已含四个 Azure 变量（2026-10-25 核对），
+   本 PR 只需补 `AZURE_OPENAI_API_KEY` 留空的说明。
 3. **PR3 前端去直连**：`src/ai/client.ts` 改为调自家接口；删除 `credential.ts` 与
    `providers.ts` 的直连规格；`AiSettingsPanel` 改为只读状态；构建产物检查。
 4. **PR4 日志与安全验收**：内容日志关闭、错误处理脱敏、合成资料端到端、Network／构建 grep、
@@ -929,5 +984,16 @@ careflow-atlas.org.<orgId>.<userId>.reminders
 5. **`docs/ENCRYPTION.md`**：这是本次最大的承诺变更。AI 请求经服务器，服务器进程可读内容。
    需要新增「AI 代理例外」：仅在内存转发、不落库、不写内容日志、`store:false`；
    **不能再写「服务器看不到资料」**。这一条要与机构及平台一起定。
-6. **`deploy/nginx.conf` 的 CSP 注解**：从「列出供应商端点」改为「浏览器只连自家服务器；
-   Azure 出站由服务器负责」，`connect-src` 只需要 `'self'`。
+6. **`deploy/nginx.conf`：不只是 CSP 注解**（2026-10-25 补全）。原稿只提到 CSP，
+   实际改起来有三件事，缺一件代理就直接不通：
+   - **CSP 注解 + 真正的 `Content-Security-Policy`**：现在整个文件**没有任何 CSP**
+     （文件末尾的注解解释了原因）。改后浏览器只连自家服务器，
+     `connect-src` 只需要 `'self'`，出站到 Azure 由服务器负责。
+   - **`/api/ai/assist` 要独立的 `location`**：现在的 `location /api/` 是
+     `client_max_body_size 8k`、`proxy_read_timeout 20s`。AI 的请求体上限是 512 KiB、
+     总上限 120 秒，**两条都不够**——大块表会先被 nginx 挡成 `413`，
+     慢一点的模型会被 nginx 断成 `504`，而服务器日志里看起来像「客户端断开」。
+     照 `location = /api/photos/recognize` 的写法另开一块，`client_max_body_size 1m`、
+     `proxy_read_timeout 180s`，并照那里的规矩重复 `add_header`（nginx 的 `add_header` 不跨层继承）。
+   - **顺序**：CSP 必须与 PR3（前端去直连）**同一个部署**或之后上线。先上 CSP、后上前端，
+     旧版前端直连 Azure 会被浏览器拦掉，看起来像网络故障。
