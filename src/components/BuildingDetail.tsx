@@ -6,7 +6,7 @@ import { StructureBar } from "./StructureBar";
 import { RoomList } from "./RoomSplitPanel";
 import type { StructureChange } from "../domain/structure";
 import { buildingState, clueOf, currentAssessment, followUpEventsFor, getCoverageSummary, getOpenFollowUps, isTagged, latestForUnit, subjectUnitIds, unitState, type ClueLevel, type NodeTag, type Observation, type OutreachSnapshot, type Unit } from "../domain/types";
-import { assessmentLabels, clueLabels, clueMarks, coverageLabels, nodeTagLabel, stateColors, stateLabels, supportCategoryLabels, uncategorisedFollowUpLabel } from "../domain/presentation";
+import { assessmentLabels, clueLabels, clueMarks, coverageLabels, coverageNotUpdatedLabel, nodeTagLabel, stateColors, stateLabels, supportCategoryLabels, uncategorisedFollowUpLabel } from "../domain/presentation";
 import { ObservationHistory } from "./ObservationHistory";
 import { UnitPickerBar } from "./UnitPickerBar";
 import { nextSelection, pruneSelection } from "./unitSelection";
@@ -291,7 +291,7 @@ export function BuildingDetail(props: BuildingDetailProps) {
         {selectedUnit ? <section className="cf-plate__sec cf-selected-unit" key={selectedUnit.id}>
           <h3><span className="cf-plate__unit">{selectedUnit.label}</span><span className="cf-caps">Ledger</span></h3>
           <dl className="cf-plate__facts">
-            <dt>最近</dt><dd>{unitLatest ? `${formatDay(unitLatest.occurredAt)}，${unitLatest.optionNotes?.coverage ?? coverageLabels[unitLatest.coverage]}` : "未有記錄"}{/* A room with nothing of its own reads its unit's record, and says so: the date is real, but it is not a visit to this room. */}{unitLatest && unitLatest.unitId !== selectedUnit.id && <span className="cf-plate__inherited">承自分拆前的原單位</span>}</dd>
+            <dt>最近</dt><dd>{unitLatest ? `${formatDay(unitLatest.occurredAt)}，${unitLatest.optionNotes?.coverage ?? (unitLatest.coverage ? coverageLabels[unitLatest.coverage] : coverageNotUpdatedLabel)}` : "未有記錄"}{/* A room with nothing of its own reads its unit's record, and says so: the date is real, but it is not a visit to this room. */}{unitLatest && unitLatest.unitId !== selectedUnit.id && <span className="cf-plate__inherited">承自分拆前的原單位</span>}</dd>
             <dt>住房</dt><dd>{unitAssessment ? assessmentLabels[unitAssessment] : "未有判斷"}</dd>
             {(selectedUnit.parentUnitId || rooms.length > 0) && <><dt>劏房</dt><dd>{selectedUnit.parentUnitId ? <>劏房間格，屬 <button type="button" className="cf-link" onClick={() => onSelectUnit(selectedUnit.parentUnitId!)}>{buildingUnits.find(unit => unit.id === selectedUnit.parentUnitId)?.label ?? "原單位"}</button>（分拆前的記錄在那裡）</> : <><p className="cf-room-ledger__count">已分拆為 {rooms.length} 間，點一間看它自己的記錄：</p><RoomList snapshot={snapshot} rooms={rooms} labelOf={roomLabel} onSelect={onSelectUnit} onRecord={room => onStartObservation({ buildingId: building.id, floorId: room.floorId, unitId: room.id, label: `${building.name} · ${room.label}` })} /></>}</dd></>}
             {unitTasks > 0 && <><dt>待跟進</dt><dd>{unitTasks} 項</dd></>}

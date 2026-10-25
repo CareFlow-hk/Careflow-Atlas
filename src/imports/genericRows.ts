@@ -68,6 +68,38 @@ export interface GenericParseResult {
   pending: PendingPlace[];
 }
 
+/** One cell the person or the assistant changed, before the sheet is read again. */
+export interface CellOverride {
+  /** 1-based worksheet row, as in `ParsedRow.rowNumber`. */
+  row: number;
+  /** 0-based column, as in `mapping[].columnIndex`. */
+  column: number;
+  value: string;
+}
+
+/** A sheet already read, so a re-parse does not decode the workbook again. */
+export interface SheetMatrix {
+  matrix: readonly unknown[][];
+  date1904: boolean;
+}
+
+/**
+ * Read the sheet the same way `parseGenericRows` does. The dialog reads it once when the
+ * file is chosen; every later edit rebuilds the parse from this matrix instead of the
+ * buffer (`docs/AI_ASSISTANT.md` 6.2).
+ */
+export function readSheetMatrix(buffer: ArrayBuffer, sheetName: string): SheetMatrix | undefined {
+  let workbook: XLSX.WorkBook;
+  try { workbook = XLSX.read(buffer, { type: 'array' }); }
+  catch { return undefined; }
+  const sheet = workbook.Sheets[sheetName];
+  if (!sheet) return undefined;
+  return {
+    matrix: XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: true, defval: '', blankrows: true }),
+    date1904: !!workbook.Workbook?.WBProps?.date1904,
+  };
+}
+
 export interface GenericParseInput {
   buffer: ArrayBuffer;
   sheetName: string;
@@ -82,6 +114,24 @@ export interface GenericParseInput {
   extraColumns?: readonly { header: string; columnIndex: number }[];
   snapshot: OutreachSnapshot;
   fileName: string;
+  /**
+   * A building the person named in what they typed next to the file (`docs/AI_ASSISTANT.md`
+   * 6.1) — 「在裕安樓」. It is used only for a row whose own 大廈 cell is empty; a row that
+   * names a building keeps it. The parser does not look for it, does not create a building,
+   * and the plan says how many rows relied on it.
+   */
+  defaultBuilding?: { id: string; name: string };
+  /**
+   * The sheet, already read. When given, the buffer is not decoded again; the dialog
+   * re-parses on every edit and decoding a 700-row workbook each time would be wasteful.
+   */
+  matrix?: SheetMatrix;
+  /**
+   * Cells changed after the person saw the plan — edited by hand or proposed by the
+   * assistant and confirmed. They are applied before any rule runs, so every check
+   * (dates, options, locations, duplicates, corrections) sees the changed sheet.
+   */
+  overrides?: readonly CellOverride[];
   now?: string;
   /** Test seam; production uses `crypto.randomUUID`. */
   newId?: () => string;
@@ -94,6 +144,18 @@ const str = (value: unknown) => value == null ? '' : String(value);
 const optional = (value: unknown) => str(value).trim() || undefined;
 const loose = (text: string) => text.replace(/[\s\u3000·・]/g, '').toLowerCase();
 const pad = (n: string | number) => String(n).padStart(2, '0');
+
+/**
+ * Reads one option cell: the label the sheet printed, the key itself, or an accepted
+ * colloquial wording. `false` means it says something this system does not know; it is
+ * never mapped to a nearby option. Shared with the patch contract so a value the assistant
+ * proposes is judged by the same list the file is.
+ */
+export const readOption = <T extends string>(value: unknown, labels: Record<T, string>, accepted: Record<string, T>): T | undefined | false => {
+  const raw = optional(value);
+  if (!raw) return undefined;
+  return (Object.keys(labels) as T[]).find(key => labels[key] === raw || key === raw) ?? accepted[raw] ?? false;
+};
 
 /** Every mapping field the parser can use, in the order the dialog lists them. */
 export const GENERIC_FIELDS: CanonicalField[] = [
@@ -109,21 +171,41 @@ export function parseGenericRows(input: GenericParseInput): GenericParseResult {
   const notes: string[] = [];
   const column = new Map(input.mapping.map(entry => [entry.key, entry.columnIndex]));
   const mappedIndexes = new Set(input.mapping.map(entry => entry.columnIndex));
-  const at = (values: unknown[], key: CanonicalField) => {
+  const at = (values: readonly unknown[], key: CanonicalField) => {
     const index = column.get(key);
     return index === undefined ? undefined : values[index];
   };
-  if (!column.has('buildingId') && !column.has('buildingName')) notes.push('未對應「大廈」欄，任何一行都無法寫入。請回到欄位核對，指出哪一欄是大廈。');
+  if (!column.has('buildingId') && !column.has('buildingName') && !input.defaultBuilding) notes.push('未對應「大廈」欄，任何一行都無法寫入。請回到欄位核對，指出哪一欄是大廈。');
   if (!column.has('occurredAt')) notes.push('未對應「到訪日期」欄，任何一行都需要人補日期。');
 
-  let workbook: XLSX.WorkBook;
-  try { workbook = XLSX.read(input.buffer, { type: 'array' }); }
-  catch { return { rows: [], counts: { READY: 0, NEEDS_REVIEW: 0, INVALID: 0 }, notes: ['讀不到這個檔案。'], blankRows: 0, pending: [] }; }
-  const sheet = workbook.Sheets[input.sheetName];
-  if (!sheet) return { rows: [], counts: { READY: 0, NEEDS_REVIEW: 0, INVALID: 0 }, notes: [`找不到工作表「${input.sheetName}」。`], blankRows: 0, pending: [] };
-  const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: true, defval: '', blankrows: true });
+  let matrix: readonly unknown[][];
+  let date1904 = false;
+  if (input.matrix) {
+    matrix = input.matrix.matrix;
+    date1904 = input.matrix.date1904;
+  } else {
+    let workbook: XLSX.WorkBook;
+    try { workbook = XLSX.read(input.buffer, { type: 'array' }); }
+    catch { return { rows: [], counts: { READY: 0, NEEDS_REVIEW: 0, INVALID: 0 }, notes: ['讀不到這個檔案。'], blankRows: 0, pending: [] }; }
+    const sheet = workbook.Sheets[input.sheetName];
+    if (!sheet) return { rows: [], counts: { READY: 0, NEEDS_REVIEW: 0, INVALID: 0 }, notes: [`找不到工作表「${input.sheetName}」。`], blankRows: 0, pending: [] };
+    matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: true, defval: '', blankrows: true });
+    date1904 = !!workbook.Workbook?.WBProps?.date1904;
+  }
 
-  const date1904 = !!workbook.Workbook?.WBProps?.date1904;
+  // Edits are applied per row before anything is read, so a hand edit and an assistant
+  // edit take exactly the same path through the parser.
+  const edits = new Map<number, Map<number, string>>();
+  for (const edit of input.overrides ?? []) {
+    const row = edits.get(edit.row) ?? new Map<number, string>();
+    row.set(edit.column, edit.value);
+    edits.set(edit.row, row);
+  }
+  const withOverrides = (values: readonly unknown[], cells: Map<number, string>): unknown[] => {
+    const copy = values.slice();
+    for (const [column, value] of cells) copy[column] = value;
+    return copy;
+  };
   const readDay = (value: unknown): string | undefined | false => {
     if (value == null || str(value).trim() === '') return undefined;
     let day = str(value).trim();
@@ -151,14 +233,9 @@ export function parseGenericRows(input: GenericParseInput): GenericParseResult {
     const match = /^([01]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/.exec(text);
     return match ? `${pad(match[1])}:${match[2]}` : false;
   };
-  const option = <T extends string>(value: unknown, labels: Record<T, string>, accepted: Record<string, T>): T | undefined | false => {
-    const raw = optional(value);
-    if (!raw) return undefined;
-    return (Object.keys(labels) as T[]).find(key => labels[key] === raw || key === raw) ?? accepted[raw] ?? false;
-  };
 
   const buildings = input.snapshot.buildings;
-  const resolveBuilding = (values: unknown[]): { building: Building } | { error: string } => {
+  const resolveBuilding = (values: readonly unknown[]): { building: Building } | { error: string } => {
     const byId = optional(at(values, 'buildingId')), byName = optional(at(values, 'buildingName'));
     const tryMatch = (text: string) => {
       const exactId = buildings.filter(building => building.id === text);
@@ -174,7 +251,12 @@ export function parseGenericRows(input: GenericParseInput): GenericParseResult {
       if (found) return { building: found } as const;
     }
     const named = byId ?? byName;
-    return { error: named ? `找不到大廈「${named}」。新大廈要請人先在地圖新增；AI 不會代為建立。` : '未填大廈。' } as const;
+    if (named) return { error: `找不到大廈「${named}」。新大廈要請人先在地圖新增；AI 不會代為建立。` } as const;
+    // Only an empty cell takes the fallback; a row that names a building, right or wrong,
+    // keeps its own wording so a typo is reported rather than papered over.
+    const fallback = input.defaultBuilding && buildings.find(building => building.id === input.defaultBuilding!.id);
+    if (fallback) return { building: fallback } as const;
+    return { error: '未填大廈。' } as const;
   };
 
   /** A missing place, offered for creation; otherwise the wording nobody can act on. */
@@ -240,9 +322,13 @@ export function parseGenericRows(input: GenericParseInput): GenericParseResult {
   /** Places the file names that are not there yet, gathered across rows. */
   const pending = new Map<string, PendingPlace>();
   let blankRows = 0;
+  /** Rows that got their building from what the person typed, not from the sheet. */
+  let defaultRows = 0;
 
   for (let index = input.headerRow; index < matrix.length; index++) {
-    const values = matrix[index] ?? [];
+    const original = matrix[index] ?? [];
+    const cells = edits.get(index + 1);
+    const values = cells ? withOverrides(original, cells) : original;
     if (!values.some(value => optional(value))) { blankRows++; continue; }
     const rowNumber = index + 1;
     const issues: RowIssue[] = [];
@@ -251,7 +337,11 @@ export function parseGenericRows(input: GenericParseInput): GenericParseResult {
     const building = resolveBuilding(values);
     let buildingId = '';
     if ('error' in building) issues.push({ code: 'BUILDING', message: building.error });
-    else { buildingId = building.building.id; parsed.buildingName = building.building.name; }
+    else {
+      buildingId = building.building.id;
+      parsed.buildingName = building.building.name;
+      if (input.defaultBuilding && !optional(at(values, 'buildingId')) && !optional(at(values, 'buildingName'))) defaultRows++;
+    }
 
     const day = readDay(at(values, 'occurredAt'));
     if (day === false) issues.push({ code: 'DATE', message: '「到訪日期」看不懂是哪一天。請用 Excel 日期，或寫成 2026-10-09；不知道就留空。' });
@@ -263,17 +353,17 @@ export function parseGenericRows(input: GenericParseInput): GenericParseResult {
     const workerName = optional(at(values, 'worker'));
     if (!workerName) issues.push({ code: 'MISSING_WORKER', message: '未填工作員（紙本上落樓的同事，不是入 Excel 的人）。' });
 
-    const coverage = option<CoverageStatus>(at(values, 'coverage'), coverageLabels, acceptedCoverage);
+    const coverage = readOption<CoverageStatus>(at(values, 'coverage'), coverageLabels, acceptedCoverage);
     if (coverage === false) issues.push({ code: 'COVERAGE', message: '「覆蓋結果」不是可選的寫法。' });
     else if (coverage === undefined) issues.push({ code: 'MISSING_COVERAGE', message: '未填「覆蓋結果」。資料不足請選「暫無可靠記錄」，不能留空。' });
 
-    const contactOutcome = option<ContactOutcome>(at(values, 'contactOutcome'), contactLabels, acceptedContact);
+    const contactOutcome = readOption<ContactOutcome>(at(values, 'contactOutcome'), contactLabels, acceptedContact);
     if (contactOutcome === false) issues.push({ code: 'CONTACT', message: '「接觸結果」不是可選的寫法。' });
-    const assessment = option<HousingAssessment>(at(values, 'assessment'), assessmentLabels, acceptedAssessment);
+    const assessment = readOption<HousingAssessment>(at(values, 'assessment'), assessmentLabels, acceptedAssessment);
     if (assessment === false) issues.push({ code: 'ASSESSMENT', message: '「住房判斷」不是可選的寫法。' });
-    const sourceType = option<SourceType>(at(values, 'sourceType'), sourceLabels, acceptedSource);
+    const sourceType = readOption<SourceType>(at(values, 'sourceType'), sourceLabels, acceptedSource);
     if (sourceType === false) issues.push({ code: 'SOURCE', message: '「資料來源」不是可選的寫法。' });
-    const category = option<SupportCategory>(at(values, 'followUpCategory'), supportCategoryLabels, {} as Record<string, SupportCategory>);
+    const category = readOption<SupportCategory>(at(values, 'followUpCategory'), supportCategoryLabels, {} as Record<string, SupportCategory>);
     if (category === false) issues.push({ code: 'CATEGORY', message: '「跟進類別」不是可選的寫法。' });
 
     const action = optional(at(values, 'followUpAction'));
@@ -373,7 +463,7 @@ export function parseGenericRows(input: GenericParseInput): GenericParseResult {
     // Suspected duplicates: same place, same day, same coverage and worker as a live
     // record or an earlier row. Shown for a person to check; never merged (CLAUDE.md 3.2).
     const sameVisit = { buildingId, occurredAt, workerName, coverage, place: input_.unitId ?? input_.floorId ?? '' };
-    const place = (item: { buildingId: string; occurredAt: string; workerName: string; coverage: string; unitId?: string; floorId?: string }) => item.unitId ?? item.floorId ?? '';
+    const place = (item: { unitId?: string; floorId?: string }) => item.unitId ?? item.floorId ?? '';
     const twin = live.find(item => item.buildingId === sameVisit.buildingId && item.occurredAt === sameVisit.occurredAt && item.workerName === sameVisit.workerName && item.coverage === sameVisit.coverage && place(item) === sameVisit.place);
     if (twin) parsed.suspectedDuplicateOf = twin.id;
     else {
@@ -382,6 +472,12 @@ export function parseGenericRows(input: GenericParseInput): GenericParseResult {
     }
 
     rows.push(parsed);
+  }
+
+  // Say out loud where the building came from. A person reading the plan can see the name
+  // on every line, but not that it was their own sentence rather than the sheet's.
+  if (defaultRows && input.defaultBuilding) {
+    notes.push(`${defaultRows} 行沒有填大廈，都按你在補充說明寫的「${input.defaultBuilding.name}」處理。要改就改上面的文字再上傳。`);
   }
 
   const counts = { READY: 0, NEEDS_REVIEW: 0, INVALID: 0 };

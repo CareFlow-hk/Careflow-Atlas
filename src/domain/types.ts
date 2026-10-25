@@ -104,7 +104,13 @@ export interface PhotoFallback {
 export interface AiAssist { at: string; provider: string; model: string }
 export interface Observation extends SyntheticRecord {
   id: string; visitId: string; buildingId: string; floorId?: string; unitId?: string;
-  occurredAt: string; recordedAt: string; workerName: string; coverage: CoverageStatus;
+  occurredAt: string; recordedAt: string; workerName: string;
+  /**
+   * Absent means this visit stated no coverage — not that it found nothing. The place's
+   * earlier coverage result keeps standing; readers skip the record rather than reading
+   * a blank as UNKNOWN (which would repaint a visited unit grey).
+   */
+  coverage?: CoverageStatus;
   assessment?: HousingAssessment; /** Blank remains absent, it is not UNKNOWN. */
   contactOutcome?: ContactOutcome; /** Independent from assessment and coverage. */
   sourceType?: SourceType;
@@ -175,7 +181,7 @@ export interface OutreachSnapshot {
 
 export interface SaveObservationInput {
   id: string; visitId: string; buildingId: string; floorId?: string; unitId?: string;
-  occurredAt: string; recordedAt: string; workerName: string; coverage: CoverageStatus; assessment?: HousingAssessment;
+  occurredAt: string; recordedAt: string; workerName: string; coverage?: CoverageStatus; assessment?: HousingAssessment;
   contactOutcome?: ContactOutcome; evidence: string[]; note?: string;
   sourceType?: SourceType;
   /** A self-defined wording kept beside the chosen option. Never read by the pipeline. */
@@ -345,15 +351,27 @@ export function compareObservationTime(left: Observation, right: Observation): n
   return Date.parse(left.occurredAt) - Date.parse(right.occurredAt) || Date.parse(left.recordedAt) - Date.parse(right.recordedAt);
 }
 /** The latest of a set of events by the one ordering the whole domain uses. */
-export function latestObservation(records: Observation[]): Observation | undefined {
-  return records.reduce<Observation | undefined>((latest, current) => !latest || compareObservationTime(current, latest) > 0 ? current : latest, undefined);
+export function latestObservation<T extends Observation>(records: T[]): T | undefined {
+  return records.reduce<T | undefined>((latest, current) => !latest || compareObservationTime(current, latest) > 0 ? current : latest, undefined);
 }
+
+/**
+ * A record that states what the coverage is. A visit may be recorded without one — the
+ * entry form no longer requires it — and such a record leaves the place's coverage result
+ * where it was. It is still a record: it stays in the history and counts as a visit, it
+ * just does not get to answer the coverage question.
+ */
+type CoverageObservation = Observation & { coverage: CoverageStatus };
+function statesCoverage(item: Observation): item is CoverageObservation { return item.coverage !== undefined; }
 
 export function getCoverageStatus(snapshot: OutreachSnapshot, buildingId: string, unitId?: string): CoverageStatus {
   const ids = unitId !== undefined ? new Set(subjectUnitIds(snapshot, unitId)) : undefined;
   const records = effectiveObservations(snapshot).filter((item) => item.buildingId === buildingId && (!ids || (item.unitId !== undefined && ids.has(item.unitId))));
-  if (unitId && records.length) return latestObservation(records)!.coverage;
-  const explicitBuildingRecord = latestObservation(records.filter((item) => !item.floorId && !item.unitId));
+  if (unitId) {
+    const own = latestCoverageForUnit(snapshot, unitId);
+    if (own) return own.coverage;
+  }
+  const explicitBuildingRecord = latestObservation(records.filter((item) => !item.floorId && !item.unitId).filter(statesCoverage));
   if (explicitBuildingRecord) return explicitBuildingRecord.coverage;
   if (!unitId) return snapshot.buildings.find((item) => item.id === buildingId)?.initialCoverage ?? "UNKNOWN";
   const own = snapshot.units.find((item) => item.id === unitId);
@@ -384,15 +402,26 @@ export function getCoverageSummary(snapshot: OutreachSnapshot, buildingId: strin
   const splitIds = new Set(snapshot.units.map((unit) => unit.parentUnitId).filter((id): id is string => id !== undefined));
   const scopeUnits = snapshot.units.filter((unit) => unit.buildingId === buildingId && (!floorId || unit.floorId === floorId) && !splitIds.has(unit.id));
   const scopedRecords = effectiveObservations(snapshot).filter((item) => item.buildingId === buildingId && (!floorId || item.floorId === floorId));
-  const latestByUnit = new Map<string, Observation>();
-  scopeUnits.forEach((unit) => { const latest = latestForUnit(snapshot, unit.id); if (latest) latestByUnit.set(unit.id, latest); });
+  /*
+   * Two answers per unit, deliberately read apart: which units were visited at all (the
+   * record count), and which ones stated a coverage (the status and completion figures).
+   * A record without a coverage is a visit, but it cannot make the unit read as completed
+   * or partial; its earlier coverage result keeps standing.
+   */
+  const latestByUnit = new Map<string, CoverageObservation>();
+  const recordedUnitIds = new Set<string>();
+  scopeUnits.forEach((unit) => {
+    if (latestForUnit(snapshot, unit.id)) recordedUnitIds.add(unit.id);
+    const latest = latestCoverageForUnit(snapshot, unit.id);
+    if (latest) latestByUnit.set(unit.id, latest);
+  });
   const completed = [...latestByUnit.values()].filter((item) => ["VISITED_NO_FINDING", "VISITED_WITH_FINDING"].includes(item.coverage)).length;
   const hasFinding = [...latestByUnit.values()].some((item) => item.coverage === "VISITED_WITH_FINDING");
-  const explicitScopeRecord = latestObservation(scopedRecords.filter((item) => floorId ? item.floorId === floorId && !item.unitId : !item.floorId && !item.unitId));
+  const explicitScopeRecord = latestObservation(scopedRecords.filter((item) => floorId ? item.floorId === floorId && !item.unitId : !item.floorId && !item.unitId).filter(statesCoverage));
   const latestChildRecord = latestObservation([...latestByUnit.values()]);
   const derivedStatus = scopeUnits.length ? completed === scopeUnits.length ? hasFinding ? "VISITED_WITH_FINDING" : "VISITED_NO_FINDING" : latestByUnit.size ? "PARTIAL" : scopeUnits[0].initialCoverage ?? "UNKNOWN" : snapshot.buildings.find((item) => item.id === buildingId)?.initialCoverage ?? "UNKNOWN";
   const status = explicitScopeRecord && (!latestChildRecord || compareObservationTime(explicitScopeRecord, latestChildRecord) >= 0) ? explicitScopeRecord.coverage : derivedStatus;
-  const recordedLocations = new Set([...latestByUnit.keys()].map(unitId => `unit:${unitId}`));
+  const recordedLocations = new Set([...recordedUnitIds].map(unitId => `unit:${unitId}`));
   scopedRecords.filter((item) => !item.unitId).forEach((item) => recordedLocations.add(item.floorId ? `floor:${item.floorId}` : `building:${item.buildingId}`));
   return { total: scopeUnits.length || undefined, recorded: recordedLocations.size, completed, followUps: getOpenFollowUps(snapshot).filter(item => item.buildingId === buildingId && (!floorId || item.floorId === floorId)).length, status };
 }
@@ -426,7 +455,7 @@ export function subjectUnitIds(snapshot: OutreachSnapshot, unitId: string): stri
  * the more specific statement, and a room's own visit must not be overruled by a record
  * made at its unit in the same moment.
  */
-function latestOfSubjects(unitId: string, records: Observation[]): Observation | undefined {
+function latestOfSubjects<T extends Observation>(unitId: string, records: T[]): T | undefined {
   const own = latestObservation(records.filter(item => item.unitId === unitId));
   const inherited = latestObservation(records.filter(item => item.unitId !== unitId));
   if (!own) return inherited;
@@ -442,6 +471,15 @@ function recordsForUnit(snapshot: OutreachSnapshot, unitId: string): Observation
 /** The latest effective event that speaks for this unit. Undefined means "nothing recorded here". */
 export function latestForUnit(snapshot: OutreachSnapshot, unitId: string): Observation | undefined {
   return latestOfSubjects(unitId, recordsForUnit(snapshot, unitId));
+}
+
+/**
+ * The latest effective event that states a coverage for this unit. A later record written
+ * without one is skipped, so the earlier result keeps standing — the same reading
+ * `currentAssessment` already uses for a visit that did not revisit housing.
+ */
+export function latestCoverageForUnit(snapshot: OutreachSnapshot, unitId: string): CoverageObservation | undefined {
+  return latestOfSubjects(unitId, recordsForUnit(snapshot, unitId).filter(statesCoverage));
 }
 
 /* ------------------------------------------------------------------------- *
@@ -473,6 +511,14 @@ function isNodeLevelRecord(item: Observation, scope: Scope): boolean {
 export function latestInScope(snapshot: OutreachSnapshot, scope: Scope): Observation | undefined {
   if (scope.unitId !== undefined) return latestForUnit(snapshot, scope.unitId);
   return latestObservation(effectiveObservations(snapshot).filter(item => inScope(item, scope) && isNodeLevelRecord(item, scope)));
+}
+
+/** The latest effective event at this level that states a coverage. Colour reads this, not `latestInScope`. */
+export function latestCoverageInScope(snapshot: OutreachSnapshot, scope: Scope): CoverageObservation | undefined {
+  if (scope.unitId !== undefined) return latestCoverageForUnit(snapshot, scope.unitId);
+  return latestObservation(effectiveObservations(snapshot)
+    .filter(item => inScope(item, scope) && isNodeLevelRecord(item, scope))
+    .filter(statesCoverage));
 }
 
 /**
@@ -522,7 +568,9 @@ export function previewState(coverage: CoverageStatus, contactOutcome: ContactOu
  * node stays grey whether or not a task is outstanding — the task shows as a badge.
  */
 export function stateOf(snapshot: OutreachSnapshot, scope: Scope, hasOpen: boolean): State {
-  const observation = latestInScope(snapshot, scope);
+  // Only a record that states a coverage can decide a colour; a visit recorded without
+  // one leaves the earlier result — and therefore the colour — as it was.
+  const observation = latestCoverageInScope(snapshot, scope);
   if (!observation) return "GRAY";
   return stateFor(observation.coverage, observation.contactOutcome, hasOpen);
 }
@@ -537,10 +585,11 @@ export function aggregate(states: State[]): State | undefined {
  * The latest unit event below this node, used to time the competition in `nodeState`.
  * Floors keep no record of their own, so only unit events count as "below".
  */
-export function latestChildInScope(snapshot: OutreachSnapshot, scope: Scope): Observation | undefined {
+export function latestChildInScope(snapshot: OutreachSnapshot, scope: Scope): CoverageObservation | undefined {
   if (scope.unitId !== undefined) return undefined;
   return latestObservation(effectiveObservations(snapshot).filter(item => item.buildingId === scope.buildingId
-    && item.unitId !== undefined && (scope.floorId === undefined || item.floorId === scope.floorId)));
+    && item.unitId !== undefined && (scope.floorId === undefined || item.floorId === scope.floorId))
+    .filter(statesCoverage));
 }
 
 /**
@@ -563,7 +612,9 @@ export function withOpenTasks(state: State, hasOpen: boolean): State {
  * stale record must not override newer unit work.
  */
 export function nodeState(snapshot: OutreachSnapshot, scope: Scope, childStates: State[], childLatest?: Observation): State {
-  const own = latestInScope(snapshot, scope);
+  // Both sides of the comparison are coverage statements. A newer visit that states no
+  // coverage cannot overturn the node's own result, just as it cannot colour a unit.
+  const own = latestCoverageInScope(snapshot, scope);
   const aggregated = aggregate(childStates);
   const hasOpen = openFollowUpsInScope(snapshot, scope).length > 0;
   const computed = !own ? aggregated
@@ -674,5 +725,5 @@ export function clueOf(snapshot: OutreachSnapshot, buildingId: string, unitId: s
   const assessment = currentAssessment(snapshot, unitId);
   if (assessment === "SUSPECTED") return "SUSPECTED";
   if (assessment === "STAFF_VERIFIED") return "VERIFIED";
-  return latestInScope(snapshot, { buildingId, unitId })?.coverage === "VISITED_WITH_FINDING" ? "FINDING" : undefined;
+  return latestCoverageInScope(snapshot, { buildingId, unitId })?.coverage === "VISITED_WITH_FINDING" ? "FINDING" : undefined;
 }

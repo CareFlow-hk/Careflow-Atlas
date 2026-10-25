@@ -111,11 +111,24 @@ describe('paper and Excel workflow', () => {
     expect(parse(wb).snapshot).toEqual(workflowDemo);
   });
   it.each([
-    ['blank coverage', { '覆蓋結果': '' }], ['invalid date', { '到訪日期': '2026-02-31' }], ['ambiguous location', { '單位': '不存在' }], ['missing action', { '時間原話／待確認': '明天' }],
+    ['invalid date', { '到訪日期': '2026-02-31' }], ['ambiguous location', { '單位': '不存在' }], ['missing action', { '時間原話／待確認': '明天' }],
   ])('blocks %s without returning a partially importable snapshot', (_, values) => {
     const wb = workbook(); newRow(wb, values);
     expect(parse(wb).snapshot).toBeUndefined();
     expect(parse(wb).issues.some(i => i.severity === 'error' && i.sheet === '紙本回錄' && i.row)).toBe(true);
+  });
+  it('imports a row with no coverage without inventing one or repainting the place', () => {
+    const wb = workbook();
+    newRow(wb, { '紙本編號': 'QA-02', '紙本行號': '2' });
+    newRow(wb, { '紙本編號': 'QA-03', '紙本行號': '3', '覆蓋結果': '' });
+    const result = parse(wb);
+    expect(result.issues).toEqual([]);
+    const blank = result.snapshot!.observations.at(-1)!;
+    // Absent — not UNKNOWN, which is a stated result and would repaint the place grey.
+    expect(blank.coverage).toBeUndefined();
+    expect(getCoverageStatus(result.snapshot!, blank.buildingId, blank.unitId)).toBe('ATTEMPTED');
+    // Exporting and reading back must not turn the blank into 暫無可靠記錄.
+    expect(parse(workbook(result.snapshot!)).snapshot).toEqual(result.snapshot);
   });
   it('blocks changes to old observations, formulas, extra columns and numeric phones', () => {
     for (const modify of [

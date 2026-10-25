@@ -5,20 +5,23 @@
  * a business fact: the answer is a proposal a person confirms column by column, and a
  * reply that does not match the contract is discarded whole rather than partly used.
  *
- * A worksheet is read in parts (6.1). The first part carries the header and decides the
- * mapping; later parts are checked against it and may not quietly move a field to another
- * column — a disagreement voids the whole answer, because choosing one of the two would be
- * exactly the "take the columns that look right" that CLAUDE.md 3.1 forbids.
+ * A worksheet is read in parts (6.1). The first part carries the header and decides both
+ * the mapping and whether the sheet is outreach work at all; a refusal there ends the run
+ * (`docs/AI_ASSISTANT.md` 7). Later parts are checked against the first and may not quietly
+ * move a field to another column — a disagreement voids the whole answer, because choosing
+ * one of the two would be exactly the "take the columns that look right" that CLAUDE.md 3.1
+ * forbids.
  */
 import { assessmentLabels, contactLabels, coverageLabels, supportCategoryLabels } from '../domain/presentation';
+import { hkDay } from '../domain/reminders';
 import { CONTACT_OUTCOMES, COVERAGE_STATUSES, HOUSING_ASSESSMENTS, SUPPORT_CATEGORIES, type OutreachSnapshot } from '../domain/types';
 import { FORMAT_PROFILES, type CanonicalField } from '../imports/profiles';
 import { AiRequestError, callProvider } from './client';
-import { canonicalOptions, readDraft, readSuggestion, type AiDraft, type AiFieldSuggestion, type AiSuggestion, type ReadContext } from './contract';
+import { canonicalOptions, readDraft, readPatchReply, readSuggestion, type AiDraft, type AiFieldSuggestion, type AiPatchSet, type AiSuggestion, type ReadContext } from './contract';
 import type { AiCredential } from './credential';
 import { chunkHeaders, chunkRows, type OutboundPreview } from './preview';
 import { providerSpec } from './providers';
-import { draftPrompt, mappingPrompt } from './scope';
+import { draftPrompt, mappingPrompt, patchPrompt } from './scope';
 
 export interface SuggestInput {
   preview: OutboundPreview;
@@ -27,6 +30,11 @@ export interface SuggestInput {
   fetcher?: typeof fetch;
   /** Columns the person removed from the outbound payload. */
   withheld?: readonly number[];
+  /**
+   * What the person typed alongside the file. Sent as a data block so the mapping can use
+   * it («大廈名稱在第 3 欄»), never as instructions and never as a source of values.
+   */
+  context?: string;
 }
 
 export interface FileSuggestion {
@@ -42,7 +50,7 @@ const no = (message: string) => new AiRequestError('schema', message);
  * a later part may omit a field (its rows may be empty there) but may not name a
  * different column for it.
  */
-export async function suggestFileMapping({ preview, credential, fetcher, withheld = [] }: SuggestInput, onPart?: (index: number, count: number) => void): Promise<FileSuggestion> {
+export async function suggestFileMapping({ preview, credential, fetcher, withheld = [], context: contextText }: SuggestInput, onPart?: (index: number, count: number) => void): Promise<FileSuggestion> {
   const spec = providerSpec(credential.provider);
   if (!spec?.browserDirect) throw new AiRequestError('network', '尚未開放這個供應商由瀏覽器直接呼叫。');
   const headers = chunkHeaders(preview, withheld);
@@ -66,6 +74,7 @@ export async function suggestFileMapping({ preview, credential, fetcher, withhel
       profileIds: FORMAT_PROFILES.map(profile => profile.id),
       fields: canonicalOptions().map(field => ({ key: field.key, label: field.label })),
       withheldColumns: withheld,
+      context: contextText,
     });
     const raw = await callProvider(spec, { model: credential.model, key: credential.key, prompt, fetcher });
     const context: ReadContext = {
@@ -80,7 +89,17 @@ export async function suggestFileMapping({ preview, credential, fetcher, withhel
     const value = read.value;
     warnings.push(...value.warnings);
 
-    if (index === 0) { decided = value; continue; }
+    if (index === 0) {
+      /*
+       * The part holding the header decides whether this is an outreach sheet at all. If it
+       * says no, sending the remaining parts asks the same question about the same workbook
+       * again — and a payroll sheet read in 300-row slices would be paid for in full before
+       * the dialog showed the refusal. Stop at the first answer instead.
+       */
+      if (value.status === 'REFUSE') return { suggestion: value, parts: index + 1 };
+      decided = value;
+      continue;
+    }
     /*
      * A later part that refuses or finds nothing does not void the first part's mapping:
      * the mapping is a property of the sheet, and every row is still parsed below. It is
@@ -118,12 +137,17 @@ export interface DraftInput {
   snapshot: OutreachSnapshot;
   credential: AiCredential;
   fetcher?: typeof fetch;
+  /**
+   * The device's Hong Kong day, for translating a relative word the note states. Passed
+   * in rather than read here so a test can pin the day; the dialog lets it default.
+   */
+  today?: string;
 }
 
 const LOCATION_LIMIT = 400;
 
 /** Turns a note into one proposed visit. Never writes; the dialog shows the blanks. */
-export async function suggestDraft({ text, snapshot, credential, fetcher }: DraftInput): Promise<AiDraft> {
+export async function suggestDraft({ text, snapshot, credential, fetcher, today = hkDay() }: DraftInput): Promise<AiDraft> {
   const spec = providerSpec(credential.provider);
   if (!spec?.browserDirect) throw new AiRequestError('network', '尚未開放這個供應商由瀏覽器直接呼叫。');
   const floorOf = new Map(snapshot.floors.map(floor => [floor.id, floor]));
@@ -133,6 +157,7 @@ export async function suggestDraft({ text, snapshot, credential, fetcher }: Draf
     .map(unit => ({ buildingId: unit.buildingId, floorLabel: floorOf.get(unit.floorId)?.label ?? '', unitLabel: unit.label }));
   const prompt = draftPrompt({
     text,
+    today,
     buildings: snapshot.buildings.map(building => ({ id: building.id, name: building.name })),
     locations,
     coverage: COVERAGE_STATUSES.map(key => ({ key, label: coverageLabels[key] })),
@@ -141,7 +166,7 @@ export async function suggestDraft({ text, snapshot, credential, fetcher }: Draf
     categories: SUPPORT_CATEGORIES.map(key => ({ key, label: supportCategoryLabels[key] })),
   });
   const raw = await callProvider(spec, { model: credential.model, key: credential.key, prompt, fetcher });
-  const read = readDraft(raw, { text, buildingIds: new Set(snapshot.buildings.map(building => building.id)) });
+  const read = readDraft(raw, { text, today, buildingIds: new Set(snapshot.buildings.map(building => building.id)) });
   if (!read.ok) throw no(read.reason);
   if (snapshot.units.length > LOCATION_LIMIT) read.value.warnings.push(`單位清單超過 ${LOCATION_LIMIT} 個，只提供前 ${LOCATION_LIMIT} 個；未列出的位置請人手填寫。`);
   return read.value;
@@ -149,3 +174,69 @@ export async function suggestDraft({ text, snapshot, credential, fetcher }: Draf
 
 export type { AiFieldSuggestion };
 export type { CanonicalField };
+
+export interface PatchInput {
+  text: string;
+  preview: OutboundPreview;
+  columns: Partial<Record<CanonicalField, number | null>>;
+  /** 1-based worksheet rows the person can change — the rows the plan lists. */
+  rows: readonly number[];
+  credential: AiCredential;
+  /** Personal columns; they are absent from the request and cannot be patched. */
+  withheld?: readonly number[];
+  fetcher?: typeof fetch;
+  today?: string;
+}
+
+/** Enough rows to work through a sheet by hand, few enough to keep one request bounded. */
+export const PATCH_ROW_LIMIT = 500;
+
+/**
+ * Asks the assistant to change cells of the plan already on screen. Only rows in the plan
+ * are sent, withheld columns are absent, and the reply is checked cell by cell; a reply
+ * that names a row or a column outside what was sent loses the whole answer.
+ */
+export async function suggestPatches({
+  text, preview, columns, rows, credential, withheld = [], fetcher, today = hkDay(),
+}: PatchInput): Promise<AiPatchSet> {
+  const spec = providerSpec(credential.provider);
+  if (!spec?.browserDirect) throw new AiRequestError('network', '尚未開放這個供應商由瀏覽器直接呼叫。');
+
+  const hidden = new Set(withheld);
+  const labels = new Map(canonicalOptions().map(option => [option.key, option.label]));
+  const fieldOfColumn = new Map<number, CanonicalField>();
+  for (const [field, column] of Object.entries(columns) as [CanonicalField, number | null][]) {
+    if (typeof column === 'number') fieldOfColumn.set(column, field);
+  }
+  const payloadColumns = preview.headers
+    .map((header, columnIndex) => ({ columnIndex, header, field: fieldOfColumn.get(columnIndex) ?? null }))
+    .filter(column => !hidden.has(column.columnIndex))
+    .map(column => ({ ...column, label: column.field ? labels.get(column.field) ?? column.field : null }));
+
+  const byNumber = new Map(preview.rowNumbers.map((number, index) => [number, preview.rows[index]]));
+  const chosen = rows.slice(0, PATCH_ROW_LIMIT);
+  const payloadRows = chosen.map(row => ({
+    row,
+    values: payloadColumns.map(column => byNumber.get(row)?.[column.columnIndex] ?? ''),
+  }));
+
+  const prompt = patchPrompt({
+    text, today,
+    sheetName: preview.sheetName,
+    columns: payloadColumns,
+    rows: payloadRows,
+    omitted: rows.length - chosen.length,
+    coverage: COVERAGE_STATUSES.map(key => ({ key, label: coverageLabels[key] })),
+    contacts: CONTACT_OUTCOMES.map(key => ({ key, label: contactLabels[key] })),
+    assessments: HOUSING_ASSESSMENTS.map(key => ({ key, label: assessmentLabels[key] })),
+    categories: SUPPORT_CATEGORIES.map(key => ({ key, label: supportCategoryLabels[key] })),
+  });
+  const raw = await callProvider(spec, { model: credential.model, key: credential.key, prompt, fetcher });
+  const read = readPatchReply(raw, {
+    text, today, rows: chosen, columnCount: preview.columnCount, columns,
+    readOnlyColumns: withheld,
+  });
+  if (!read.ok) throw no(read.reason);
+  if (rows.length > chosen.length) read.value.warnings.push(`表格有 ${rows.length} 行，這次只把前 ${PATCH_ROW_LIMIT} 行送交 AI；後面的行請分幾次處理。`);
+  return read.value;
+}

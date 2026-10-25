@@ -219,15 +219,17 @@ export function parseWorkflowWorkbook(buffer: ArrayBuffer, file: string, now = n
     }
     // Floors keep no record of their own: a floor's colour is only the sum of its units.
     if (floorLabel && !unitLabel) { add(sheet, row, '單位', 'FLOOR_WITHOUT_UNIT', `只填了樓層「${floorLabel}」，未填單位。請補上單位；如果是整幢的記錄，樓層也要留空。`); continue; }
+    // A blank 覆蓋結果 is a record that states no coverage — the same thing the entry form
+    // now saves when the recorder leaves it at 未更新. It imports as absent, never as
+    // 「暫無可靠記錄」, so re-importing an export cannot repaint a visited unit grey.
     const coverage = enumValue(v['覆蓋結果'], coverageLabels, sheet, row, '覆蓋結果', acceptedCoverage);
-    if (!optional(v['覆蓋結果'])) add(sheet, row, '覆蓋結果', 'MISSING_COVERAGE', '未選覆蓋結果。資料不足可選「暫無可靠記錄」，不能留空。');
     const action = optional(v['跟進行動']);
     const followUpBits = ['跟進類別', '負責人', '確定跟進日期', '時間原話／待確認'].filter(k => optional(v[k]));
     if (!action && followUpBits.length) add(sheet, row, '跟進行動', 'MISSING_ACTION', `填了「${followUpBits.join('」「')}」，但沒寫「跟進行動」。請寫明要做什麼，例如「再上門」。`);
     const correctsId = optional(v['更正原記錄編號']);
     // Resolve links after every row is read: spreadsheet sorting cannot change validity.
     const visitId = optional(v['外出編號']) ?? `paper-visit:${encodeURIComponent(paperRef ?? id)}`;
-    const observation: Observation = { ...flags, id, visitId, buildingId: buildingId!, floorId: units[0]?.floorId ?? floors[0]?.id, unitId: units[0]?.id, occurredAt, recordedAt: now, workerName: str(v['工作員']).trim(), coverage: coverage ?? 'UNKNOWN',
+    const observation: Observation = { ...flags, id, visitId, buildingId: buildingId!, floorId: units[0]?.floorId ?? floors[0]?.id, unitId: units[0]?.id, occurredAt, recordedAt: now, workerName: str(v['工作員']).trim(), ...(coverage ? { coverage } : {}),
       contactOutcome: enumValue(v['接觸結果'], contactLabels, sheet, row, '接觸結果', acceptedContact), assessment: enumValue(v['住房判斷'], assessmentLabels, sheet, row, '住房判斷', acceptedAssessment), sourceType: enumValue(v['資料來源'], sourceLabels, sheet, row, '資料來源', acceptedSource), note: optional(v['紙本原話／備註']), evidence: str(v['依據']).split('\n').map(s => s.trim()).filter(Boolean),
       paperRef, paperLine, importSource: { file, sheet, row }, resolvesObservationId: optional(v['結束跟進編號']),
       correctsObservationId: correctsId, correctionReason: optional(v['更正原因']),

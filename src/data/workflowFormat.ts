@@ -52,7 +52,9 @@ export function observationRow(snapshot: OutreachSnapshot, o: Observation): Cell
   const [date, time] = hkParts(o.occurredAt);
   return [o.id, o.paperRef ?? '', o.paperLine ?? '', o.visitId, excelDate(date), time, o.workerName, o.buildingId,
     snapshot.floors.find(f => f.id === o.floorId)?.label ?? '', snapshot.units.find(u => u.id === o.unitId)?.label ?? '',
-    coverageLabels[o.coverage], o.contactOutcome ? contactLabels[o.contactOutcome] : '', o.assessment ? assessmentLabels[o.assessment] : '',
+    // A record that stated no coverage exports a blank cell: the export keeps what was
+    // recorded rather than filling in 暫無可靠記錄, and importing it back leaves it absent.
+    o.coverage ? coverageLabels[o.coverage] : '', o.contactOutcome ? contactLabels[o.contactOutcome] : '', o.assessment ? assessmentLabels[o.assessment] : '',
     o.note ?? '', o.evidence.join('\n'), o.sourceType ? sourceLabels[o.sourceType] : '',
     o.followUp?.category ? supportCategoryLabels[o.followUp.category] : '', o.followUp?.action ?? '', o.followUp?.assignee ?? '',
     o.followUp?.dueDate ? excelDate(o.followUp.dueDate) : '', o.followUp?.timingNote ?? '', o.resolvesObservationId ?? '',
@@ -90,7 +92,7 @@ export function workflowSheets(snapshot: OutreachSnapshot): WorkflowSheet[] {
       const membership = snapshot.memberships.filter(m => m.personId === p.id).at(-1);
       return [p.id, p.displayName, p.phone ?? '', p.addressNote ?? addresses.join('\n'), p.contactNote ?? '', membershipLabels[membership?.status ?? 'UNKNOWN'], households.join('、')];
     }) },
-    { name: '紙本回錄', note: '每行是一處的本次記錄；新增行回錄，既有行保留。更正請新增行並填「更正原記錄編號」。日期必填，時間未知可留空。', headers: paperHeaders, widths: [29, 21, 13, 28, 16, 15, 20, 23, 13, 17, 25, 20, 23, 62, 45, 22, 19, 48, 20, 20, 48, 30, 29, 40, 52], editable: paperHeaders, dates: ['到訪日期', '確定跟進日期'], choices: { '覆蓋結果': Object.values(coverageLabels), '接觸結果': Object.values(contactLabels), '住房判斷': Object.values(assessmentLabels), '資料來源': Object.values(sourceLabels), '跟進類別': Object.values(supportCategoryLabels), '大廈編號': snapshot.buildings.map(b => b.id) }, rows: effective.map(o => observationRow(snapshot, o)) },
+    { name: '紙本回錄', note: '每行是一處的本次記錄；新增行回錄，既有行保留。更正請新增行並填「更正原記錄編號」。日期必填，時間未知可留空，覆蓋結果可留空（該處會沿用上次結果）。', headers: paperHeaders, widths: [29, 21, 13, 28, 16, 15, 20, 23, 13, 17, 25, 20, 23, 62, 45, 22, 19, 48, 20, 20, 48, 30, 29, 40, 52], editable: paperHeaders, dates: ['到訪日期', '確定跟進日期'], choices: { '覆蓋結果': Object.values(coverageLabels), '接觸結果': Object.values(contactLabels), '住房判斷': Object.values(assessmentLabels), '資料來源': Object.values(sourceLabels), '跟進類別': Object.values(supportCategoryLabels), '大廈編號': snapshot.buildings.map(b => b.id) }, rows: effective.map(o => observationRow(snapshot, o)) },
     { name: '待跟進', note: '由未結束跟進產生的閱讀清單；結果請新增到紙本回錄，再填結束跟進編號。', headers: ['原記錄編號', '大廈', '樓層／單位', '跟進類別', '跟進行動', '負責人', '確定日期', '時間原話／待確認'], widths: [29, 18, 20, 19, 58, 20, 18, 48], dates: ['確定日期'], rows: followUps.map(f => { const o = snapshot.observations.find(o => o.id === f.observationId)!; return [o.id, snapshot.buildings.find(b => b.id === f.buildingId)?.name ?? f.buildingId, snapshot.units.find(u => u.id === f.unitId)?.label ?? snapshot.floors.find(l => l.id === f.floorId)?.label ?? '大廈層面', o.followUp?.category ? supportCategoryLabels[o.followUp.category] : '一般跟進', f.action, o.followUp?.assignee ?? '', f.dueDate ? excelDate(f.dueDate) : '', o.followUp?.timingNote ?? '']; }) },
     { name: '跟進處理', note: '在工作台按「標記完成」「取消跟進」「撤銷」的記錄，只供閱讀；修改不會套用。操作人是登入帳號，不是紙本工作員。', headers: followUpEventHeaders, widths: [22, 18, 12, 40, 29, 18, 20, 58], rows: (snapshot.followUpEvents ?? []).map(e => {
       const o = snapshot.observations.find(o => o.id === e.observationId);

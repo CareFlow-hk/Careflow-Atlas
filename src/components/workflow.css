@@ -194,6 +194,25 @@
 .cf-ai__form input,.cf-ai__form select,.cf-ai__form textarea{min-height:40px;border:1px solid #cad8d4;border-radius:8px;padding:8px;font:inherit;font-size:13px;box-sizing:border-box}
 @media(max-width:760px){.cf-ai__form{grid-template-columns:1fr}.cf-ai__form .is-wide{grid-column:auto}}
 
+/* One row opened into its cells, and the chat that changes the same cells (`docs/AI_ASSISTANT.md` 6.2). */
+.cf-ai__rowedit summary{cursor:pointer;display:block}
+.cf-ai__rowedit[open] summary{margin-bottom:10px}
+.cf-ai__fieldlabel{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.cf-ai__source{font-size:10px;font-weight:550;border-radius:999px;padding:1px 6px;background:#eef1f6;color:#3c5266}
+.cf-ai__source.is-ai{background:#f0ecfa;color:#5a3f86}
+.cf-ai__fieldhint{font-weight:400;color:#637570;font-size:11px;line-height:1.4}
+.cf-ai__addfield{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px;padding-top:10px;border-top:1px dashed #dbe5e1;font-size:12px}
+.cf-ai__addfield select,.cf-ai__addfield input{min-height:36px;border:1px solid #cad8d4;border-radius:8px;padding:6px 8px;font:inherit;font-size:12px;background:#fff}
+.cf-ai__chat{margin-top:14px;border-top:1px solid #e1e9e6;padding-top:12px}
+.cf-ai__turns{list-style:none;margin:8px 0;padding:0;display:grid;gap:8px;max-height:180px;overflow:auto}
+.cf-ai__turns li{border-left:3px solid #cfdcd7;padding-left:8px;font-size:12px;color:#315049}
+.cf-ai__turns li.is-failed{border-left-color:#8b3e32;color:#8b3e32}
+.cf-ai__turns p{margin:2px 0}
+.cf-ai__ask{font-weight:550;color:#203b36}
+.cf-ai__askform{display:flex;gap:8px;align-items:center}
+.cf-ai__askform input{flex:1;min-height:40px;border:1px solid #cad8d4;border-radius:8px;padding:8px;font:inherit;font-size:13px}
+@media(max-width:760px){.cf-ai__askform{flex-direction:column;align-items:stretch}}
+
 /* Task reminders (`docs/AI_ASSISTANT.md` 8): computed on this device, never sent away. */
 .reminder-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#8b3e32;color:#fff;font-size:11px;font-weight:550}
 .cf-dialog--reminder{width:min(720px,calc(100vw - 28px))}

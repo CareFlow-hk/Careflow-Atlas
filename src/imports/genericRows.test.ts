@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { demoSnapshot } from '../data/demoFixture';
 import { floorNumber } from '../domain/structure';
 import type { CanonicalField } from './profiles';
-import { parseGenericRows } from './genericRows';
+import { parseGenericRows, readSheetMatrix } from './genericRows';
 
 const building = demoSnapshot.buildings[0];
 const unit = demoSnapshot.units.find(item => item.buildingId === building.id && !item.parentUnitId)!;
@@ -232,5 +232,123 @@ describe('the sheet as a whole', () => {
     const result = parse([row(), row({ 1: '' }), row({ 0: '不存在大廈' })]);
     const total = result.counts.READY + result.counts.NEEDS_REVIEW + result.counts.INVALID;
     expect(total).toBe(3);
+  });
+});
+
+describe('a sheet with no 大廈 column, and the building the person typed', () => {
+  // 「探訪日期 / 樓 / 室 / 負責同事 / 覆蓋結果」: the paper was filed under a building that
+  // the rows never repeat. What the person typed beside the file is where it comes from.
+  const NO_BUILDING = [
+    { key: 'occurredAt' as const, columnIndex: 0 }, { key: 'floor' as const, columnIndex: 1 },
+    { key: 'unit' as const, columnIndex: 2 }, { key: 'worker' as const, columnIndex: 3 },
+    { key: 'coverage' as const, columnIndex: 4 },
+  ];
+  const sheet = (rows: unknown[][]) => {
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([['探訪日期', '樓', '室', '負責同事', '覆蓋結果'], ...rows]), '探訪記錄');
+    return workbook;
+  };
+  const run = (rows: unknown[][], over: Partial<Parameters<typeof parseGenericRows>[0]> = {}) => parseGenericRows({
+    buffer: XLSX.write(sheet(rows), { type: 'array', bookType: 'xlsx' }) as ArrayBuffer,
+    sheetName: '探訪記錄', headerRow: 1, mapping: NO_BUILDING, snapshot: demoSnapshot,
+    fileName: '探訪.xlsx', now: '2026-10-23T02:00:00.000Z', newId: () => `t-${++counter}`, ...over,
+  });
+
+  it('writes the rows under the building the person named, and says that is where it came from', () => {
+    const result = run([['2026-10-05', floor.label, unit.label, '陳同事', '已嘗試接觸']], { defaultBuilding: { id: building.id, name: building.name } });
+    expect(result.rows[0].status).toBe('READY');
+    expect(result.rows[0].input!.buildingId).toBe(building.id);
+    expect(result.notes.join('')).toContain(`1 行沒有填大廈，都按你在補充說明寫的「${building.name}」處理`);
+  });
+
+  it('is still unusable without it: the parser never picks a building itself', () => {
+    const result = run([['2026-10-05', floor.label, unit.label, '陳同事', '已嘗試接觸']]);
+    expect(result.rows[0].status).toBe('INVALID');
+    expect(result.notes[0]).toContain('大廈');
+  });
+
+  it('does not overrule a row that names its own building', () => {
+    const other = demoSnapshot.buildings.find(item => item.id !== building.id)!;
+    const otherUnit = demoSnapshot.units.find(item => item.buildingId === other.id && !item.parentUnitId)!;
+    const otherFloor = demoSnapshot.floors.find(item => item.id === otherUnit.floorId)!;
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+      ['大廈', '探訪日期', '樓', '室', '負責同事', '覆蓋結果'],
+      [other.name, '2026-10-05', otherFloor.label, otherUnit.label, '陳同事', '已嘗試接觸'],
+      [other.name, '2026-10-06', otherFloor.label, otherUnit.label, '李同事', '已嘗試接觸'],
+    ]), '探訪記錄');
+    const result = parseGenericRows({
+      buffer: XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer,
+      sheetName: '探訪記錄', headerRow: 1, snapshot: demoSnapshot, fileName: '探訪.xlsx',
+      now: '2026-10-23T02:00:00.000Z', newId: () => `t-${++counter}`,
+      mapping: [{ key: 'buildingName', columnIndex: 0 }, ...NO_BUILDING.map(entry => ({ ...entry, columnIndex: entry.columnIndex + 1 }))],
+      defaultBuilding: { id: building.id, name: building.name },
+    });
+    expect(result.rows.map(row => row.input?.buildingId)).toEqual([other.id, other.id]);
+    expect(result.notes.join('')).not.toContain('沒有填大廈');
+  });
+
+  it('still refuses a name the workspace does not have, rather than falling back to the typed one', () => {
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+      ['大廈', '探訪日期', '樓', '室', '負責同事', '覆蓋結果'],
+      ['不存在大廈', '2026-10-05', floor.label, unit.label, '陳同事', '已嘗試接觸'],
+    ]), '探訪記錄');
+    const result = parseGenericRows({
+      buffer: XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer,
+      sheetName: '探訪記錄', headerRow: 1, snapshot: demoSnapshot, fileName: '探訪.xlsx',
+      now: '2026-10-23T02:00:00.000Z', newId: () => `t-${++counter}`,
+      mapping: [{ key: 'buildingName', columnIndex: 0 }, ...NO_BUILDING.map(entry => ({ ...entry, columnIndex: entry.columnIndex + 1 }))],
+      defaultBuilding: { id: building.id, name: building.name },
+    });
+    expect(result.rows[0].status).toBe('INVALID');
+    expect(result.rows[0].issues.map(issue => issue.code)).toContain('BUILDING');
+  });
+});
+
+describe('cells changed after the plan was shown', () => {
+  it('reads an edit exactly like the cell had said so in the first place', () => {
+    const before = parse([row({ 5: '' })]);
+    expect(before.rows[0].status).toBe('NEEDS_REVIEW');
+    expect(before.rows[0].issues.map(issue => issue.code)).toContain('MISSING_COVERAGE');
+
+    const after = parse([row({ 5: '' })], { overrides: [{ row: 2, column: 5, value: '已嘗試接觸' }] });
+    expect(after.rows[0].status).toBe('READY');
+    expect(after.rows[0].input!.coverage).toBe('ATTEMPTED');
+  });
+
+  it('changes only the row it names', () => {
+    const result = parse([row({ 1: '' }), row()], { overrides: [{ row: 2, column: 1, value: '2026-10-11' }] });
+    expect(result.rows[0].input!.occurredAt).toBe('2026-10-11');
+    expect(result.rows[1].input!.occurredAt).toBe('2026-10-09');
+  });
+
+  it('still refuses a value the parser cannot read, rather than accepting the edit', () => {
+    const result = parse([row()], { overrides: [{ row: 2, column: 5, value: '好像去過' }] });
+    expect(result.rows[0].status).toBe('INVALID');
+    expect(result.rows[0].issues.map(issue => issue.code)).toContain('COVERAGE');
+  });
+
+  it('fills a cell past the sheet width for a field that has no column', () => {
+    const mapping = MAPPING.filter(entry => entry.key !== 'coverage');
+    // 100 is past the seven columns the sheet has: the person supplied a value for a field
+    // the sheet never carried, so the dialog maps it to a column of its own.
+    const result = parse([row()], {
+      mapping: [...mapping, { key: 'coverage', columnIndex: 100 }],
+      overrides: [{ row: 2, column: 100, value: '已嘗試接觸' }],
+    });
+    expect(result.rows[0].status).toBe('READY');
+    expect(result.rows[0].input!.coverage).toBe('ATTEMPTED');
+  });
+
+  it('reads the same sheet from a matrix it was handed instead of the buffer', () => {
+    const buffer = book([row()]);
+    const stored = readSheetMatrix(buffer, '探訪')!;
+    const result = parseGenericRows({
+      buffer, sheetName: '探訪', headerRow: 1, mapping: MAPPING, snapshot: demoSnapshot,
+      fileName: '回錄.xlsx', newId: () => `m-${++counter}`, matrix: stored,
+    });
+    expect(result.rows[0].status).toBe('READY');
+    expect(result.rows[0].input!.coverage).toBe('ATTEMPTED');
   });
 });

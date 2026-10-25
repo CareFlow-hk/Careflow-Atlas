@@ -6,7 +6,10 @@
  * what CLAUDE.md 3.1 forbids. Nothing here decides business facts: only "which of the
  * existing columns is which existing field".
  */
+import { acceptedAssessment, acceptedContact, acceptedCoverage, acceptedSource, assessmentLabels, contactLabels, coverageLabels, sourceLabels, supportCategoryLabels } from '../domain/presentation';
+import { resolveRelativeDay } from '../domain/relativeDay';
 import { CONTACT_OUTCOMES, COVERAGE_STATUSES, HOUSING_ASSESSMENTS, SOURCE_TYPES, SUPPORT_CATEGORIES, type ContactOutcome, type CoverageStatus, type HousingAssessment, type SourceType, type SupportCategory } from '../domain/types';
+import { readOption } from '../imports/genericRows';
 import { FORMAT_PROFILES, type CanonicalField, type ProfileId } from '../imports/profiles';
 
 export const CONTRACT_VERSION = 'ai-mapping-v1';
@@ -224,6 +227,11 @@ export interface DraftContext {
   /** The note as typed; every date and time in the reply must appear in it. */
   text: string;
   buildingIds: ReadonlySet<string>;
+  /**
+   * The device's Hong Kong calendar day, used only to translate a relative day the note
+   * already names (`resolveRelativeDay`). It is never used to invent one.
+   */
+  today: string;
 }
 
 const DRAFT_TOP = new Set(['status', 'buildingId', 'floorLabel', 'unitLabel', 'occurredDate', 'occurredTime', 'workerName', 'coverage', 'contactOutcome', 'assessment', 'sourceType', 'note', 'followUp', 'missing', 'warnings']);
@@ -239,7 +247,13 @@ const dayIsReal = (day: string): boolean => {
   const value = new Date(`${day}T00:00:00Z`);
   return value.getUTCFullYear() === Number(match[1]) && value.getUTCMonth() + 1 === Number(match[2]) && value.getUTCDate() === Number(match[3]);
 };
-const digitsIn = (text: string, ...values: string[]) => values.every(value => text.includes(value));
+/**
+ * Whether the note literally carries these digits. A zero-padded part also counts without
+ * its padding — 「2026年10月9日」 writes the same day as 「2026-10-09」 — but the year must
+ * still be there, so a note that only says 「10月9日」 cannot pin down a calendar date.
+ */
+const digitsIn = (text: string, ...values: string[]) =>
+  values.every(value => text.includes(value) || (Number(value) > 0 && text.includes(String(Number(value)))));
 
 const draftReject = (why: string): DraftRead => ({ ok: false, reason: `AI 回覆格式不正確，已整份作廢，未寫入任何資料：${why}` });
 
@@ -269,11 +283,15 @@ export function readDraft(raw: unknown, context: DraftContext): DraftRead {
   }
 
   const text = context.text;
+  const stated = resolveRelativeDay(text, context.today);
   const optionalDay = (value: unknown): string | undefined | false => {
     if (value == null) return undefined;
     if (typeof value !== 'string' || !dayIsReal(value)) return false;
     const [, y, m, d] = DAY.exec(value)!;
-    return digitsIn(text, y, m, d) ? value : false;
+    if (digitsIn(text, y, m, d)) return value;
+    // A relative word the note states, translated against the device's day. Anything else
+    // is a date nobody wrote down, and it is refused with the rest of the reply.
+    return stated.has(value) ? value : false;
   };
 
   const occurredDate = optionalDay(raw.occurredDate);
@@ -336,3 +354,160 @@ export function readDraft(raw: unknown, context: DraftContext): DraftRead {
   };
 }
 
+
+/* ---------------------------------------------------------------------------------------
+ * The patch contract: what the chat beside the plan may change.
+ *
+ * A person reads the target list, then says 「第 3、4 行都是已嘗試接觸」 or 「把第 5 行的
+ * 日期改成 2026-10-11」. The reply is a list of cells, not a new record: this path can only
+ * change rows already in front of the person (`docs/AI_ASSISTANT.md` 6.2). It cannot add a
+ * row, a column, a building or a place — those need the file or the structure edit.
+ *
+ * Every patch lands in the same override layer a hand edit uses, and the whole sheet is
+ * parsed again, so a value the assistant proposes passes exactly the checks the file does.
+ * Dates and times are the exception checked here: like a draft, they must come from what
+ * the person wrote, or the whole reply is discarded rather than a day invented.
+ * ------------------------------------------------------------------------------------- */
+
+export interface AiPatch {
+  /** 1-based worksheet row, as the plan shows it. */
+  row: number;
+  /** 0-based column, when the cell exists in the sheet. */
+  column: number | null;
+  /** A canonical field, when the sheet has no column for it. */
+  field: CanonicalField | null;
+  /** The cell's new text. An empty string clears it. */
+  value: string;
+  reason: string;
+}
+
+export interface AiPatchSet {
+  status: 'PATCH' | 'REFUSE';
+  /** One sentence for the chat: what it changed, or why it did not. */
+  explanation: string;
+  patches: AiPatch[];
+  warnings: string[];
+}
+
+export type PatchRead = { ok: true; value: AiPatchSet } | { ok: false; reason: string };
+
+export interface PatchContext {
+  /** The instruction as typed; every date and time must be derivable from it. */
+  text: string;
+  /** The device's Hong Kong day, for a relative day the instruction names. */
+  today: string;
+  /** Worksheet rows the person can edit, 1-based. Nothing outside these is reachable. */
+  rows: readonly number[];
+  columnCount: number;
+  /**
+   * The current column mapping, so a patch named by column is still judged as the field it
+   * holds: a date column must carry a date the person wrote, whichever way it is named.
+   */
+  columns?: Partial<Record<CanonicalField, number | null>>;
+  /** Cells that decide identity, not content; the chat may not rewrite them. */
+  readOnlyColumns?: readonly number[];
+}
+
+const PATCH_TOP = new Set(['status', 'explanation', 'patches', 'warnings']);
+const PATCH_KEYS = new Set(['row', 'column', 'field', 'value', 'reason']);
+const MAX_PATCHES = 80, MAX_EXPLANATION = 300, MAX_PATCH_VALUE = 2000;
+
+/** Fields that say which record this is; changing them would rewrite history, not fix it. */
+export const IDENTITY_FIELDS = new Set<CanonicalField>(['buildingId', 'recordId', 'paperRef', 'paperLine', 'visitId', 'correctsObservationId', 'resolvesObservationId']);
+
+const patchReject = (why: string): PatchRead => ({ ok: false, reason: `AI 回覆格式不正確，已整份作廢，未改動任何資料：${why}` });
+
+/** Validates one reply from the plan's chat against the rows and sheet in front of the person. */
+export function readPatchReply(raw: unknown, context: PatchContext): PatchRead {
+  if (!isObject(raw)) return patchReject('不是一個 JSON 物件。');
+  const extra = strayKeys(raw, PATCH_TOP);
+  if (extra) return patchReject(`多了合約以外的欄位「${extra}」。`);
+  if (raw.status !== 'PATCH' && raw.status !== 'REFUSE') return patchReject('status 不在 PATCH／REFUSE 之內。');
+  const explanation = textOf(raw.explanation);
+  if (!explanation || explanation.length > MAX_EXPLANATION) return patchReject('explanation 必須是一句簡短說明。');
+
+  const warnings: string[] = [];
+  if (raw.warnings !== undefined) {
+    if (!Array.isArray(raw.warnings) || raw.warnings.length > MAX_WARNINGS || !raw.warnings.every(warning => typeof warning === 'string' && warning.length <= MAX_TEXT)) {
+      return patchReject('warnings 必須是最多 10 句短文字。');
+    }
+    warnings.push(...(raw.warnings as string[]));
+  }
+
+  if (!Array.isArray(raw.patches)) {
+    if (raw.status === 'REFUSE' && raw.patches === undefined) return { ok: true, value: { status: 'REFUSE', explanation, patches: [], warnings } };
+    return patchReject('缺少 patches 陣列。');
+  }
+  if (raw.status === 'REFUSE' && raw.patches.length) return patchReject('REFUSE 不應附帶改動。');
+  if (raw.status === 'PATCH' && raw.patches.length === 0) return patchReject('PATCH 但沒有任何改動。');
+  if (raw.patches.length > MAX_PATCHES) return patchReject('一次改動太多格。');
+
+  const stated = resolveRelativeDay(context.text, context.today);
+  const rows = new Set(context.rows);
+  const fieldOfColumn = (column: number): CanonicalField | undefined =>
+    (Object.entries(context.columns ?? {}) as [CanonicalField, number | null][]).find(entry => entry[1] === column)?.[0];
+  const patches: AiPatch[] = [];
+  const seen = new Set<string>();
+
+  for (const entry of raw.patches) {
+    if (!isObject(entry)) return patchReject('patches 內有一項不是物件。');
+    const stray = strayKeys(entry, PATCH_KEYS);
+    if (stray) return patchReject(`patches 內多了合約以外的欄位「${stray}」。`);
+
+    const row = entry.row;
+    if (!Number.isInteger(row) || !rows.has(row as number)) return patchReject(`第 ${String(row)} 行不在這份表的可改範圍內。`);
+
+    const hasColumn = entry.column !== null && entry.column !== undefined;
+    const hasField = entry.field !== null && entry.field !== undefined;
+    if (hasColumn === hasField) return patchReject('每一項改動必須只指出 column 或 field 其中一個。');
+
+    let column: number | null = null, field: CanonicalField | null = null;
+    if (hasColumn) {
+      if (!Number.isInteger(entry.column) || (entry.column as number) < 0 || (entry.column as number) >= context.columnCount) return patchReject(`第 ${row} 行的欄索引超出範圍。`);
+      column = entry.column as number;
+      if (context.readOnlyColumns?.includes(column)) return patchReject(`第 ${column + 1} 欄沒有送交 AI（個人資料或記錄身分），不能在對話裡改。`);
+    } else {
+      if (typeof entry.field !== 'string' || !CANONICAL.has(entry.field)) return patchReject(`不認識欄位代號「${String(entry.field)}」。`);
+      if (IDENTITY_FIELDS.has(entry.field as CanonicalField)) return patchReject(`「${entry.field}」是記錄身分，不能在對話裡改。`);
+      field = entry.field as CanonicalField;
+    }
+
+    // A patch named by column still has to pass the checks of the field that column holds.
+    const targetField = field ?? fieldOfColumn(column!);
+    if (targetField && IDENTITY_FIELDS.has(targetField)) return patchReject(`「${targetField}」是記錄身分，不能在對話裡改。`);
+
+    if (typeof entry.value !== 'string' || entry.value.length > MAX_PATCH_VALUE) return patchReject(`第 ${row} 行的新值不是文字或太長。`);
+    const value = entry.value.trim();
+    // An empty value clears the cell; it is a real edit, not a missing one.
+    if (value) {
+      const day = targetField === 'occurredAt' || targetField === 'followUpDueDate';
+      const clock = targetField === 'occurredTime';
+      if (day) {
+        if (!dayIsReal(value)) return patchReject(`第 ${row} 行的日期「${value}」不是真實日期。`);
+        const [, y, m, d] = DAY.exec(value)!;
+        if (!digitsIn(context.text, y, m, d) && !stated.has(value)) return patchReject(`第 ${row} 行的日期「${value}」不是你在對話裡寫出的日期；年份也請寫明。`);
+      }
+      if (clock) {
+        if (!CLOCK.test(value)) return patchReject(`第 ${row} 行的時間「${value}」不是 24 小時制。`);
+        const [, hh, mm] = CLOCK.exec(value)!;
+        if (!digitsIn(context.text, hh, mm) && !stated.has(value)) return patchReject(`第 ${row} 行的時間「${value}」不是你在對話裡寫出的時間。`);
+      }
+      const allowed = targetField === 'coverage' ? readOption(value, coverageLabels, acceptedCoverage)
+        : targetField === 'contactOutcome' ? readOption(value, contactLabels, acceptedContact)
+        : targetField === 'assessment' ? readOption(value, assessmentLabels, acceptedAssessment)
+        : targetField === 'sourceType' ? readOption(value, sourceLabels, acceptedSource)
+        : targetField === 'followUpCategory' ? readOption(value, supportCategoryLabels, {} as Record<string, SupportCategory>)
+        : undefined;
+      if (allowed === false) return patchReject(`第 ${row} 行的「${value}」不是可選的寫法。`);
+    }
+
+    const reason = textOf(entry.reason);
+    if (!reason) return patchReject(`第 ${row} 行的改動缺少理由。`);
+    const key = column !== null ? `c:${row}:${column}` : `f:${row}:${field}`;
+    if (seen.has(key)) return patchReject(`第 ${row} 行的同一格被改了多於一次。`);
+    seen.add(key);
+    patches.push({ row: row as number, column, field, value, reason });
+  }
+
+  return { ok: true, value: { status: raw.status, explanation, patches, warnings } };
+}

@@ -97,6 +97,14 @@ export const coverageLabels: Record<CoverageStatus, string> = {
   VISITED_WITH_FINDING: '已訪，有記錄', INACCESSIBLE: '未能進入',
 };
 
+/**
+ * What a record says when the visit stated no coverage. It is not a coverage value:
+ * nothing is stored, and the place's earlier result keeps standing (CLAUDE.md §4,
+ * "缺失就是缺失"). The entry form offers it as the blank choice; history and detail
+ * views show it in place of a coverage label so the row never reads as a colour.
+ */
+export const coverageNotUpdatedLabel = '未更新覆蓋狀態';
+
 export const contactLabels: Record<ContactOutcome, string> = {
   NOT_ATTEMPTED: '未嘗試接觸', NO_ANSWER: '無人應門', DECLINED: '住戶婉拒',
   CONTACTED: '已接觸', UNKNOWN: '接觸結果未明',

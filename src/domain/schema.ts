@@ -20,7 +20,9 @@ export const photoFallbackSchema = z.object({
 });
 export const observationSchema = z.object({
   ...base, visitId: id, buildingId: id, floorId: id.optional(), unitId: id.optional(),
-  occurredAt: occurrenceSchema, recordedAt: instantSchema, workerName: id, coverage: z.enum(COVERAGE_STATUSES),
+  // Absent coverage is a record that states no result for this visit; the place's earlier
+  // coverage keeps standing. It is not UNKNOWN, which is itself a stated result.
+  occurredAt: occurrenceSchema, recordedAt: instantSchema, workerName: id, coverage: z.enum(COVERAGE_STATUSES).optional(),
   assessment: z.enum(HOUSING_ASSESSMENTS).optional(), contactOutcome: z.enum(CONTACT_OUTCOMES).optional(),
   sourceType: z.enum(['STAFF_OBSERVATION', 'RESIDENT_REPORT', 'UNKNOWN']).optional(), evidence: z.array(text).max(100), note: text.optional(),
   // A self-defined wording kept beside the stored enum; the pipeline never reads it.

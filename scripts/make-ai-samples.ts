@@ -15,15 +15,24 @@
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import * as XLSX from 'xlsx';
-import { buildPreview } from '../src/ai/preview';
+import { MAX_SHEET_COLUMNS, buildPreview } from '../src/ai/preview';
 import { detectWorkbook } from '../src/imports/detector';
 
 const OUT = 'samples/ai-assistant';
 
+/** Over the per-cell limit (80 characters), so the preview has to admit truncation. */
+const LONG_NOTE_A = '單位內兩戶共用廚房及洗手間，走廊照明不足，門口有雜物堆放。住戶表示晚上八時後才有人在家，需要再與管理處確認上樓時間，並提醒同工不要單獨入內。另外走廊有兩戶共用電錶，需記錄讀數，住戶擔心加租，想了解租務管制。';
+const LONG_NOTE_B = '大門鎖上，按鈴三次無人回應，門外有新的外賣單據。鄰居表示單位近日有人出入，但多數在日間，建議改為下午時段再訪，並先向管理處核對住戶是否仍在。鐵閘有新換的鎖頭，門牌與紀錄不符，需要再確認。';
+const LONG_NOTE_C = '住戶願意受訪，表示單位已分間為三間，租金按月繳付，沒有書面租約。住戶詢問申請津貼的方法，已留下單張並記下需要下次帶同表格再來詳細說明。住戶提到業主近期會上門收租，希望同工避開該時段。';
+
 interface Sample {
   file: string;
-  /** What the rule detector must say before the assistant is even offered. */
-  expect: 'UNKNOWN' | 'AMBIGUOUS' | 'KNOWN';
+  /**
+   * What the rule detector must say before the assistant is even offered.
+   * `REFUSED` means the shared reader throws on size limits instead of answering, which is
+   * also a legitimate sample: the person must see a refusal, not a silently trimmed sheet.
+   */
+  expect: 'UNKNOWN' | 'AMBIGUOUS' | 'KNOWN' | 'REFUSED';
   /** One line the README repeats, so the two cannot drift apart. */
   why: string;
   sheets: { name: string; rows: (string | number)[][] }[];
@@ -125,6 +134,74 @@ const samples: Sample[] = [
     why: '只有一行表頭、一筆資料都沒有 —— 外送預覽仍會產生（樣本 1 行），用來確認 AI 面對零資料時不會虛構住戶、樓層或日期。',
     sheets: [{ name: '空白', rows: [['日期', '樓', '室', '同事']] }],
   },
+  {
+    file: '07_分塊測試_701行工資表.xlsx',
+    expect: 'UNKNOWN',
+    // 701 行剛好越過兩個 CHUNK_ROWS，分成 3 段；非外展內容，所以第 1 段就該回 REFUSE。
+    why: '701 行的工資表，會分成 3 段送出 —— 用來確認第 1 段拒絕之後就停，另外 2 段不再送出，也不再按次付費。',
+    sheets: [{
+      name: '2026年10月工資',
+      rows: [
+        ['員工姓名', '職位', '底薪（港元）', '勤工獎', '強積金', '發薪日期'],
+        ...Array.from({ length: 700 }, (_, index) => {
+          const number = String(index + 1).padStart(3, '0');
+          return [`員工${number}（合成）`, '外展助理', 18000, 300, 900, '2026-10-31'] as (string | number)[];
+        }),
+      ],
+    }],
+  },
+  {
+    file: '08_超長儲存格_截斷.xlsx',
+    expect: 'UNKNOWN',
+    why: '三格的現場文字超過 80 字 —— 預覽要說明「有 3 格超過 80 字，只送出前 80 字」，實際請求裡的內容也確實被截斷，不能聲稱送了完整原文。',
+    sheets: [{
+      name: '探訪記錄',
+      rows: [
+        ['探訪日期', '樓', '室', '負責同事', '現場情況文字'],
+        ['2026-10-05', '5', 'B', '陳同事', LONG_NOTE_A],
+        ['2026-10-05', '5', 'C', '陳同事', LONG_NOTE_B],
+        ['2026-10-06', '6', 'A', '李同事', LONG_NOTE_C],
+      ],
+    }],
+  },
+  {
+    file: '09_欄數超上限_拒絕.xlsx',
+    expect: 'REFUSED',
+    why: '65 欄，比 64 欄上限多 1 欄 —— 讀取階段就拒絕，整份檔案不會送到 AI，也不得靜默截掉第 65 欄（目前訊息來自共用的讀取器，用語仍寫「示範」）。',
+    sheets: [{
+      name: '過寬的表',
+      rows: [
+        Array.from({ length: MAX_SHEET_COLUMNS + 1 }, (_, index) => `欄${index + 1}`),
+        Array.from({ length: MAX_SHEET_COLUMNS + 1 }, (_, index) => `甲-${index + 1}`),
+        Array.from({ length: MAX_SHEET_COLUMNS + 1 }, (_, index) => `乙-${index + 1}`),
+      ],
+    }],
+  },
+  {
+    file: '10_多工作表_只送一份.xlsx',
+    expect: 'AMBIGUOUS',
+    why: '兩個工作表：外展紀錄（較多行，會被選中）與工資表 —— 用來確認只有被選中的那份進請求，預覽要写明另一個工作表「未送交 AI」。',
+    sheets: [
+      {
+        name: '探訪紀錄',
+        rows: [
+          ['探訪日期', '樓', '室', '負責同事', '探訪結果'],
+          ...Array.from({ length: 12 }, (_, index) => [
+            '2026-10-05', String(3 + (index % 3)), String.fromCharCode(65 + (index % 2)),
+            index % 2 ? '陳同事' : '李同事', index % 3 ? '未能完成探訪' : '已完成探訪',
+          ] as (string | number)[]),
+        ],
+      },
+      {
+        name: '工資（勿送）',
+        rows: [
+          ['員工姓名', '職位', '底薪（港元）'],
+          ['陳大文（合成）', '社工', 28000],
+          ['李小明（合成）', '活動助理', 18000],
+        ],
+      },
+    ],
+  },
 ];
 
 mkdirSync(OUT, { recursive: true });
@@ -135,14 +212,26 @@ for (const sample of samples) {
   // Re-read from disk rather than the in-memory copy: what ships is the file.
   const onDisk = readFileSync(`${OUT}/${sample.file}`);
   const buffer = onDisk.buffer.slice(onDisk.byteOffset, onDisk.byteOffset + onDisk.byteLength) as ArrayBuffer;
-  const recognition = detectWorkbook(buffer);
-  const preview = buildPreview(buffer, recognition, sample.file);
-  const status = recognition.status === sample.expect ? 'OK  ' : 'FAIL';
+
+  // The shared reader throws on the size limits rather than reporting a status; both
+  // outcomes are sampled, so the failure is caught here and compared like any other.
+  let observed: string;
+  let detail: string;
+  try {
+    const recognition = detectWorkbook(buffer);
+    observed = recognition.status;
+    const preview = buildPreview(buffer, recognition, sample.file);
+    detail = preview.ok
+      ? `樣本 ${preview.preview.rows.length} 行×${preview.preview.columnCount} 欄，分 ${preview.preview.chunks.length} 段，個人資料欄 ${preview.preview.sensitiveColumns.map(index => index + 1).join('、') || '無'}，截斷 ${preview.preview.truncatedCells} 格`
+      : `預覽拒絕：${preview.reason}`;
+  } catch (error) {
+    observed = 'REFUSED';
+    detail = `讀取拒絕：${error instanceof Error ? error.message : String(error)}`;
+  }
+
+  const status = observed === sample.expect ? 'OK  ' : 'FAIL';
   if (status === 'FAIL') failed = true;
-  const detail = preview.ok
-    ? `樣本 ${preview.preview.rows.length} 行×${preview.preview.columnCount} 欄，個人資料欄 ${preview.preview.sensitiveColumns.map(index => index + 1).join('、') || '無'}`
-    : `預覽拒絕：${preview.reason}`;
-  console.log(`${status} ${sample.file} · 規則識別 ${recognition.status}（預期 ${sample.expect}）· ${detail}`);
+  console.log(`${status} ${sample.file} · 識別結果 ${observed}（預期 ${sample.expect}）· ${detail}`);
   if (status === 'FAIL') console.log(`      ${sample.why}`);
 }
 

@@ -1,10 +1,13 @@
 /**
  * The standalone assistant dialog (`docs/AI_ASSISTANT.md` 6.1).
  *
- * Two screens, not five: put in a note or a workbook, then read the list of things that
- * will happen — 「在裕安樓 · 5F B室 新增 1 筆到訪記錄」 — and press one button. A note is
+ * Two screens, not five: put in a note, a workbook, or both, then read the list of things
+ * that will happen — 「在裕安樓 · 5F B室 新增 1 筆到訪記錄」 — and press one button. A note is
  * sent as typed; a workbook first says, on the same screen, how many rows and columns will
- * leave the device, and personal-looking columns are withheld. The column mapping lives
+ * leave the device, and personal-looking columns are withheld. Each input keeps its own
+ * provenance — the note is one draft, the sheet is one row per record — but they are read
+ * together and confirmed once, because a person who drops a sheet and types 「另外今日去咗
+ * 5 樓 B 室」 means one piece of work. The column mapping lives
  * inside the target list rather than in front of it, and the columns nobody mapped are
  * kept in the note rather than put to a vote — both are details of how the rows were read,
  * not decisions the person came here to make (the reading rules never invent a value).
@@ -25,19 +28,22 @@ import type { DragEvent } from 'react';
 import { AlertTriangle, CheckCircle2, FileSpreadsheet, Sparkles, Upload, X } from 'lucide-react';
 import { assessmentLabels, contactLabels, coverageLabels } from '../domain/presentation';
 import { buildReminders, type ReminderBook, type ReminderTask, type ReminderViewer } from '../domain/reminders';
+import { namedBuilding, type NamedBuilding } from '../domain/buildingMentions';
 import { proposeLocation, type LocationProposal } from '../domain/structure';
 import type { AiAssist, ContactOutcome, CoverageStatus, HousingAssessment, OutreachSnapshot, SaveObservationInput } from '../domain/types';
 import { detectWorkbook } from '../imports/detector';
-import { parseGenericRows, type GenericParseInput, type GenericParseResult } from '../imports/genericRows';
+import { parseGenericRows, readSheetMatrix, type GenericParseInput, type GenericParseResult, type SheetMatrix } from '../imports/genericRows';
 import type { CanonicalField } from '../imports/profiles';
 import { REQUIRED_FIELDS, shownFields } from './aiMappingFields';
 import { placeKey, placesToCreate, planActions, plannedRows } from './aiPlan';
+import { NO_EDITS, cellKey, editCounts, fieldKey, planInput, toMapping, withEdit, withoutEdit, type EditSource, type PlanEdits } from './planEdits';
+import { PlanRowEditor, RowDetails } from './AiPlanRows';
 import { aiCredential, type AiCredential } from '../ai/credential';
 import { canonicalOptions, type AiDraft, type AiSuggestion } from '../ai/contract';
 import { buildPreview, outboundSummary, type OutboundPreview } from '../ai/preview';
 import { isReminderQuestion, readReminderQuestion } from '../ai/reminderQuery';
-import { SCOPE_REFUSAL, outOfScope } from '../ai/scope';
-import { suggestDraft, suggestFileMapping } from '../ai/suggest';
+import { SCOPE_REFUSAL } from '../ai/scope';
+import { suggestDraft, suggestFileMapping, suggestPatches } from '../ai/suggest';
 import { ReminderAnswer } from './ReminderAnswer';
 
 export interface AiAssistantDialogProps {
@@ -65,26 +71,49 @@ export interface AiAssistantDialogProps {
 
 /** A workbook read with its confirmed mapping, and what that produced. */
 export interface FilePlan {
-  source: 'file';
   credential: AiCredential;
   preview: OutboundPreview;
   suggestion: AiSuggestion;
   columns: Partial<Record<CanonicalField, number | null>>;
   parse: ParseRun;
+  /** The sheet, read once, so every edit re-parses without decoding the workbook again. */
+  matrix: SheetMatrix;
   result: GenericParseResult;
 }
 
-interface TextPlan { source: 'text'; credential: AiCredential; value: AiDraft }
+/** Everything a `FilePlan` is built from; the parse itself is always recomputed. */
+type FilePlanBase = Omit<FilePlan, 'result'>;
 
-type Plan = FilePlan | TextPlan;
+/** One turn of the plan's chat, kept so the person can see what the assistant did. */
+export interface PlanChatTurn { question: string; answer: string; changed: number; failed?: boolean }
+
+export interface PlanChat {
+  turns: readonly PlanChatTurn[];
+  value: string;
+  asking: boolean;
+  onChange: (value: string) => void;
+  onAsk: () => void;
+}
+
+interface TextPlan { credential: AiCredential; value: AiDraft }
+
+/**
+ * One screen, one confirmation. A file and a note can be put in together; each keeps its
+ * own provenance and its own rules, but they are read once and confirmed once, because a
+ * person who drops a sheet and types 「另外今日去咗 5 樓 B 室」 means one piece of work.
+ */
+export type Plan =
+  | { source: 'file'; file: FilePlan }
+  | { source: 'text'; text: TextPlan }
+  | { source: 'both'; file: FilePlan; text: TextPlan };
 
 /** A chosen workbook, read locally; nothing has left the device yet. */
-interface FileDraft { buffer: ArrayBuffer; preview: OutboundPreview; known: boolean }
+interface FileDraft { buffer: ArrayBuffer; preview: OutboundPreview; known: boolean; matrix: SheetMatrix }
 
 type Stage =
   | { kind: 'idle' }
   | { kind: 'busy'; label: string }
-  | { kind: 'plan'; plan: Plan }
+  | { kind: 'plan'; plan: Plan; notice?: string }
   | { kind: 'reminder'; book: ReminderBook; text: string }
   | { kind: 'error'; message: string }
   | { kind: 'done'; message: string };
@@ -92,13 +121,29 @@ type Stage =
 /** What a sheet was read with, kept so a changed mapping can be read in again. */
 type ParseRun = Omit<GenericParseInput, 'snapshot' | 'now' | 'newId' | 'extraColumns'>;
 
-interface DraftForm {
+export interface DraftForm {
   buildingId: string; floor: string; unit: string; date: string; time: string; worker: string;
   coverage: CoverageStatus | ''; contact: ContactOutcome | ''; assessment: HousingAssessment | ''; note: string;
   action: string; dueDate: string; assignee: string;
 }
 
 const blankDraft: DraftForm = { buildingId: '', floor: '', unit: '', date: '', time: '', worker: '', coverage: '', contact: '', assessment: '', note: '', action: '', dueDate: '', assignee: '' };
+
+/**
+ * Said when the note beside a sheet is not a second record. It is not a failure: 「在裕安樓」
+ * is how the uploaded file gets a building, and answering it with 「為什麼沒有記錄」 would
+ * treat the person's own words as a broken upload. The text stays in the box for rewriting.
+ */
+const TEXT_CONTEXT_ONLY = '這段文字沒有另外整理成一筆記錄，只用作這次讀表的補充說明（例如「在裕安樓」）。文字仍留在輸入框，可以改寫後再上傳。';
+
+/**
+ * Whether a draft says anything about a visit. A reply that only repeats where the sheet
+ * belongs («裕安樓») is context for the file, not a second record to confirm — showing it
+ * would put an empty form beside the sheet and block the single confirmation on fields
+ * nobody meant to fill.
+ */
+const draftIsRecord = (value: AiDraft) =>
+  !!value.occurredDate || !!value.occurredTime || !!value.coverage || !!value.contactOutcome || !!value.assessment || !!value.followUp;
 const message = (error: unknown) => error instanceof Error ? error.message : '未能完成，請再試一次。';
 const loose = (text: string) => text.replace(/[\s\u3000·・]/g, '').toLowerCase();
 
@@ -114,12 +159,6 @@ function draftLocation(snapshot: OutreachSnapshot, buildingId: string, floorText
   if (matches.length === 1) return { floorId: matches[0].floorId, unitId: matches[0].id };
   return { error: matches.length ? `「${unitText}」對應到多個單位，請把寫法寫清楚。` : `找不到「${unitText}」。請照樓層立面的寫法填，或把位置留空。` };
 }
-
-/** The mapping in the shape the parser takes, dropping the fields left unmapped. */
-const toMapping = (columns: Partial<Record<CanonicalField, number | null>>) =>
-  (Object.entries(columns) as [CanonicalField, number | null][])
-    .filter(([, index]) => index !== null)
-    .map(([key, index]) => ({ key, columnIndex: index as number }));
 
 /** Columns with no canonical field: every one is kept in each row's note (`CLAUDE.md` 3.1). */
 const unmappedColumns = (preview: OutboundPreview, columns: Partial<Record<CanonicalField, number | null>>) => {
@@ -141,12 +180,18 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
   const [dragging, setDragging] = useState(false);
   const [fileDraft, setFileDraft] = useState<FileDraft | null>(null);
   const [form, setForm] = useState<DraftForm>(blankDraft);
+  /** Cells changed after the plan was shown — by hand or by the chat, one layer. */
+  const [edits, setEdits] = useState<PlanEdits>(NO_EDITS);
+  const [chat, setChat] = useState<PlanChatTurn[]>([]);
+  const [ask, setAsk] = useState('');
+  const [asking, setAsking] = useState(false);
 
   useEffect(() => { const dialog = dialogRef.current; if (!dialog) return; if (open && !dialog.open) dialog.showModal(); else if (!open && dialog.open) dialog.close(); }, [open]);
   useEffect(() => {
     if (!open) {
       setStage({ kind: 'idle' }); setText(''); setDragging(false);
       setFileDraft(null); setForm(blankDraft);
+      setEdits(NO_EDITS); setChat([]); setAsk(''); setAsking(false);
     }
   }, [open]);
 
@@ -163,43 +208,66 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
       const recognition = detectWorkbook(buffer);
       const built = buildPreview(buffer, recognition, file.name);
       if (!built.ok) { setStage({ kind: 'error', message: built.reason }); return; }
-      setFileDraft({ buffer, preview: built.preview, known: recognition.status === 'KNOWN' });
+      const matrix = readSheetMatrix(buffer, built.preview.sheetName);
+      if (!matrix) { setStage({ kind: 'error', message: `讀不到工作表「${built.preview.sheetName}」。` }); return; }
+      // A new file starts from its own cells: edits made to the previous one do not follow.
+      setEdits(NO_EDITS); setChat([]);
+      setFileDraft({ buffer, preview: built.preview, known: recognition.status === 'KNOWN', matrix });
       setStage({ kind: 'idle' });
     } catch (error) { fail(error); }
   };
 
-  /** Read the whole file and show the plan; the person sees the actions, not the columns. */
-  const showFilePlan = (run: ParseRun, credential: AiCredential, preview: OutboundPreview, suggestion: AiSuggestion, columns: FilePlan['columns']) => {
-    const result = parseGenericRows({ ...run, snapshot: snapshot!, extraColumns: extraColumnsFor(preview, columns) });
-    setStage({ kind: 'plan', plan: { source: 'file', credential, preview, suggestion, columns, parse: run, result } });
+  /**
+   * Read the whole file against the workspace, with every confirmed cell change applied to
+   * the sheet first. The person sees the actions, not the columns — but the actions are
+   * always the product of the rules run on the changed sheet, never of the edit alone.
+   */
+  const withResult = (base: FilePlanBase, changes: PlanEdits): FilePlan => {
+    const { mapping, overrides } = planInput(base.columns, changes);
+    return {
+      ...base,
+      result: parseGenericRows({
+        ...base.parse, mapping, matrix: base.matrix, overrides,
+        snapshot: snapshot!, extraColumns: extraColumnsFor(base.preview, base.columns),
+      }),
+    };
   };
 
-  const sendFile = async () => {
+
+  /** A plan without the parse that is about to be recomputed. */
+  const baseOf = (file: FilePlan): FilePlanBase => ({
+    credential: file.credential, preview: file.preview, suggestion: file.suggestion,
+    columns: file.columns, parse: file.parse, matrix: file.matrix,
+  });
+
+  /** One stage for one confirmed piece of work, whichever inputs went into it. */
+  const showPlan = (file: FilePlan | undefined, text: TextPlan | undefined, notice?: string) => {
+    if (file && text) setStage({ kind: 'plan', plan: { source: 'both', file, text }, notice });
+    else if (file) setStage({ kind: 'plan', plan: { source: 'file', file }, notice });
+    else if (text) setStage({ kind: 'plan', plan: { source: 'text', text } });
+  };
+
+  /**
+   * Map the dropped sheet. What the person typed beside it goes along as context, so
+   * 「大廈名稱在第 3 欄」 can explain the sheet; it can never add a column or a value.
+   * Returns `null` when it has already put a reason on screen.
+   */
+  const planFile = async (credential: AiCredential, context: string, defaultBuilding?: NamedBuilding): Promise<FilePlan | null | undefined> => {
     const draft = fileDraft;
-    if (!draft) return;
+    if (!draft) return undefined;
     // Personal-looking columns never leave the device by default; their content is still
     // kept in the note. This is stricter than the old opt-out and needs no extra screen.
-    const withheld = draft.preview.sensitiveColumns;
-    setStage({ kind: 'busy', label: '正在請 AI 核對欄位…' });
-    try {
-      if (!orgId) throw new Error('未設定機構，無法使用 AI 助手。');
-      const credential = await aiCredential(orgId);
-      const { suggestion } = await suggestFileMapping({ preview: draft.preview, credential, withheld }, (index, count) => setStage({ kind: 'busy', label: `正在請 AI 核對欄位（第 ${index}/${count} 段）…` }));
-      if (suggestion.status === 'REFUSE') { setStage({ kind: 'error', message: SCOPE_REFUSAL }); return; }
-      if (suggestion.status === 'NO_MATCH') { setStage({ kind: 'error', message: 'AI 看不出哪一欄對應哪一個既有欄位，沒有提出建議。可以只匯入工作表中間那一段，或改用人手對應。' }); return; }
-      const headerRow = suggestion.headerRow ?? draft.preview.headerRow;
-      if (headerRow === null || headerRow === undefined) { setStage({ kind: 'error', message: 'AI 找不到表頭，無法確定哪一行才是資料。請在工作表加上表頭後再試。' }); return; }
-      const columns = Object.fromEntries(suggestion.fields.map(field => [field.key, field.columnIndex]));
-      const run: ParseRun = { buffer: draft.buffer, sheetName: draft.preview.sheetName, headerRow: headerRow + 1, mapping: toMapping(columns), fileName: draft.preview.fileName };
-      showFilePlan(run, credential, draft.preview, suggestion, columns);
-    } catch (error) { fail(error); }
-  };
-
-  /** A different mapping: read the file again, plan again. */
-  const reread = (plan: FilePlan, columns: FilePlan['columns']) => {
-    if (!snapshot) return;
-    const run: ParseRun = { ...plan.parse, mapping: toMapping(columns) };
-    showFilePlan(run, plan.credential, plan.preview, plan.suggestion, columns);
+    const { suggestion } = await suggestFileMapping(
+      { preview: draft.preview, credential, withheld: draft.preview.sensitiveColumns, context: context || undefined },
+      (index, count) => setStage({ kind: 'busy', label: `正在請 AI 核對欄位（第 ${index}/${count} 段）…` }),
+    );
+    if (suggestion.status === 'REFUSE') { setStage({ kind: 'error', message: SCOPE_REFUSAL }); return null; }
+    if (suggestion.status === 'NO_MATCH') { setStage({ kind: 'error', message: 'AI 看不出哪一欄對應哪一個既有欄位，沒有提出建議。可以只匯入工作表中間那一段，或改用人手對應。' }); return null; }
+    const headerRow = suggestion.headerRow ?? draft.preview.headerRow;
+    if (headerRow === null || headerRow === undefined) { setStage({ kind: 'error', message: 'AI 找不到表頭，無法確定哪一行才是資料。請在工作表加上表頭後再試。' }); return null; }
+    const columns = Object.fromEntries(suggestion.fields.map(field => [field.key, field.columnIndex]));
+    const run: ParseRun = { buffer: draft.buffer, sheetName: draft.preview.sheetName, headerRow: headerRow + 1, mapping: toMapping(columns), fileName: draft.preview.fileName, defaultBuilding };
+    return withResult({ credential, preview: draft.preview, suggestion, columns, parse: run, matrix: draft.matrix }, edits);
   };
 
   /**
@@ -215,110 +283,207 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
     setStage({ kind: 'reminder', book, text: raw });
   };
 
-  const sendText = async (raw: string, asReminder = true) => {
+  /** Put the reviewed draft into the form; the person can still change every field. */
+  const applyDraft = (value: AiDraft) => setForm({
+    ...blankDraft,
+    buildingId: value.buildingId ?? '',
+    floor: value.floorLabel ?? '',
+    unit: value.unitLabel ?? '',
+    date: value.occurredDate ?? '',
+    time: value.occurredTime ?? '',
+    worker: value.workerName ?? '',
+    coverage: value.coverage ?? '',
+    contact: value.contactOutcome ?? '',
+    assessment: value.assessment ?? '',
+    note: value.note ?? '',
+    action: value.followUp?.action ?? '',
+    dueDate: value.followUp?.dueDate ?? '',
+    assignee: value.followUp?.assignee ?? '',
+  });
+
+  /**
+   * One button for one piece of work. The sheet is mapped with the typed note as context, the
+   * note is drafted on its own rules, and both land in one list with one confirmation. A
+   * question about open follow-ups is still answered here, from the workspace, and never
+   * leaves the device — so that path only applies when no file came with it.
+   */
+  const submit = async (asReminder = true, raw?: string) => {
+    const typed = (raw ?? text).trim();
+    if (!fileDraft && !typed) return;
     if (!snapshot) { setStage({ kind: 'error', message: '尚未載入工作區資料，無法核對大廈與單位。' }); return; }
-    if (asReminder && isReminderQuestion(raw)) { answerReminder(raw); return; }
-    if (outOfScope(raw)) { setStage({ kind: 'error', message: SCOPE_REFUSAL }); return; }
-    setStage({ kind: 'busy', label: '正在整理草稿…' });
+    if (!orgId) { setStage({ kind: 'error', message: '未設定機構，無法使用 AI 助手。' }); return; }
+    if (asReminder && !fileDraft && isReminderQuestion(typed)) { answerReminder(typed); return; }
+    // No local keyword check otherwise: the assistant's own reply decides (`docs/AI_ASSISTANT.md` 7).
+    setStage({ kind: 'busy', label: fileDraft ? '正在讀取檔案…' : '正在整理草稿…' });
     try {
-      if (!orgId) throw new Error('未設定機構，無法使用 AI 助手。');
       const credential = await aiCredential(orgId);
-      const value = await suggestDraft({ text: raw, snapshot, credential });
-      if (value.status === 'REFUSE') { setStage({ kind: 'error', message: SCOPE_REFUSAL }); return; }
-      setForm({
-        ...blankDraft,
-        buildingId: value.buildingId ?? '',
-        floor: value.floorLabel ?? '',
-        unit: value.unitLabel ?? '',
-        date: value.occurredDate ?? '',
-        time: value.occurredTime ?? '',
-        worker: value.workerName ?? '',
-        coverage: value.coverage ?? '',
-        contact: value.contactOutcome ?? '',
-        assessment: value.assessment ?? '',
-        note: value.note ?? '',
-        action: value.followUp?.action ?? '',
-        dueDate: value.followUp?.dueDate ?? '',
-        assignee: value.followUp?.assignee ?? '',
-      });
-      setStage({ kind: 'plan', plan: { source: 'text', credential, value } });
+      // The note the person typed is how a sheet with no 大廈 column gets one. Matched
+      // locally against the workspace's own names, so only a building they actually named
+      // can be used, and only for rows that name none (CLAUDE.md §4).
+      const fallback = fileDraft ? namedBuilding(snapshot.buildings, typed).building : undefined;
+      const file = await planFile(credential, typed, fallback);
+      if (file === null) return;
+      let draft: TextPlan | undefined;
+      let notice: string | undefined;
+      if (typed) {
+        setStage({ kind: 'busy', label: '正在整理文字草稿…' });
+        try {
+          const value = await suggestDraft({ text: typed, snapshot, credential });
+          if (value.status === 'REFUSE') {
+            // A sheet that read cleanly is not thrown away because the note beside it was not a record.
+            if (!file) { setStage({ kind: 'error', message: SCOPE_REFUSAL }); return; }
+            notice = TEXT_CONTEXT_ONLY;
+          } else if (file && !draftIsRecord(value)) {
+            // It named a place but no visit: that is the file's heading, not a record.
+            notice = TEXT_CONTEXT_ONLY;
+          } else { applyDraft(value); draft = { credential, value }; }
+        } catch (error) {
+          if (!file) { fail(error); return; }
+          notice = `文字部分沒有整理成功（${message(error)}），下面只有檔案的部分。`;
+        }
+      }
+      showPlan(file ?? undefined, draft, notice);
     } catch (error) { fail(error); }
   };
 
-  const filePlan = stage.kind === 'plan' && stage.plan.source === 'file' ? stage.plan : undefined;
-  const textPlan = stage.kind === 'plan' && stage.plan.source === 'text' ? stage.plan : undefined;
+  const plan = stage.kind === 'plan' ? stage.plan : undefined;
 
   const changeColumn = (key: CanonicalField, index: number | null) => {
-    const plan = stage.kind === 'plan' ? stage.plan : undefined;
-    if (plan?.source !== 'file') return;
-    reread(plan, { ...plan.columns, [key]: index });
-  };
-  const runPlan = () => {
-    const plan = stage.kind === 'plan' ? stage.plan : undefined;
-    if (!plan) return;
-    if (plan.source === 'file') runFilePlan(plan); else runDraftPlan(plan);
+    if (!plan || plan.source === 'text') return;
+    const base = baseOf(plan.file);
+    showPlan(withResult({ ...base, columns: { ...base.columns, [key]: index } }, edits), plan.source === 'both' ? plan.text : undefined, stage.kind === 'plan' ? stage.notice : undefined);
   };
 
-  /** Run the plan: create the floors/units it needs, read the file once more, write the rows. */
-  const runFilePlan = (plan: FilePlan) => {
-    if (!snapshot) return;
+  /** A cell changed by hand. The whole sheet is read again; nothing is patched in place. */
+  const editCell = (key: string, value: string | null, source: EditSource) => {
+    if (!plan || plan.source === 'text') return;
+    const next = value === null ? withoutEdit(edits, key) : withEdit(edits, key, value, source);
+    setEdits(next);
+    showPlan(withResult(baseOf(plan.file), next), plan.source === 'both' ? plan.text : undefined, stage.kind === 'plan' ? stage.notice : undefined);
+  };
+  const runPlan = () => {
+    if (!plan) return;
+    runPlanWith(plan.source === 'text' ? undefined : plan.file, plan.source === 'file' ? undefined : plan.text);
+  };
+
+  /**
+   * Run the whole list as one batch: create the floors/units it needs, read the file once
+   * more against that workspace, build the draft's record, then write everything in one
+   * call — one confirmation is one write.
+   */
+  const runPlanWith = (file: FilePlan | undefined, draft: TextPlan | undefined) => {
+    if (!snapshot || (!file && !draft)) return;
     let latest = snapshot;
-    const places = placesToCreate(plan.result);
-    if (places.length && !onApplyProposal) {
-      setStage({ kind: 'error', message: '結構編輯目前關閉，不能在這裡新增樓層或單位。請先在「編輯結構」新增，再回來執行。' });
-      return;
+    const made: string[] = [];
+    if (file) {
+      const places = placesToCreate(file.result);
+      if (places.length && !onApplyProposal) {
+        setStage({ kind: 'error', message: '結構編輯目前關閉，不能在這裡新增樓層或單位。請先在「編輯結構」新增，再回來執行。' });
+        return;
+      }
+      for (const place of places) {
+        const proposal = proposeLocation(latest, place.buildingId, place.floorLabel, place.unitLabel);
+        if (!proposal) { setStage({ kind: 'error', message: `系統讀不出「${place.floorLabel} ${place.unitLabel}」該怎樣建（只認數字樓層＋字母單位）。請在「編輯結構」手動新增，再回來執行。` }); return; }
+        const applied = onApplyProposal!(proposal);
+        if ('error' in applied) { setStage({ kind: 'error', message: applied.error }); return; }
+        latest = applied.snapshot;
+        made.push(`${place.floorLabel} ${place.unitLabel}`);
+      }
     }
-    for (const place of places) {
-      const proposal = proposeLocation(latest, place.buildingId, place.floorLabel, place.unitLabel);
-      if (!proposal) { setStage({ kind: 'error', message: `系統讀不出「${place.floorLabel} ${place.unitLabel}」該怎樣建（只認數字樓層＋字母單位）。請在「編輯結構」手動新增，再回來執行。` }); return; }
-      const applied = onApplyProposal!(proposal);
-      if ('error' in applied) { setStage({ kind: 'error', message: applied.error }); return; }
-      latest = applied.snapshot;
+    const inputs: SaveObservationInput[] = [];
+    if (file) {
+      // Read again against the workspace as it now stands; the rows that waited for a place
+      // are writable, and anything still short of a date, worker or result stays out.
+      const { mapping, overrides } = planInput(file.columns, edits);
+      const result = parseGenericRows({ ...file.parse, mapping, matrix: file.matrix, overrides, snapshot: latest, extraColumns: extraColumnsFor(file.preview, file.columns) });
+      const chosen = plannedRows(result, new Set());
+      if (!chosen.length && !draft) { setStage({ kind: 'error', message: '沒有任何一行可以寫入。未寫入的行都列在目標清單下面，並寫了原因。' }); return; }
+      inputs.push(...chosen.map(row => ({ ...row.input!, aiAssist: assistOf(file.credential) })));
     }
-    // Read again against the workspace as it now stands; the rows that waited for a place
-    // are writable, and anything still short of a date, worker or result stays out.
-    const result = parseGenericRows({ ...plan.parse, snapshot: latest, extraColumns: extraColumnsFor(plan.preview, plan.columns) });
-    const chosen = plannedRows(result, new Set());
-    if (!chosen.length) { setStage({ kind: 'error', message: '沒有任何一行可以寫入。未寫入的行都列在目標清單下面，並寫了原因。' }); return; }
+    if (draft) {
+      const record = draftRecord(draft, latest);
+      if (!record) return;
+      inputs.push(record.input);
+      if (record.created) made.push(record.created);
+    }
     try {
-      onWrite(chosen.map(row => ({ ...row.input!, aiAssist: assistOf(plan.credential) })));
-      const made = places.length ? `，也新增了 ${places.length} 個樓層／單位` : '';
-      setStage({ kind: 'done', message: `已寫入 ${chosen.length} 筆記錄${made}。每筆都標了「由 AI 協助」。` });
+      onWrite(inputs);
+      const extra = made.length ? `，也新增了 ${made.length} 個樓層／單位` : '';
+      setStage({ kind: 'done', message: `已寫入 ${inputs.length} 筆記錄${extra}。每筆都標了「由 AI 協助」。` });
     } catch (error) { fail(error); }
   };
 
-  /** Run the draft: create its floor/unit if the workspace lacks it, then write the record. */
-  const runDraftPlan = (plan: TextPlan) => {
-    if (!snapshot) return;
+  /** Turn the reviewed form into one record, creating its floor/unit first if the workspace lacks it. */
+  const draftRecord = (draft: TextPlan, start: OutreachSnapshot): { input: SaveObservationInput; created?: string } | undefined => {
     if (!form.buildingId || !form.date || !form.coverage || !form.worker.trim()) {
       setStage({ kind: 'error', message: '大廈、日期、覆蓋結果與工作員都必須由人填寫。' });
-      return;
+      return undefined;
     }
-    let latest = snapshot;
+    let latest = start;
+    let created: string | undefined;
     let location = draftLocation(latest, form.buildingId, form.floor.trim(), form.unit.trim());
     if ('error' in location) {
       const proposal = form.floor.trim() && form.unit.trim() ? proposeLocation(latest, form.buildingId, form.floor.trim(), form.unit.trim()) : undefined;
-      if (!proposal || !onApplyProposal) { setStage({ kind: 'error', message: location.error }); return; }
+      if (!proposal || !onApplyProposal) { setStage({ kind: 'error', message: location.error }); return undefined; }
       const applied = onApplyProposal(proposal);
-      if ('error' in applied) { setStage({ kind: 'error', message: applied.error }); return; }
+      if ('error' in applied) { setStage({ kind: 'error', message: applied.error }); return undefined; }
       latest = applied.snapshot;
+      created = `${form.floor.trim()} ${form.unit.trim()}`;
       location = draftLocation(latest, form.buildingId, form.floor.trim(), form.unit.trim());
-      if ('error' in location) { setStage({ kind: 'error', message: location.error }); return; }
+      if ('error' in location) { setStage({ kind: 'error', message: location.error }); return undefined; }
     }
-    const input: SaveObservationInput = {
-      id: `ai:${crypto.randomUUID()}`, visitId: `ai-visit:${crypto.randomUUID()}`, buildingId: form.buildingId,
-      floorId: location.floorId, unitId: location.unitId,
-      occurredAt: form.time ? `${form.date}T${form.time}:00+08:00` : form.date,
-      recordedAt: new Date().toISOString(), workerName: form.worker.trim(), coverage: form.coverage,
-      contactOutcome: form.contact || undefined, assessment: form.assessment || undefined,
-      note: form.note.trim() || undefined, evidence: [],
-      followUp: form.action.trim() ? { action: form.action.trim(), status: 'OPEN', assignee: form.assignee.trim() || undefined, dueDate: form.dueDate || undefined } : undefined,
-      aiAssist: assistOf(plan.credential),
+    return {
+      created,
+      input: {
+        id: `ai:${crypto.randomUUID()}`, visitId: `ai-visit:${crypto.randomUUID()}`, buildingId: form.buildingId,
+        floorId: location.floorId, unitId: location.unitId,
+        occurredAt: form.time ? `${form.date}T${form.time}:00+08:00` : form.date,
+        recordedAt: new Date().toISOString(), workerName: form.worker.trim(), coverage: form.coverage,
+        contactOutcome: form.contact || undefined, assessment: form.assessment || undefined,
+        note: form.note.trim() || undefined, evidence: [],
+        followUp: form.action.trim() ? { action: form.action.trim(), status: 'OPEN', assignee: form.assignee.trim() || undefined, dueDate: form.dueDate || undefined } : undefined,
+        aiAssist: assistOf(draft.credential),
+      },
     };
+  };
+
+  /**
+   * The plan's chat (`docs/AI_ASSISTANT.md` 6.2). The assistant proposes cells, never a new
+   * row: every proposal goes into the same override layer a hand edit uses, and the sheet is
+   * read again. A refusal is an answer too — it is kept in the transcript with its reason.
+   */
+  const askPlan = async () => {
+    if (!plan || plan.source === 'text' || asking) return;
+    const question = ask.trim();
+    if (!question) return;
+    const file = plan.file;
+    setAsking(true);
     try {
-      onWrite([input]);
-      setStage({ kind: 'done', message: '已寫入 1 筆記錄，標了「由 AI 協助」。' });
-    } catch (error) { fail(error); }
+      const answer = await suggestPatches({
+        text: question, preview: file.preview, columns: file.columns,
+        rows: file.result.rows.map(row => row.rowNumber),
+        credential: file.credential, withheld: file.preview.sensitiveColumns,
+      });
+      if (answer.status === 'REFUSE') {
+        setChat(turns => [...turns, { question, answer: answer.explanation, changed: 0 }]);
+        setAsk('');
+        return;
+      }
+      let next = edits;
+      for (const patch of answer.patches) {
+        const column = patch.column !== null ? patch.column
+          : typeof file.columns[patch.field!] === 'number' ? file.columns[patch.field!]!
+          : null;
+        const key = column === null ? fieldKey(patch.row, patch.field!) : cellKey(patch.row, column);
+        next = withEdit(next, key, patch.value, 'ai');
+      }
+      setEdits(next);
+      showPlan(withResult(baseOf(file), next), plan.source === 'both' ? plan.text : undefined, stage.kind === 'plan' ? stage.notice : undefined);
+      setChat(turns => [...turns, { question, answer: answer.explanation, changed: answer.patches.length }]);
+      setAsk('');
+    } catch (error) {
+      setChat(turns => [...turns, { question, answer: message(error), changed: 0, failed: true }]);
+    } finally { setAsking(false); }
   };
 
   return <dialog aria-labelledby="ai-title" ref={dialogRef} className="cf-dialog cf-dialog--ai" onCancel={event => { event.preventDefault(); onClose(); }} onClose={() => { if (open) onClose(); }}>
@@ -326,11 +491,10 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
       <header className="cf-dialog__header"><div><span className="cf-eyebrow">AI 助手</span><h2 id="ai-title">說一句，或放一份表</h2></div><button className="cf-icon-button" onClick={onClose} aria-label="關閉"><X /></button></header>
 
       {stage.kind === 'idle' && <>
-        <p className="cf-callout">AI 只提出草稿或欄位建議，<strong>不會寫入任何資料</strong>。下一步會列出「將執行的目標」；你看過、按下「確認並執行」，記錄才會以你的身分存入，並標明「由 AI 協助」。貼上的文字會送交 AI，但問未完成跟進除外（那一類在本機回答）；檔案會先顯示行數與欄數，姓名、電話等欄不會送出。</p>
+        <p className="cf-callout">AI 只提出草稿或欄位建議，<strong>不會寫入任何資料</strong>。下一步會列出「將執行的目標」；你看過、按下「確認並執行」，記錄才會以你的身分存入，並標明「由 AI 協助」。文字和檔案可以一起放入，整理成同一份清單、同一次確認。貼上的文字會送交 AI，但問未完成跟進除外（那一類在本機回答）；檔案會先顯示行數與欄數，姓名、電話等欄不會送出。</p>
         {!snapshot && <p className="cf-error" role="alert"><AlertTriangle />尚未載入工作區資料，先載入後再使用。</p>}
-        <label className="cf-ai__label" htmlFor="ai-note">貼一段紙本原話或口述</label>
+        <label className="cf-ai__label" htmlFor="ai-note">貼一段紙本原話或口述（可留空）</label>
         <textarea id="ai-note" className="cf-ai__text" rows={5} value={text} placeholder="例如：10月9日晚上 7 點，3樓 A 室拍門無人應門，門外有水電單；下星期再上門。" onChange={event => setText(event.target.value)} />
-        <div className="cf-ai__send"><button className="cf-button cf-button--secondary" disabled={!snapshot || !text.trim()} onClick={() => void sendText(text)}><Sparkles size={16} />整理成目標</button></div>
         <p className="cf-ai__note">也可以直接問「今天還有什麼未完成的跟進？」。這一類問題在工作區本機計算，內容不會送交 AI；員工帳號只會看到指派給自己的任務。</p>
         <div className={`cf-dropzone ${dragging ? 'is-dragging' : ''}`} role="button" tabIndex={0} onClick={() => inputRef.current?.click()} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') inputRef.current?.click(); }} onDragOver={event => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={(event: DragEvent) => { event.preventDefault(); setDragging(false); const file = event.dataTransfer.files?.[0]; if (file) void readFile(file); }}>
           <Upload size={26} /><strong>拖放 Excel／CSV 檔案到這裡</strong><span>或按此選擇檔案。上限 5 MB、5000 行、64 欄；超出會請你先拆檔，不會偷偷截斷。</span>
@@ -342,29 +506,31 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
           {fileDraft.known && <p className="cf-ai__note">系統的規則識別已認得這個格式。多數情況可以直接用「紙本與 Excel」匯入；仍然想請 AI 核對欄位的話可以繼續。</p>}
           <div className="cf-ai__send">
             <button className="cf-button cf-button--ghost" onClick={() => setFileDraft(null)}>換一個檔案</button>
-            <button className="cf-button cf-button--primary" disabled={!snapshot} onClick={() => void sendFile()}><Sparkles size={16} />整理這份表</button>
           </div>
         </section>}
-        <p className="cf-ai__note">對談內容只留在這部裝置，不上傳、不進匯出檔。AI 不會自己新增或改寫任何資料：表格寫到而工作區沒有的樓層／單位，會列在「將執行的目標」裡，由你確認後才建立；大廈本身仍要在地圖上新增。要更正舊記錄，只會產生一筆帶「更正原記錄」的追加記錄。</p>
+        <div className="cf-ai__send">
+          <button className="cf-button cf-button--primary" disabled={!snapshot || (!fileDraft && !text.trim())} onClick={() => void submit()}><Upload size={16} />上傳</button>
+        </div>
+        <p className="cf-ai__note">文字和檔案會一起處理：文字整理成 1 筆記錄，檔案整理成逐行記錄，列在同一份「將執行的目標」裡，按一次確認全部寫入。對談內容只留在這部裝置，不上傳、不進匯出檔。AI 不會自己新增或改寫任何資料：表格寫到而工作區沒有的樓層／單位，會列在「將執行的目標」裡，由你確認後才建立；大廈本身仍要在地圖上新增。要更正舊記錄，只會產生一筆帶「更正原記錄」的追加記錄。</p>
       </>}
 
       {stage.kind === 'busy' && <p className="cf-ai__busy" role="status"><Sparkles size={18} />{stage.label}</p>}
 
-      {filePlan && <FilePlanPanel
-        plan={filePlan} canCreate={!!onApplyProposal}
-        onChangeColumn={changeColumn} onRun={runPlan} onBack={() => setStage({ kind: 'idle' })} />}
-
-      {textPlan && <DraftPlanPanel
-        snapshot={snapshot!} value={textPlan.value} form={form}
-        onChange={(key, value) => setForm({ ...form, [key]: value })}
-        canCreate={!!onApplyProposal} onRun={runPlan} onBack={() => setStage({ kind: 'idle' })} />}
+      {plan && <PlanView
+        plan={plan} snapshot={snapshot!} form={form} canCreate={!!onApplyProposal}
+        notice={stage.kind === 'plan' ? stage.notice : undefined}
+        edits={edits}
+        chat={plan.source === 'text' ? undefined : { turns: chat, value: ask, asking, onChange: setAsk, onAsk: () => void askPlan() }}
+        onChangeColumn={changeColumn} onChangeForm={(key, value) => setForm({ ...form, [key]: value })}
+        onEdit={editCell}
+        onRun={runPlan} onBack={() => { setStage({ kind: 'idle' }); setEdits(NO_EDITS); setChat([]); setAsk(''); }} />}
 
       {stage.kind === 'reminder' && <>
         <ReminderAnswer book={stage.book} onOpenTask={onOpenTask} />
         <footer className="cf-dialog__footer">
           <span>這份清單在工作區本機計算，沒有送交 AI，也沒有寫入任何資料。</span>
           <div>
-            <button className="cf-button cf-button--ghost" onClick={() => void sendText(stage.text, false)}>這不是提醒，改為整理成記錄</button>
+            <button className="cf-button cf-button--ghost" onClick={() => void submit(false, stage.text)}>這不是提醒，改為整理成記錄</button>
             <button className="cf-button cf-button--primary" onClick={() => setStage({ kind: 'idle' })}>返回</button>
           </div>
         </footer>
@@ -385,51 +551,142 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
 
 const assistOf = (credential: AiCredential): AiAssist => ({ at: new Date().toISOString(), provider: credential.provider, model: credential.model });
 
-/** The list of things that will happen, one line each, and the details folded behind it. */
-export function FilePlanPanel({ plan, canCreate, onChangeColumn, onRun, onBack }: {
-  plan: FilePlan; canCreate: boolean;
-  onChangeColumn: (key: CanonicalField, index: number | null) => void; onRun: () => void; onBack: () => void;
+/**
+ * The plan screen: what will happen, from whichever inputs went in, and the one button that
+ * writes it. Two sources stack with their own headings and their own rules, but they share
+ * one footer — one press always means the whole list, never only the half that was ready.
+ */
+export function PlanView({ plan, snapshot, form, canCreate, notice, edits, chat, onChangeColumn, onChangeForm, onEdit, onRun, onBack }: {
+  plan: Plan; snapshot: OutreachSnapshot; form: DraftForm; canCreate: boolean; notice?: string;
+  edits: PlanEdits; chat?: PlanChat;
+  onChangeColumn: (key: CanonicalField, index: number | null) => void;
+  onChangeForm: (key: keyof DraftForm, value: string) => void;
+  onEdit: (key: string, value: string | null, source: EditSource) => void;
+  onRun: () => void; onBack: () => void;
+}) {
+  const file = plan.source === 'text' ? undefined : plan.file;
+  const text = plan.source === 'file' ? undefined : plan.text;
+  const both = plan.source === 'both' ? plan : undefined;
+  // The combined footer holds both halves' conditions, so one press can never write only
+  // the part that happened to be ready.
+  const writable = both ? filePlanRows(both.file, canCreate).writable.length : 0;
+  const ready = !!both && writable > 0 && draftComplete(form);
+  const note = !both ? '' : !writable
+    ? '檔案部分沒有可以寫入的行（原因列在上面），請先修正欄位對應或取消。'
+    : !draftComplete(form) ? '文字部分還缺：大廈、日期、覆蓋結果與工作員都必須由人填寫。'
+    : '兩部分會在同一次寫入裡完成，以你的帳號署名，並標明「由 AI 協助」。';
+  return <>
+    {file && <FilePlanPanel plan={file} canCreate={canCreate} label={both ? `檔案：${file.preview.fileName}` : undefined}
+      edits={edits} chat={chat} onChangeColumn={onChangeColumn} onEdit={onEdit} onRun={both ? undefined : onRun} onBack={onBack} />}
+    {text && <DraftPlanPanel snapshot={snapshot} value={text.value} form={form} canCreate={canCreate}
+      label={both ? '文字：由這段原話整理的 1 筆記錄' : undefined} onChange={onChangeForm}
+      onRun={both ? undefined : onRun} onBack={onBack} />}
+    {notice && <p className="cf-ai__note" role="status">{notice}</p>}
+    {both && <footer className="cf-dialog__footer">
+      <span>{note}</span>
+      <div>
+        <button className="cf-button cf-button--ghost" onClick={onBack}>取消</button>
+        <button className="cf-button cf-button--primary" disabled={!ready} onClick={onRun}>確認並執行</button>
+      </div>
+    </footer>}
+  </>;
+}
+
+/** The rows the file part can write, and the places it has to create first. */
+function filePlanRows(plan: FilePlan, canCreate: boolean) {
+  // Without the structure edit nothing can be created, so the rows that wait for a new
+  // floor/unit are not counted as writable — no footer may promise them. A place is only
+  // created when it turns a row into something writable.
+  const places = canCreate ? placesToCreate(plan.result) : [];
+  return { places, writable: plannedRows(plan.result, new Set(places.map(placeKey))) };
+}
+
+/** What a draft record needs from the person, whichever screen is asking. */
+const draftComplete = (form: DraftForm) =>!!form.buildingId && !!form.date && !!form.coverage && !!form.worker.trim();
+
+/**
+ * The list of things that will happen, one line each, and the details folded behind it.
+ * Each record opens into the cells it came from: a value per header, the source of the
+ * last change (人 or AI), and a way to supply a field the sheet never printed.
+ */
+export function FilePlanPanel({ plan, canCreate, label, edits, chat, onChangeColumn, onEdit, onRun, onBack }: {
+  plan: FilePlan; canCreate: boolean; label?: string; edits: PlanEdits; chat?: PlanChat;
+  onChangeColumn: (key: CanonicalField, index: number | null) => void;
+  onEdit: (key: string, value: string | null, source: EditSource) => void;
+  onRun?: () => void; onBack: () => void;
 }) {
   const { result, preview, suggestion } = plan;
-  // Without the structure edit nothing can be created, so the rows that wait for a new
-  // floor/unit are not counted as writable — the footer must not promise them. A place is
-  // only created when it turns a row into something writable.
-  const places = canCreate ? placesToCreate(result) : [];
-  const chosen = new Set(places.map(placeKey));
-  const writable = plannedRows(result, chosen);
+  const { places, writable } = filePlanRows(plan, canCreate);
   const actions = planActions(places, writable);
   const creating = places.length;
   const planned = new Set(writable.map(row => row.rowNumber));
   const skipped = result.rows.filter(row => !planned.has(row.rowNumber));
   const extras = unmappedColumns(preview, plan.columns);
+  const changed = editCounts(edits);
+  const totalChanged = changed.person + changed.ai;
+  const valuesOf = (rowNumber: number) => plan.matrix.matrix[rowNumber - 1] ?? [];
+  const editor = (rowNumber: number) => {
+    const row = result.rows.find(item => item.rowNumber === rowNumber);
+    if (!row) return null;
+    return <PlanRowEditor row={row} values={valuesOf(rowNumber)} preview={preview} columns={plan.columns} edits={edits} onEdit={onEdit} />;
+  };
   return <>
     <section className="cf-ai__preview">
-      <h3>將執行的目標</h3>
+      <h3>{label ?? '將執行的目標'}</h3>
       <p className="cf-ai__note">{preview.fileName}：「{preview.sheetName}」共 {preview.totalRows} 行 → 寫入 {writable.length} 筆記錄{creating ? `，並新增 ${creating} 個樓層／單位` : ''}{skipped.length ? `；${skipped.length} 行不會寫入（原因在下面）` : ''}。</p>
+      {totalChanged > 0 && <p className="cf-ai__note" role="status">已改 {totalChanged} 格（人手 {changed.person}、AI {changed.ai}）。每次改動都由系統重新核對整份表，不是只改畫面上的字。</p>}
       {result.notes.map((note, index) => <p className="cf-error" key={index}><AlertTriangle />{note}</p>)}
-      {actions.length ? <ul className="cf-ai__actions">{actions.map(action => <li key={action.key} className={`is-${action.kind}`}>
-        <span className="cf-ai__rowmark">＋</span>
-        <div><strong>{action.sentence}</strong>{action.detail && <small>{action.detail}</small>}</div>
-      </li>)}</ul> : <p className="cf-ai__note">這份表沒有任何可以直接執行的事。下面列出的行都缺了必要內容，沒有人可以替你補。</p>}
+      {actions.length ? <ul className="cf-ai__actions">{actions.map(action => action.kind === 'place'
+        ? <li key={action.key} className="is-place">
+          <span className="cf-ai__rowmark">＋</span>
+          <div><strong>{action.sentence}</strong>{action.detail && <small>{action.detail}</small>}</div>
+        </li>
+        : <li key={action.key} className="is-record">
+          <span className="cf-ai__rowmark">＋</span>
+          <div><RowDetails summary={<span><strong>{action.sentence}</strong>{action.detail && <small>{action.detail} · 可以改這一行</small>}</span>}>
+            {editor(action.rowNumber)}
+          </RowDetails></div>
+        </li>)}</ul>
+        : <p className="cf-ai__note">這份表沒有任何可以直接執行的事。下面列出的行都缺了必要內容，可以直接在行內補上，或叫 AI 幫你改。</p>}
       {extras.length > 0 && <p className="cf-ai__note">原表另有 {extras.length} 欄系統沒有對應（{extras.map(column => column.header || `第 ${column.columnIndex + 1} 欄`).join('、')}）：不用的話不用管，寫入時會把每一行的內容原樣記在備註，不會丟掉。</p>}
       {result.pending.length > 0 && !canCreate && <p className="cf-error"><AlertTriangle />結構編輯目前關閉，不能在這裡新增樓層或單位。請先在「編輯結構」新增，再回來執行。</p>}
       {skipped.length > 0 && <details className="cf-ai__skipped">
-        <summary>不會寫入的 {skipped.length} 行</summary>
+        <summary>不會寫入的 {skipped.length} 行（可以展開修正）</summary>
         <ul>{skipped.map(row => <li key={row.rowNumber}>
-          <strong>第 {row.rowNumber} 行 · {row.buildingName ?? '未知大廈'}{row.location ? ` · ${row.location}` : ''}</strong>
-          <small>{skipReason(row)}</small>
+          <RowDetails summary={<span><strong>第 {row.rowNumber} 行 · {row.buildingName ?? '未知大廈'}{row.location ? ` · ${row.location}` : ''}</strong>
+            <small>{skipReason(row)} · 可以展開修正</small></span>}>
+            {editor(row.rowNumber)}
+          </RowDetails>
         </li>)}</ul>
       </details>}
+      {chat && <PlanChatBox chat={chat} />}
     </section>
     <details className="cf-ai__mapping-details">
       <summary>AI 讀到的欄位對應（{suggestion.fields.length} 欄）</summary>
       <MappingTable preview={preview} suggestion={suggestion} columns={plan.columns} onChange={onChangeColumn} />
     </details>
-    <footer className="cf-dialog__footer">
+    {onRun && <footer className="cf-dialog__footer">
       <span>按下確認才執行；以你的帳號署名，並標明「由 AI 協助」。</span>
       <div><button className="cf-button cf-button--ghost" onClick={onBack}>取消</button><button className="cf-button cf-button--primary" disabled={!writable.length} onClick={onRun}>確認並執行</button></div>
-    </footer>
+    </footer>}
   </>;
+}
+
+/** The chat beside the plan: one instruction in, cell changes out, nothing written yet. */
+function PlanChatBox({ chat }: { chat: PlanChat }) {
+  return <section className="cf-ai__chat">
+    <h3>直接叫 AI 改這份表</h3>
+    <p className="cf-ai__note">例如「第 3、4 行都是已嘗試接觸」、「這幾行日期改成 2026-10-11」。AI 只會改上面列出的行，改完系統會重新核對；寫入前仍要你按一次「確認並執行」。</p>
+    {chat.turns.length > 0 && <ol className="cf-ai__turns">{chat.turns.map((turn, index) => <li key={index} className={turn.failed ? 'is-failed' : undefined}>
+      <p className="cf-ai__ask">你：{turn.question}</p>
+      <p>AI：{turn.answer}{turn.changed > 0 ? `（改了 ${turn.changed} 格）` : ''}</p>
+    </li>)}</ol>}
+    <form className="cf-ai__askform" onSubmit={event => { event.preventDefault(); chat.onAsk(); }}>
+      <input aria-label="叫 AI 改這份表" value={chat.value} disabled={chat.asking} placeholder="用一句話說明要改什麼"
+        onChange={event => chat.onChange(event.target.value)} />
+      <button className="cf-button cf-button--primary" type="submit" disabled={chat.asking || !chat.value.trim()}>{chat.asking ? '正在核對…' : '請 AI 改'}</button>
+    </form>
+  </section>;
 }
 
 /** Why a row is not in the plan, in the person's words rather than an issue code. */
@@ -483,11 +740,11 @@ function MappingTable({ preview, suggestion, columns, onChange }: {
   </section>;
 }
 
-function DraftPlanPanel({ snapshot, value, form, canCreate, onChange, onRun, onBack }: {
-  snapshot: OutreachSnapshot; value: AiDraft; form: DraftForm; canCreate: boolean;
-  onChange: (key: keyof DraftForm, value: string) => void; onRun: () => void; onBack: () => void;
+function DraftPlanPanel({ snapshot, value, form, canCreate, label, onChange, onRun, onBack }: {
+  snapshot: OutreachSnapshot; value: AiDraft; form: DraftForm; canCreate: boolean; label?: string;
+  onChange: (key: keyof DraftForm, value: string) => void; onRun?: () => void; onBack: () => void;
 }) {
-  const complete = !!form.buildingId && !!form.date && !!form.coverage && !!form.worker.trim();
+  const complete = draftComplete(form);
   const building = snapshot.buildings.find(item => item.id === form.buildingId);
   const target = form.buildingId ? draftLocation(snapshot, form.buildingId, form.floor.trim(), form.unit.trim()) : undefined;
   const proposal = target && 'error' in target && form.floor.trim() && form.unit.trim()
@@ -496,7 +753,7 @@ function DraftPlanPanel({ snapshot, value, form, canCreate, onChange, onRun, onB
   const where = building ? `${building.name}${form.floor.trim() || form.unit.trim() ? ` · ${[form.floor.trim(), form.unit.trim()].filter(Boolean).join(' ')}` : '（整幢）'}` : '尚未選擇大廈';
   return <>
     <section className="cf-ai__preview">
-      <h3>將執行的目標</h3>
+      <h3>{label ?? '將執行的目標'}</h3>
       <ul className="cf-ai__actions">
         {proposal && <li className="is-place">
           <span className="cf-ai__rowmark">＋</span>
@@ -530,9 +787,9 @@ function DraftPlanPanel({ snapshot, value, form, canCreate, onChange, onRun, onB
         <label>負責人<input value={form.assignee} onChange={event => onChange('assignee', event.target.value)} /></label>
       </div>
     </details>
-    <footer className="cf-dialog__footer">
+    {onRun && <footer className="cf-dialog__footer">
       <span>{complete ? '寫入後會標明由 AI 協助，署名是你的帳號。' : '大廈、日期、覆蓋結果與工作員都必須由人填寫。'}</span>
       <div><button className="cf-button cf-button--ghost" onClick={onBack}>取消</button><button className="cf-button cf-button--primary" disabled={!complete} onClick={onRun}>確認並執行</button></div>
-    </footer>
+    </footer>}
   </>;
 }
