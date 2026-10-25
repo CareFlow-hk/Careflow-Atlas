@@ -1,7 +1,7 @@
 import { effectiveObservations, getCoverageSummary, getOpenFollowUps, type OutreachSnapshot, type Observation } from '../domain/types';
 import { layoutSummary, UNDECLARED_LAYOUT } from './layoutSummary';
 import { exportAssessmentLabels, exportContactLabels, exportCoverageLabels, exportSourceLabels, followUpEventLabels, supportCategoryLabels } from '../domain/presentation';
-import { providerSpec } from '../ai/providers';
+import { providerLabel } from '../ai/providers';
 
 export const WORKFLOW_VERSION = 'careflow-paper-excel-v1';
 /*
@@ -59,7 +59,7 @@ export function observationRow(snapshot: OutreachSnapshot, o: Observation): Cell
     o.followUp?.category ? supportCategoryLabels[o.followUp.category] : '', o.followUp?.action ?? '', o.followUp?.assignee ?? '',
     o.followUp?.dueDate ? excelDate(o.followUp.dueDate) : '', o.followUp?.timingNote ?? '', o.resolvesObservationId ?? '',
     o.correctsObservationId ?? '', o.correctionReason ?? '',
-    o.aiAssist ? `${providerSpec(o.aiAssist.provider)?.label ?? o.aiAssist.provider} · ${o.aiAssist.model} · ${hkParts(o.aiAssist.at).join(' ')}` : ''];
+    o.aiAssist ? `${providerLabel(o.aiAssist.provider)} · ${o.aiAssist.model} · ${hkParts(o.aiAssist.at).join(' ')}` : ''];
 }
 export function workflowSheets(snapshot: OutreachSnapshot): WorkflowSheet[] {
   const followUps = getOpenFollowUps(snapshot);

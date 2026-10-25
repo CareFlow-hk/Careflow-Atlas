@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api, ApiError, SESSION_IDLE_MS, setCsrf, type Session } from './api';
-import { forgetAiKey } from '../ai/credential';
 import { pullWorkspace, setWorkspaceAccount } from '../app/store';
 import { AccountPanel } from './AccountPanel';
 import { AccountContext, type FeatureSwitches } from './accountContext';
@@ -124,7 +123,7 @@ export function SessionGate({ children }: { children: ReactNode }) {
   }, [accept, drop]);
   useEffect(() => {
     void refresh();
-    const expired = () => { void forgetKeys(); forgetAiKey(); drop(); setNotice('登入已結束，請重新登入。'); };
+    const expired = () => { void forgetKeys(); drop(); setNotice('登入已結束，請重新登入。'); };
     window.addEventListener('atlas-session-expired', expired);
     const channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('atlas-account') : undefined;
     if (channel) channel.onmessage = () => { drop(); void refresh(); };
@@ -136,7 +135,7 @@ export function SessionGate({ children }: { children: ReactNode }) {
     const check = () => { if (!document.hidden && Date.now() - lastActivity.current < 60_000) void refresh(); };
     const focus = () => { active(); void refresh(); };
     const timer = window.setInterval(check, 30_000);
-    const expiry = window.setTimeout(() => { void forgetKeys(); forgetAiKey(); drop(); setNotice('登入已過期，請重新登入。'); }, Math.min(session.expiresAt - Date.now(), SESSION_IDLE_MS));
+    const expiry = window.setTimeout(() => { void forgetKeys(); drop(); setNotice('登入已過期，請重新登入。'); }, Math.min(session.expiresAt - Date.now(), SESSION_IDLE_MS));
     window.addEventListener('pointerdown', active); window.addEventListener('keydown', active); window.addEventListener('focus', focus);
     return () => { clearInterval(timer); clearTimeout(expiry); window.removeEventListener('pointerdown', active); window.removeEventListener('keydown', active); window.removeEventListener('focus', focus); };
   }, [session, refresh, drop]);
@@ -154,7 +153,7 @@ export function SessionGate({ children }: { children: ReactNode }) {
   }, [syncing]);
   function broadcast() { if (typeof BroadcastChannel !== 'undefined') { const channel = new BroadcastChannel('atlas-account'); channel.postMessage('changed'); channel.close(); } }
   // Signing out forgets the unlocked institution key on this device, too.
-  function signedOut() { void forgetKeys(); forgetAiKey(); drop(); broadcast(); setNotice('請重新登入。'); }
+  function signedOut() { void forgetKeys(); drop(); broadcast(); setNotice('請重新登入。'); }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const data = new FormData(event.currentTarget);
     if (grant && data.get('password') !== data.get('confirm')) { setError('兩次密碼不一致。'); return; }

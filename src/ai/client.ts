@@ -1,18 +1,37 @@
-/** The one place a person's browser talks to an AI provider.
+/** The one place a person's page asks for AI help.
  *
- * It is called directly from the page — no server in between — so the institution's
- * workspace never passes through the VPS (`docs/AI_ASSISTANT.md` 9). That also means this
- * is the only place a provider's failure modes can be told apart: a rejected key, a quota
- * limit, a blocked browser call and a timeout each need a different sentence, and saying
- * only "失敗" leaves the administrator guessing.
+ * Since phase 5 there is one door and it is ours: `POST /api/ai/assist`
+ * (`docs/AI_ASSISTANT.md` 5.2). The endpoint, the deployment, the model, the system prompt
+ * and `store:false` all belong to the server, so this bundle holds no key and a modified
+ * page cannot widen what leaves the device. It follows that this module no longer knows
+ * any provider's envelope — only our own answer.
  *
- * The reply is parsed as JSON here and nowhere else; the key is passed in and never
- * stored, logged, or put in an error message.
+ * What it still does is tell failures apart: a closed switch, a spent quota, a reply that
+ * broke its contract and a dropped connection each need a different sentence, and saying
+ * only 「失敗」 leaves the person guessing. The server writes most of those sentences; the
+ * kind is kept so a caller can react differently.
+ *
+ * The reply is checked here as well as on the server. The rules in `contract.ts` are what
+ * the plan screen relies on, and a reply that breaks them is discarded whole.
  */
-import type { ProviderSpec } from './providers';
-import type { ScopedPrompt } from './scope';
+import { ApiError, api } from '../auth/api';
 
-export const AI_TIMEOUT_MS = 60_000;
+/**
+ * Longer than the server's own budget (60 s per call, 120 s for the pair), so a slow answer
+ * is reported by the server as 「逾時」 rather than by the browser as a dropped connection.
+ */
+export const AI_TIMEOUT_MS = 150_000;
+
+export type AiKind = 'mapping' | 'draft' | 'patch';
+
+/**
+ * The server's record of one request, written onto every record that answer produces.
+ *
+ * It is a disclosure, not a proof: the server can only vouch that it made the request, never
+ * that a person really used the assistant (`docs/AI_ASSISTANT.md` 6.3). `requestId` is the
+ * upstream's own id, so an administrator can match the row to `ai_requests`.
+ */
+export interface AiAssistMarker { at: string; provider: string; model: string; requestId?: string }
 
 export type AiErrorKind = 'auth' | 'quota' | 'network' | 'timeout' | 'http' | 'schema';
 
@@ -20,63 +39,49 @@ export class AiRequestError extends Error {
   constructor(public kind: AiErrorKind, message: string) { super(message); this.name = 'AiRequestError'; }
 }
 
-export interface CallInput {
-  model: string;
-  key: string;
-  prompt: ScopedPrompt;
-  timeoutMs?: number;
-  /** Test seam; production always uses the page's own fetch. */
-  fetcher?: typeof fetch;
-}
+export interface AiAnswer<T> { proposal: T; aiAssist: AiAssistMarker }
 
 const SCHEMA_MESSAGE = 'AI 回覆格式不正確，已作廢，未寫入任何資料。';
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+const name = (error: unknown) => (error as { name?: unknown } | null)?.name;
 
-function failure(status: number): AiRequestError {
-  if (status === 401 || status === 403) return new AiRequestError('auth', '密鑰已失效或被拒絕，請機構管理員在設定 › AI 助手更新。');
-  if (status === 429) return new AiRequestError('quota', '已達供應商額度或頻率上限，請稍後再試，或請機構管理員在供應商端提高額度。');
-  // DeepSeek answers 402 when the account is out of credit; that is a quota problem, not a broken key.
-  if (status === 402) return new AiRequestError('quota', '供應商帳戶餘額不足，請機構管理員在供應商端充值。');
-  return new AiRequestError('http', `供應商未能處理這次請求（HTTP ${status}）。請機構管理員核對設定的型號是否正確。`);
+/**
+ * The server's refusal, as the sentence the person sees and the kind its caller may act on.
+ * `403` is the switch (or a session that ended), `429` the quota or the institution's two
+ * in-flight calls, `504` a timeout the server already gave up on.
+ */
+function translate(error: unknown): never {
+  if (error instanceof AiRequestError) throw error;
+  if (error instanceof ApiError) {
+    const kind: AiErrorKind = error.status === 401 || error.status === 403 ? 'auth'
+      : error.status === 429 ? 'quota'
+      : error.status === 504 ? 'timeout'
+      : 'http';
+    throw new AiRequestError(kind, error.message);
+  }
+  if (name(error) === 'TimeoutError') throw new AiRequestError('timeout', '等候太久，已取消；可再試一次或改用人手對應。');
+  if (name(error) === 'AbortError') throw new AiRequestError('timeout', '已取消這次請求。');
+  throw new AiRequestError('network', '無法連線到 AI 服務，請檢查網絡後再試。');
 }
 
-/** Sends one prompt and returns the parsed JSON object, or throws `AiRequestError`. */
-export async function callProvider(spec: ProviderSpec, input: CallInput): Promise<Record<string, unknown>> {
-  if (!spec.browserDirect || !spec.endpoint || !spec.headers || !spec.body || !spec.reply) {
-    throw new AiRequestError('network', `尚未開放「${spec.label}」由瀏覽器直接呼叫。`);
-  }
-  const fetcher = input.fetcher ?? fetch;
-  const controller = new AbortController();
-  let timedOut = false;
-  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, input.timeoutMs ?? AI_TIMEOUT_MS);
-
-  let response: Response;
+/** One request in, one proposal out. Throws `AiRequestError` rather than a bare failure. */
+export async function callAi<T>(kind: AiKind, request: object, options: { fetcher?: typeof fetch; signal?: AbortSignal } = {}): Promise<AiAnswer<T>> {
+  let reply: unknown;
   try {
-    response = await fetcher(spec.endpoint, {
-      method: 'POST',
-      headers: spec.headers(input.key),
-      body: JSON.stringify(spec.body({ model: input.model, system: input.prompt.system, user: input.prompt.user })),
-      signal: controller.signal,
-      cache: 'no-store',
-    });
-  } catch {
-    if (timedOut) throw new AiRequestError('timeout', '等候太久，已取消；可再試一次或改用人手對應。');
-    throw new AiRequestError('network', '無法連線到該供應商。若剛換過供應商，可能是端點不允許瀏覽器直連。');
-  } finally {
-    clearTimeout(timer);
-  }
+    reply = await api<unknown>('/ai/assist', 'POST', { kind, ...request }, { signal: options.signal, timeoutMs: AI_TIMEOUT_MS, fetcher: options.fetcher });
+  } catch (error) { translate(error); }
 
-  if (!response.ok) throw failure(response.status);
-
-  let envelope: unknown;
-  try { envelope = await response.json(); }
-  catch { throw new AiRequestError('schema', SCHEMA_MESSAGE); }
-
-  const text = spec.reply(envelope).trim();
-  if (!text) throw new AiRequestError('schema', SCHEMA_MESSAGE);
-  let parsed: unknown;
-  try { parsed = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, '')); }
-  catch { throw new AiRequestError('schema', SCHEMA_MESSAGE); }
-  if (!isObject(parsed)) throw new AiRequestError('schema', SCHEMA_MESSAGE);
-  return parsed;
+  if (!isObject(reply) || !isObject(reply.proposal) || !isObject(reply.aiAssist)) throw new AiRequestError('schema', SCHEMA_MESSAGE);
+  const marker = reply.aiAssist;
+  const wellFormed = typeof marker.at === 'string' && Number.isFinite(Date.parse(marker.at))
+    && typeof marker.provider === 'string' && typeof marker.model === 'string'
+    && (marker.requestId === undefined || typeof marker.requestId === 'string');
+  if (!wellFormed) throw new AiRequestError('schema', SCHEMA_MESSAGE);
+  return {
+    proposal: reply.proposal as T,
+    aiAssist: {
+      at: marker.at as string, provider: marker.provider as string, model: marker.model as string,
+      ...(typeof marker.requestId === 'string' ? { requestId: marker.requestId } : {}),
+    },
+  };
 }

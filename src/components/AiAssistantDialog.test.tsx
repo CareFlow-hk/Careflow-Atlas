@@ -7,6 +7,9 @@ import { shownFields } from './aiMappingFields';
 import { NO_EDITS } from './planEdits';
 import { PlanRowEditor, SkippedRowsTable } from './AiPlanRows';
 
+/** What the server writes on every record an answer produced. */
+const marker = { at: '2026-10-25T08:00:00.000Z', provider: 'azure-openai', model: 'gpt-6-luna', requestId: 'resp_test' };
+
 const render = (over: Partial<Parameters<typeof AiAssistantDialog>[0]> = {}) => renderToStaticMarkup(
   <AiAssistantDialog open onClose={() => undefined} snapshot={demoSnapshot} orgId="org-default" onWrite={() => undefined} {...over} />,
 );
@@ -66,7 +69,7 @@ describe('the plan screen', () => {
     columnCount: 3, totalRows: 2, rows: [], rowNumbers: [], sensitiveColumns: [], truncatedCells: 0, chunks: [],
   };
   const plan: FilePlan = {
-    credential: { provider: 'deepseek', model: 'deepseek-chat', key: 'sk-test' },
+    aiAssist: marker,
     preview,
     suggestion: { status: 'MATCH', fields: [], unmappedColumns: [], warnings: [] },
     columns: { buildingName: 0 },
@@ -141,7 +144,7 @@ describe('the plan screen', () => {
       note: '', action: '', dueDate: '', assignee: '',
     };
     const text = {
-      credential: { provider: 'deepseek' as const, model: 'deepseek-chat', key: 'sk-test' },
+      aiAssist: marker,
       value: {
         status: 'DRAFT' as const, buildingId: 'bldg-yu-an', floorLabel: '3樓', unitLabel: 'A室',
         occurredDate: '2026-10-24', contactOutcome: 'NO_ANSWER' as const, missing: [], warnings: [],
@@ -199,7 +202,7 @@ describe('editing a row on the plan screen', () => {
     rowNumbers: [1, 2], sensitiveColumns: [], truncatedCells: 0, chunks: [],
   };
   const plan: FilePlan = {
-    credential: { provider: 'deepseek', model: 'deepseek-chat', key: 'sk-test' },
+    aiAssist: marker,
     preview,
     suggestion: { status: 'MATCH', fields: [], unmappedColumns: [], warnings: [] },
     columns: { buildingName: 0, occurredAt: 1 },

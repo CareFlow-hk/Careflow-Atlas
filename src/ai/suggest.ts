@@ -1,9 +1,13 @@
-/** Asking the provider for a proposal: prompt in, validated suggestion out.
+/** Asking for a proposal: what to read in, a validated suggestion out.
  *
  * The rule detector runs first and column mapping is only reached when it answered
  * `UNKNOWN` or `AMBIGUOUS` (`docs/AI_ASSISTANT.md` 6). Nothing here writes data or decides
  * a business fact: the answer is a proposal a person confirms column by column, and a
  * reply that does not match the contract is discarded whole rather than partly used.
+ *
+ * What leaves the device is assembled here and checked once more on the server
+ * (`server/aiProxy.mjs`); since phase 5 the server also writes the prompt, so this module
+ * sends the data and the question, never instructions (`docs/AI_ASSISTANT.md` 5.2).
  *
  * A worksheet is read in parts (6.1). The first part carries the header and decides both
  * the mapping and whether the sheet is outreach work at all; a refusal there ends the run
@@ -16,17 +20,14 @@ import { assessmentLabels, contactLabels, coverageLabels, supportCategoryLabels 
 import { hkDay } from '../domain/reminders';
 import { CONTACT_OUTCOMES, COVERAGE_STATUSES, HOUSING_ASSESSMENTS, SUPPORT_CATEGORIES, type OutreachSnapshot } from '../domain/types';
 import { FORMAT_PROFILES, type CanonicalField } from '../imports/profiles';
-import { AiRequestError, callProvider } from './client';
+import { AiRequestError, callAi, type AiAssistMarker } from './client';
 import { canonicalOptions, readDraft, readPatchReply, readSuggestion, type AiDraft, type AiFieldSuggestion, type AiPatchSet, type AiSuggestion, type ReadContext } from './contract';
-import type { AiCredential } from './credential';
 import { chunkHeaders, chunkRows, type OutboundPreview } from './preview';
-import { providerSpec } from './providers';
-import { draftPrompt, mappingPrompt, patchPrompt } from './scope';
+import type { DraftRequest, MappingRequest, PatchRequest } from './scope';
 
 export interface SuggestInput {
   preview: OutboundPreview;
-  credential: AiCredential;
-  /** Test seam, passed through to `callProvider`. */
+  /** Test seam, passed through to `callAi`. */
   fetcher?: typeof fetch;
   /** Columns the person removed from the outbound payload. */
   withheld?: readonly number[];
@@ -41,6 +42,12 @@ export interface FileSuggestion {
   suggestion: AiSuggestion;
   /** How many requests the worksheet took; the dialog reports the same number. */
   parts: number;
+  /**
+   * The request that decided this sheet's mapping, written onto every record the sheet
+   * produces. Each part is its own request, so this names the first one — the part that
+   * also decided the sheet is outreach work at all. A later part only confirms it.
+   */
+  aiAssist: AiAssistMarker;
 }
 
 const no = (message: string) => new AiRequestError('schema', message);
@@ -50,12 +57,11 @@ const no = (message: string) => new AiRequestError('schema', message);
  * a later part may omit a field (its rows may be empty there) but may not name a
  * different column for it.
  */
-export async function suggestFileMapping({ preview, credential, fetcher, withheld = [], context: contextText }: SuggestInput, onPart?: (index: number, count: number) => void): Promise<FileSuggestion> {
-  const spec = providerSpec(credential.provider);
-  if (!spec?.browserDirect) throw new AiRequestError('network', '尚未開放這個供應商由瀏覽器直接呼叫。');
+export async function suggestFileMapping({ preview, fetcher, withheld = [], context: contextText }: SuggestInput, onPart?: (index: number, count: number) => void): Promise<FileSuggestion> {
   const headers = chunkHeaders(preview, withheld);
   const parts = preview.chunks.length;
   let decided: AiSuggestion | undefined;
+  let marker: AiAssistMarker | undefined;
   const warnings: string[] = [];
 
   for (let index = 0; index < parts; index++) {
@@ -64,7 +70,7 @@ export async function suggestFileMapping({ preview, credential, fetcher, withhel
     // The header is only guaranteed inside the part that contains it. The contract's row
     // index is relative to the rows actually sent, so it is rebased per part.
     const localHeader = preview.headerRow !== null && preview.headerRow >= chunk.start && preview.headerRow < chunk.end ? preview.headerRow - chunk.start : null;
-    const prompt = mappingPrompt({
+    const request: MappingRequest = {
       sheetName: preview.sheetName,
       part: { index: index + 1, count: parts },
       headerRow: localHeader,
@@ -75,8 +81,8 @@ export async function suggestFileMapping({ preview, credential, fetcher, withhel
       fields: canonicalOptions().map(field => ({ key: field.key, label: field.label })),
       withheldColumns: withheld,
       context: contextText,
-    });
-    const raw = await callProvider(spec, { model: credential.model, key: credential.key, prompt, fetcher });
+    };
+    const { proposal: raw, aiAssist } = await callAi<Record<string, unknown>>('mapping', request, { fetcher });
     const context: ReadContext = {
       columnCount: preview.columnCount,
       rowCount: chunk.end - chunk.start,
@@ -96,8 +102,9 @@ export async function suggestFileMapping({ preview, credential, fetcher, withhel
        * again — and a payroll sheet read in 300-row slices would be paid for in full before
        * the dialog showed the refusal. Stop at the first answer instead.
        */
-      if (value.status === 'REFUSE') return { suggestion: value, parts: index + 1 };
+      if (value.status === 'REFUSE') return { suggestion: value, parts: index + 1, aiAssist };
       decided = value;
+      marker = aiAssist;
       continue;
     }
     /*
@@ -119,7 +126,7 @@ export async function suggestFileMapping({ preview, credential, fetcher, withhel
     }
   }
 
-  if (!decided) throw no('沒有讀到任何內容。');
+  if (!decided || !marker) throw no('沒有讀到任何內容。');
   // The contract already refused a mapping onto a withheld column, but a stub provider in
   // tests may still return one; the dialog must never show a field it did not see.
   const suggestion: AiSuggestion = {
@@ -129,13 +136,12 @@ export async function suggestFileMapping({ preview, credential, fetcher, withhel
     warnings: [...new Set(warnings)],
   };
   if (suggestion.status === 'MATCH' && !suggestion.fields.length) throw no('AI 提出的欄位全部落在被剔除的欄，沒有可用的對應。');
-  return { suggestion, parts };
+  return { suggestion, parts, aiAssist: marker };
 }
 
 export interface DraftInput {
   text: string;
   snapshot: OutreachSnapshot;
-  credential: AiCredential;
   fetcher?: typeof fetch;
   /**
    * The device's Hong Kong day, for translating a relative word the note states. Passed
@@ -147,15 +153,13 @@ export interface DraftInput {
 const LOCATION_LIMIT = 400;
 
 /** Turns a note into one proposed visit. Never writes; the dialog shows the blanks. */
-export async function suggestDraft({ text, snapshot, credential, fetcher, today = hkDay() }: DraftInput): Promise<AiDraft> {
-  const spec = providerSpec(credential.provider);
-  if (!spec?.browserDirect) throw new AiRequestError('network', '尚未開放這個供應商由瀏覽器直接呼叫。');
+export async function suggestDraft({ text, snapshot, fetcher, today = hkDay() }: DraftInput): Promise<{ draft: AiDraft; aiAssist: AiAssistMarker }> {
   const floorOf = new Map(snapshot.floors.map(floor => [floor.id, floor]));
   const locations = snapshot.units
     .filter(unit => !unit.parentUnitId)
     .slice(0, LOCATION_LIMIT)
     .map(unit => ({ buildingId: unit.buildingId, floorLabel: floorOf.get(unit.floorId)?.label ?? '', unitLabel: unit.label }));
-  const prompt = draftPrompt({
+  const request: DraftRequest = {
     text,
     today,
     buildings: snapshot.buildings.map(building => ({ id: building.id, name: building.name })),
@@ -164,12 +168,12 @@ export async function suggestDraft({ text, snapshot, credential, fetcher, today 
     contacts: CONTACT_OUTCOMES.map(key => ({ key, label: contactLabels[key] })),
     assessments: HOUSING_ASSESSMENTS.map(key => ({ key, label: assessmentLabels[key] })),
     categories: SUPPORT_CATEGORIES.map(key => ({ key, label: supportCategoryLabels[key] })),
-  });
-  const raw = await callProvider(spec, { model: credential.model, key: credential.key, prompt, fetcher });
-  const read = readDraft(raw, { text, today, buildingIds: new Set(snapshot.buildings.map(building => building.id)) });
+  };
+  const { proposal, aiAssist } = await callAi<Record<string, unknown>>('draft', request, { fetcher });
+  const read = readDraft(proposal, { text, today, buildingIds: new Set(snapshot.buildings.map(building => building.id)) });
   if (!read.ok) throw no(read.reason);
   if (snapshot.units.length > LOCATION_LIMIT) read.value.warnings.push(`單位清單超過 ${LOCATION_LIMIT} 個，只提供前 ${LOCATION_LIMIT} 個；未列出的位置請人手填寫。`);
-  return read.value;
+  return { draft: read.value, aiAssist };
 }
 
 export type { AiFieldSuggestion };
@@ -181,7 +185,6 @@ export interface PatchInput {
   columns: Partial<Record<CanonicalField, number | null>>;
   /** 1-based worksheet rows the person can change — the rows the plan lists. */
   rows: readonly number[];
-  credential: AiCredential;
   /** Personal columns; they are absent from the request and cannot be patched. */
   withheld?: readonly number[];
   fetcher?: typeof fetch;
@@ -197,11 +200,8 @@ export const PATCH_ROW_LIMIT = 500;
  * that names a row or a column outside what was sent loses the whole answer.
  */
 export async function suggestPatches({
-  text, preview, columns, rows, credential, withheld = [], fetcher, today = hkDay(),
+  text, preview, columns, rows, withheld = [], fetcher, today = hkDay(),
 }: PatchInput): Promise<AiPatchSet> {
-  const spec = providerSpec(credential.provider);
-  if (!spec?.browserDirect) throw new AiRequestError('network', '尚未開放這個供應商由瀏覽器直接呼叫。');
-
   const hidden = new Set(withheld);
   const labels = new Map(canonicalOptions().map(option => [option.key, option.label]));
   const fieldOfColumn = new Map<number, CanonicalField>();
@@ -220,7 +220,7 @@ export async function suggestPatches({
     values: payloadColumns.map(column => byNumber.get(row)?.[column.columnIndex] ?? ''),
   }));
 
-  const prompt = patchPrompt({
+  const request: PatchRequest = {
     text, today,
     sheetName: preview.sheetName,
     columns: payloadColumns,
@@ -230,9 +230,9 @@ export async function suggestPatches({
     contacts: CONTACT_OUTCOMES.map(key => ({ key, label: contactLabels[key] })),
     assessments: HOUSING_ASSESSMENTS.map(key => ({ key, label: assessmentLabels[key] })),
     categories: SUPPORT_CATEGORIES.map(key => ({ key, label: supportCategoryLabels[key] })),
-  });
-  const raw = await callProvider(spec, { model: credential.model, key: credential.key, prompt, fetcher });
-  const read = readPatchReply(raw, {
+  };
+  const { proposal } = await callAi<Record<string, unknown>>('patch', request, { fetcher });
+  const read = readPatchReply(proposal, {
     text, today, rows: chosen, columnCount: preview.columnCount, columns,
     readOnlyColumns: withheld,
   });

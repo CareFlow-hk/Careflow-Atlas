@@ -10,18 +10,18 @@ const preview = (over: Partial<OutboundPreview> = {}): OutboundPreview => ({
   sensitiveColumns: [0], truncatedCells: 0, chunks: [{ start: 0, end: 2 }],
   ...over,
 });
-const credential = { provider: 'deepseek' as const, model: 'deepseek-chat', key: 'sk-test' };
 
-const suggestion = {
-  status: 'MATCH', sheetName: '探訪記錄', headerRow: 0,
-  fields: [{ key: 'personName', columnIndex: 0, confidence: 0.8, reason: '表頭寫「姓名」' }],
-  unmappedColumns: [{ columnIndex: 1, header: '人數', reason: '不是既有欄位' }],
-  warnings: [],
-};
-
-type Body = { messages: { content: string }[] };
+/* eslint-disable @typescript-eslint/no-explicit-any -- the request body is the point of these tests */
+type Body = Record<string, any>;
 type Captured = { seen: { url?: string; init?: RequestInit }; bodies: Body[]; fetcher: typeof fetch };
 
+const marker = { at: '2026-10-25T08:00:00.000Z', provider: 'azure-openai', model: 'gpt-6-luna', requestId: 'resp_test' };
+
+/**
+ * Stands in for the server: records what the page sent and answers with the envelope
+ * `/api/ai/assist` returns. Nothing here knows a provider's shape any more — the page talks
+ * to our own endpoint only.
+ */
 function capture(reply: unknown | ((body: Body) => unknown)): Captured {
   const bodies: Body[] = [];
   const seen: { url?: string; init?: RequestInit } = {};
@@ -31,41 +31,54 @@ function capture(reply: unknown | ((body: Body) => unknown)): Captured {
     const body = JSON.parse(String(init?.body)) as Body;
     bodies.push(body);
     const answer = typeof reply === 'function' ? reply(body) : reply;
-    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(answer) } }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ kind: body.kind, proposal: answer, aiAssist: marker }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }) as unknown as typeof fetch;
   return { seen, bodies, fetcher };
 }
 
+const suggestion = {
+  status: 'MATCH', sheetName: '探訪記錄', headerRow: 0,
+  fields: [{ key: 'personName', columnIndex: 0, confidence: 0.8, reason: '表頭寫「姓名」' }],
+  unmappedColumns: [{ columnIndex: 1, header: '人數', reason: '不是既有欄位' }],
+  warnings: [],
+};
+
 describe('asking for a column mapping', () => {
-  it('posts one JSON-mode request to the fixed endpoint, carrying the key only in the header', async () => {
-    const { seen, fetcher } = capture(suggestion);
-    const result = await suggestFileMapping({ preview: preview(), credential, fetcher });
+  it('posts one request to our own endpoint, carrying no provider, no key and no prompt', async () => {
+    const { seen, bodies, fetcher } = capture(suggestion);
+    const result = await suggestFileMapping({ preview: preview(), fetcher });
     expect(result.suggestion.status).toBe('MATCH');
     expect(result.parts).toBe(1);
-    expect(seen.url).toBe('https://api.deepseek.com/chat/completions');
-    const headers = seen.init?.headers as Record<string, string>;
-    expect(headers.Authorization).toBe('Bearer sk-test');
-    const body = JSON.parse(String(seen.init?.body));
-    expect(body.model).toBe('deepseek-chat');
-    expect(body.response_format).toEqual({ type: 'json_object' });
-    expect(body.messages[0].content).toContain('與此無關的問題');
-    expect(body.messages[1].content).toContain('陳大文');
-    expect(String(seen.init?.body)).not.toContain('sk-test');
+    expect(seen.url).toBe('/api/ai/assist');
+    const body = bodies[0];
+    expect(body.kind).toBe('mapping');
+    // The server owns every one of these; a page that set them would be refused with 400.
+    for (const field of ['model', 'provider', 'system', 'instructions', 'store', 'endpoint', 'apiKey']) {
+      expect(body).not.toHaveProperty(field);
+    }
+    expect(String(seen.init?.body)).not.toMatch(/sk-|api-key|Bearer/i);
+    expect(body.rows[1]).toContain('陳大文');
+  });
+
+  it('keeps the server’s marker so every record can say which request read the sheet', async () => {
+    const { fetcher } = capture(suggestion);
+    const result = await suggestFileMapping({ preview: preview(), fetcher });
+    expect(result.aiAssist).toEqual(marker);
   });
 
   it('returns a refusal as a normal answer, not an error', async () => {
     const { fetcher } = capture({ status: 'REFUSE' });
-    await expect(suggestFileMapping({ preview: preview(), credential, fetcher })).resolves.toMatchObject({ suggestion: { status: 'REFUSE', fields: [] } });
+    await expect(suggestFileMapping({ preview: preview(), fetcher })).resolves.toMatchObject({ suggestion: { status: 'REFUSE', fields: [] } });
   });
 
   it('throws away a reply the rule detector would disagree with', async () => {
     const { fetcher } = capture({ ...suggestion, headerRow: 1 });
-    await expect(suggestFileMapping({ preview: preview(), credential, fetcher })).rejects.toMatchObject({ kind: 'schema' });
+    await expect(suggestFileMapping({ preview: preview(), fetcher })).rejects.toMatchObject({ kind: 'schema' });
   });
 
   it('throws away a reply with an invented field rather than keeping the rest', async () => {
     const { fetcher } = capture({ ...suggestion, fields: [{ key: 'householdSize', columnIndex: 0, confidence: 1, reason: '猜' }] });
-    await expect(suggestFileMapping({ preview: preview(), credential, fetcher })).rejects.toMatchObject({ kind: 'schema' });
+    await expect(suggestFileMapping({ preview: preview(), fetcher })).rejects.toMatchObject({ kind: 'schema' });
   });
 });
 
@@ -79,17 +92,11 @@ describe('a worksheet read in parts', () => {
 
   it('sends every row, and the parts add up to the whole sheet', async () => {
     const sheet = many(701);
-    const { bodies, fetcher } = capture((body: Body) => {
-      const payload = JSON.parse(body.messages[1].content.slice(body.messages[1].content.indexOf('{'), body.messages[1].content.lastIndexOf('}') + 1));
-      return payload.part.index === 1 ? suggestion : { ...suggestion, headerRow: undefined };
-    });
-    const result = await suggestFileMapping({ preview: sheet, credential, fetcher });
+    const { bodies, fetcher } = capture((body: Body) => (body.part.index === 1 ? suggestion : { ...suggestion, headerRow: undefined }));
+    const result = await suggestFileMapping({ preview: sheet, fetcher });
     expect(result.parts).toBe(3);
     expect(bodies).toHaveLength(3);
-    const sent = bodies.map(body => {
-      const payload = JSON.parse(body.messages[1].content.slice(body.messages[1].content.indexOf('{'), body.messages[1].content.lastIndexOf('}') + 1));
-      return payload.rows.length as number;
-    });
+    const sent = bodies.map(body => body.rows.length as number);
     expect(sent.reduce((total, count) => total + count, 0)).toBe(701);
   });
 
@@ -97,13 +104,13 @@ describe('a worksheet read in parts', () => {
     const sheet = many(701);
     let call = 0;
     const { fetcher } = capture(() => (++call === 1 ? suggestion : { ...suggestion, headerRow: undefined, fields: [{ key: 'personName', columnIndex: 1, confidence: 0.6, reason: '看起來像' }] }));
-    await expect(suggestFileMapping({ preview: sheet, credential, fetcher })).rejects.toThrow(/第 2\/3 段/);
+    await expect(suggestFileMapping({ preview: sheet, fetcher })).rejects.toThrow(/第 2\/3 段/);
   });
 
   it('stops after the first part when the header part is not outreach work', async () => {
     const sheet = many(701);
     const { bodies, fetcher } = capture({ status: 'REFUSE' });
-    const result = await suggestFileMapping({ preview: sheet, credential, fetcher });
+    const result = await suggestFileMapping({ preview: sheet, fetcher });
     expect(result.suggestion.status).toBe('REFUSE');
     // Three parts exist. Asking about the same payroll sheet again buys the same answer,
     // so only the part that carries the header is sent.
@@ -115,7 +122,7 @@ describe('a worksheet read in parts', () => {
     const sheet = many(701);
     let call = 0;
     const { fetcher } = capture(() => (++call === 1 ? suggestion : { status: 'NO_MATCH', fields: [], unmappedColumns: [], warnings: [] }));
-    const result = await suggestFileMapping({ preview: sheet, credential, fetcher });
+    const result = await suggestFileMapping({ preview: sheet, fetcher });
     expect(result.suggestion.fields).toHaveLength(1);
     expect(result.suggestion.warnings.join(' ')).toContain('沿用第 1 段');
   });
@@ -124,28 +131,23 @@ describe('a worksheet read in parts', () => {
 describe('columns the person withheld', () => {
   it('never puts a withheld cell in the request', async () => {
     const { bodies, fetcher } = capture({ status: 'MATCH', headerRow: 0, fields: [{ key: 'note', columnIndex: 1, confidence: 0.5, reason: '第二欄' }], unmappedColumns: [], warnings: [] });
-    await suggestFileMapping({ preview: preview(), credential, fetcher, withheld: [0] });
-    const content = bodies[0].messages[1].content;
-    expect(content).not.toContain('陳大文');
-    const payload = JSON.parse(content.slice(content.indexOf('{'), content.lastIndexOf('}') + 1));
-    expect(payload.rows[0][0]).toBe('');
-    expect(payload.rows[1][0]).toBe('');
-    expect(payload.withheldColumns).toEqual([0]);
+    await suggestFileMapping({ preview: preview(), fetcher, withheld: [0] });
+    expect(bodies[0].rows[0][0]).toBe('');
+    expect(bodies[0].rows[1][0]).toBe('');
+    expect(bodies[0].withheldColumns).toEqual([0]);
   });
 
   it('discards an answer that maps a field onto a withheld column', async () => {
     const { fetcher } = capture(suggestion);
-    await expect(suggestFileMapping({ preview: preview(), credential, fetcher, withheld: [0] })).rejects.toMatchObject({ kind: 'schema' });
+    await expect(suggestFileMapping({ preview: preview(), fetcher, withheld: [0] })).rejects.toMatchObject({ kind: 'schema' });
   });
 });
 
 describe('a file and a note sent together', () => {
   it('carries the note into the mapping request as data', async () => {
     const { bodies, fetcher } = capture(suggestion);
-    await suggestFileMapping({ preview: preview(), credential, fetcher, context: '大廈名稱在第 3 欄' });
-    const content = bodies[0].messages[1].content;
-    expect(content).toContain('<context_note>');
-    expect(content).toContain('大廈名稱在第 3 欄');
+    await suggestFileMapping({ preview: preview(), fetcher, context: '大廈名稱在第 3 欄' });
+    expect(bodies[0].context).toBe('大廈名稱在第 3 欄');
   });
 
   it('anchors a relative day in the note to the day the caller supplies', async () => {
@@ -155,9 +157,10 @@ describe('a file and a note sent together', () => {
       contactOutcome: 'NO_ANSWER', assessment: null, sourceType: null, note: null,
       followUp: null, missing: ['覆蓋結果'], warnings: [],
     });
-    const value = await suggestDraft({ text: '今日去咗 3樓 A 室，冇人應門。', snapshot: demoSnapshot, credential, fetcher, today: '2026-10-24' });
-    expect(value.occurredDate).toBe('2026-10-24');
-    expect(bodies[0].messages[1].content).toContain('"today":"2026-10-24"');
+    const { draft, aiAssist } = await suggestDraft({ text: '今日去咗 3樓 A 室，冇人應門。', snapshot: demoSnapshot, fetcher, today: '2026-10-24' });
+    expect(draft.occurredDate).toBe('2026-10-24');
+    expect(aiAssist).toEqual(marker);
+    expect(bodies[0].today).toBe('2026-10-24');
   });
 });
 
@@ -175,27 +178,28 @@ describe('asking the plan chat to change cells', () => {
   };
 
   it('sends the plan rows without the personal column, and returns the checked change', async () => {
-    const { seen, fetcher } = capture(answer);
+    const { bodies, fetcher } = capture(answer);
     const result = await suggestPatches({
-      text: '第 2 行係已嘗試接觸', preview: table, columns, rows: [2], credential, fetcher, today: '2026-10-24', withheld: table.sensitiveColumns,
+      text: '第 2 行係已嘗試接觸', preview: table, columns, rows: [2], fetcher, today: '2026-10-24', withheld: table.sensitiveColumns,
     });
     expect(result.status).toBe('PATCH');
     expect(result.patches).toEqual([{ row: 2, column: 2, field: null, value: '已嘗試接觸', reason: '你說第 2 行已嘗試接觸' }]);
-    const body = String(seen.init?.body);
+    const body = String(bodies[0]);
     expect(body).not.toContain('61234567');
     expect(body).not.toContain('電話');
-    expect(body).toContain('第 2 行係已嘗試接觸');
-    expect(body).toContain('裕安樓');
+    expect(bodies[0].text).toBe('第 2 行係已嘗試接觸');
+    expect(JSON.stringify(bodies[0].rows)).toContain('裕安樓');
+    expect(bodies[0].kind).toBe('patch');
   });
 
   it('will not let the reply reach a withheld column even if the model tries', async () => {
     const { fetcher } = capture({ ...answer, patches: [{ row: 2, column: 3, field: null, value: '61234567', reason: 'x' }] });
-    await expect(suggestPatches({ text: '改電話', preview: table, columns, rows: [2], credential, fetcher, withheld: table.sensitiveColumns })).rejects.toThrow(/身分|不能/);
+    await expect(suggestPatches({ text: '改電話', preview: table, columns, rows: [2], fetcher, withheld: table.sensitiveColumns })).rejects.toThrow(/身分|不能/);
   });
 
   it('keeps a refusal as an answer with its reason', async () => {
     const { fetcher } = capture({ status: 'REFUSE', explanation: '我看不出年份，請寫明日期' });
-    const result = await suggestPatches({ text: '改日期', preview: table, columns, rows: [2], credential, fetcher, today: '2026-10-24' });
+    const result = await suggestPatches({ text: '改日期', preview: table, columns, rows: [2], fetcher, today: '2026-10-24' });
     expect(result).toMatchObject({ status: 'REFUSE', explanation: '我看不出年份，請寫明日期', patches: [] });
   });
 
@@ -207,10 +211,9 @@ describe('asking the plan chat to change cells', () => {
     });
     const rows = Array.from({ length: 600 }, (_, index) => index + 2);
     const { bodies, fetcher } = capture({ ...answer, patches: [{ row: 2, column: 1, field: null, value: '已嘗試接觸', reason: 'x' }] });
-    const result = await suggestPatches({ text: '全部標為已嘗試接觸', preview: many, columns: { buildingName: 0, coverage: 1 }, rows, credential, fetcher });
-    const payload = JSON.parse(bodies[0].messages[1].content.slice(bodies[0].messages[1].content.indexOf('{'), bodies[0].messages[1].content.lastIndexOf('}') + 1));
-    expect(payload.rows).toHaveLength(PATCH_ROW_LIMIT);
-    expect(payload.omittedRows).toBe(600 - PATCH_ROW_LIMIT);
+    const result = await suggestPatches({ text: '全部標為已嘗試接觸', preview: many, columns: { buildingName: 0, coverage: 1 }, rows, fetcher });
+    expect(bodies[0].rows).toHaveLength(PATCH_ROW_LIMIT);
+    expect(bodies[0].omitted).toBe(600 - PATCH_ROW_LIMIT);
     expect(result.warnings.join('')).toContain('前 500 行');
   });
 });

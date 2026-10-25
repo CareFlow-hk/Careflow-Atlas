@@ -31,7 +31,7 @@ import type { ReminderBook, ReminderTask, ReminderViewer } from '../domain/remin
 import type { NamedBuilding } from '../domain/buildingMentions';
 import { mentionedPlace } from '../domain/locationMentions';
 import { proposeLocation, type LocationProposal } from '../domain/structure';
-import type { AiAssist, ContactOutcome, CoverageStatus, HousingAssessment, OutreachSnapshot, SaveObservationInput } from '../domain/types';
+import type { ContactOutcome, CoverageStatus, HousingAssessment, OutreachSnapshot, SaveObservationInput } from '../domain/types';
 import { detectWorkbook } from '../imports/detector';
 import { parseGenericRows, readSheetMatrix, type GenericParseInput, type GenericParseResult, type SheetMatrix } from '../imports/genericRows';
 import type { CanonicalField } from '../imports/profiles';
@@ -39,7 +39,7 @@ import { REQUIRED_FIELDS, shownFields } from './aiMappingFields';
 import { placeKey, placesToCreate, planActions, plannedRows } from './aiPlan';
 import { NO_EDITS, cellKey, editCounts, fieldKey, planInput, toMapping, withEdit, withoutEdit, type EditSource, type PlanEdits } from './planEdits';
 import { PlanRowEditor, RowDetails, SkippedSection } from './AiPlanRows';
-import { aiCredential, type AiCredential } from '../ai/credential';
+import type { AiAssistMarker } from '../ai/client';
 import { canonicalOptions, type AiDraft, type AiSuggestion } from '../ai/contract';
 import { buildPreview, outboundSummary, type OutboundPreview } from '../ai/preview';
 import { reminderBook, shouldAnswerReminder } from '../ai/reminderQuery';
@@ -51,7 +51,10 @@ export interface AiAssistantDialogProps {
   open: boolean;
   onClose: () => void;
   snapshot?: OutreachSnapshot;
-  /** Absent only in demo mode, where the assistant has no institution to read a key from. */
+  /**
+   * The institution whose workspace the confirmed records are written into. Absent only in
+   * demo mode; the server takes the institution it calls for from the session, never from here.
+   */
   orgId?: string;
   /** The existing batch write; the dialog never touches the store itself. */
   onWrite: (inputs: readonly SaveObservationInput[]) => void;
@@ -72,7 +75,8 @@ export interface AiAssistantDialogProps {
 
 /** A workbook read with its confirmed mapping, and what that produced. */
 export interface FilePlan {
-  credential: AiCredential;
+  /** The request that decided this sheet's mapping; every record it produces carries it. */
+  aiAssist: AiAssistMarker;
   preview: OutboundPreview;
   suggestion: AiSuggestion;
   columns: Partial<Record<CanonicalField, number | null>>;
@@ -96,7 +100,7 @@ export interface PlanChat {
   onAsk: () => void;
 }
 
-interface TextPlan { credential: AiCredential; value: AiDraft }
+interface TextPlan { aiAssist: AiAssistMarker; value: AiDraft }
 
 /**
  * One screen, one confirmation. A file and a note can be put in together; each keeps its
@@ -237,7 +241,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
 
   /** A plan without the parse that is about to be recomputed. */
   const baseOf = (file: FilePlan): FilePlanBase => ({
-    credential: file.credential, preview: file.preview, suggestion: file.suggestion,
+    aiAssist: file.aiAssist, preview: file.preview, suggestion: file.suggestion,
     columns: file.columns, parse: file.parse, matrix: file.matrix,
   });
 
@@ -254,15 +258,15 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
    * Returns `null` when it has already put a reason on screen.
    */
   const planFile = async (
-    credential: AiCredential, context: string, defaultBuilding?: NamedBuilding,
+    context: string, defaultBuilding?: NamedBuilding,
     defaultPlace?: { buildingId: string; floorLabel: string; unitLabel: string },
   ): Promise<FilePlan | null | undefined> => {
     const draft = fileDraft;
     if (!draft) return undefined;
     // Personal-looking columns never leave the device by default; their content is still
     // kept in the note. This is stricter than the old opt-out and needs no extra screen.
-    const { suggestion } = await suggestFileMapping(
-      { preview: draft.preview, credential, withheld: draft.preview.sensitiveColumns, context: context || undefined },
+    const { suggestion, aiAssist } = await suggestFileMapping(
+      { preview: draft.preview, withheld: draft.preview.sensitiveColumns, context: context || undefined },
       (index, count) => setStage({ kind: 'busy', label: `正在請 AI 核對欄位（第 ${index}/${count} 段）…` }),
     );
     if (suggestion.status === 'REFUSE') { setStage({ kind: 'error', message: SCOPE_REFUSAL }); return null; }
@@ -271,7 +275,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
     if (headerRow === null || headerRow === undefined) { setStage({ kind: 'error', message: 'AI 找不到表頭，無法確定哪一行才是資料。請在工作表加上表頭後再試。' }); return null; }
     const columns = Object.fromEntries(suggestion.fields.map(field => [field.key, field.columnIndex]));
     const run: ParseRun = { buffer: draft.buffer, sheetName: draft.preview.sheetName, headerRow: headerRow + 1, mapping: toMapping(columns), fileName: draft.preview.fileName, defaultBuilding, defaultPlace };
-    return withResult({ credential, preview: draft.preview, suggestion, columns, parse: run, matrix: draft.matrix }, edits);
+    return withResult({ aiAssist, preview: draft.preview, suggestion, columns, parse: run, matrix: draft.matrix }, edits);
   };
 
   /**
@@ -319,7 +323,6 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
     // No local keyword check otherwise: the assistant's own reply decides (`docs/AI_ASSISTANT.md` 7).
     setStage({ kind: 'busy', label: fileDraft ? '正在讀取檔案…' : '正在整理草稿…' });
     try {
-      const credential = await aiCredential(orgId);
       // The note the person typed is how a sheet with no 大廈 column gets one, and how a
       // sheet that never prints 樓層／單位 gets the place they named — 「在裕安樓 5 樓 B 室」.
       // Both are matched locally against the workspace's own names, so only a building and
@@ -330,14 +333,14 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
       const placeNotice = mentioned?.ambiguousPlaces
         ? `你在文字裡提到多個地點（${mentioned.ambiguousPlaces.join('、')}），系統沒有替你挑一個，所以沒有套用到沒有填樓層／單位的行。請只寫一個地點，或直接在表內補上。`
         : undefined;
-      const file = await planFile(credential, typed, fallback, mentioned?.place && fallback ? { buildingId: fallback.id, ...mentioned.place } : undefined);
+      const file = await planFile(typed, fallback, mentioned?.place && fallback ? { buildingId: fallback.id, ...mentioned.place } : undefined);
       if (file === null) return;
       let draft: TextPlan | undefined;
       let notice: string | undefined;
       if (typed) {
         setStage({ kind: 'busy', label: '正在整理文字草稿…' });
         try {
-          const value = await suggestDraft({ text: typed, snapshot, credential });
+          const { draft: value, aiAssist } = await suggestDraft({ text: typed, snapshot });
           if (value.status === 'REFUSE') {
             // A sheet that read cleanly is not thrown away because the note beside it was not a record.
             if (!file) { setStage({ kind: 'error', message: SCOPE_REFUSAL }); return; }
@@ -345,7 +348,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
           } else if (file && !draftIsRecord(value)) {
             // It named a place but no visit: that is the file's heading, not a record.
             notice = TEXT_CONTEXT_ONLY;
-          } else { applyDraft(value); draft = { credential, value }; }
+          } else { applyDraft(value); draft = { aiAssist, value }; }
         } catch (error) {
           if (!file) { fail(error); return; }
           notice = `文字部分沒有整理成功（${message(error)}），下面只有檔案的部分。`;
@@ -418,7 +421,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
       const result = parseGenericRows({ ...file.parse, mapping, matrix: file.matrix, overrides, snapshot: latest, extraColumns: extraColumnsFor(file.preview, file.columns) });
       const chosen = plannedRows(result, new Set());
       if (!chosen.length && !draft) { setStage({ kind: 'error', message: '沒有任何一行可以寫入。未寫入的行都列在目標清單下面，並寫了原因。' }); return; }
-      inputs.push(...chosen.map(row => ({ ...row.input!, aiAssist: assistOf(file.credential) })));
+      inputs.push(...chosen.map(row => ({ ...row.input!, aiAssist: file.aiAssist })));
     }
     if (draft) {
       const record = draftRecord(draft, latest);
@@ -462,7 +465,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
         contactOutcome: form.contact || undefined, assessment: form.assessment || undefined,
         note: form.note.trim() || undefined, evidence: [],
         followUp: form.action.trim() ? { action: form.action.trim(), status: 'OPEN', assignee: form.assignee.trim() || undefined, dueDate: form.dueDate || undefined } : undefined,
-        aiAssist: assistOf(draft.credential),
+        aiAssist: draft.aiAssist,
       },
     };
   };
@@ -482,7 +485,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
       const answer = await suggestPatches({
         text: question, preview: file.preview, columns: file.columns,
         rows: file.result.rows.map(row => row.rowNumber),
-        credential: file.credential, withheld: file.preview.sensitiveColumns,
+        withheld: file.preview.sensitiveColumns,
       });
       if (answer.status === 'REFUSE') {
         setChat(turns => [...turns, { question, answer: answer.explanation, changed: 0 }]);
@@ -568,8 +571,6 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
     </div>
   </dialog>;
 }
-
-const assistOf = (credential: AiCredential): AiAssist => ({ at: new Date().toISOString(), provider: credential.provider, model: credential.model });
 
 /**
  * The plan screen: what will happen, from whichever inputs went in, and the one button that
