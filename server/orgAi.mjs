@@ -1,4 +1,5 @@
 import { requireValue } from './auth.mjs';
+import { AI_ASSIST_PROVIDERS } from './aiAssist.mjs';
 
 /**
  * The institution's AI provider credential, as the server is allowed to hold it: sealed.
@@ -13,12 +14,11 @@ import { requireValue } from './auth.mjs';
  * Only an administrator sets or removes it. Members read the sealed copy, never the status
  * of the plaintext, because there is no plaintext here to report.
  */
-export const PROVIDERS = Object.freeze({
-  'azure-openai': 'Azure OpenAI',
-  openai: 'OpenAI',
-  anthropic: 'Anthropic',
-  deepseek: 'DeepSeek',
-});
+/**
+ * Shared with the record marker in `server/aiAssist.mjs`; that module owns the list so it
+ * survives this file's removal in phase 5.
+ */
+export const PROVIDERS = AI_ASSIST_PROVIDERS;
 
 /** The same marker the workspace cipher writes; the server only checks the shape. */
 const SEALED = /^enc:v1:[A-Za-z0-9+/]{16,8000}={0,2}$/;

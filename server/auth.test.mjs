@@ -687,3 +687,55 @@ test('institutions are created, renamed and joined from the command line, never 
   assert.deepEqual(listOrgs(f.auth).map(o => [o.id, o.name, o.admins, o.members]), [[DEFAULT_ORG_ID, '明愛西營盤社區客廳', 1, 0], ['org-careflow', 'CareFlow', 0, 1]]);
   assert.deepEqual(f.auth.all("SELECT action FROM audit WHERE action IN ('org_created','org_renamed','user_moved') ORDER BY id").map(r => r.action), ['org_created', 'org_renamed', 'user_moved']);
 });
+
+/*
+ * The AI assistant's door (server/aiProxy.mjs). The switch is the platform's from phase 5
+ * because the Azure key is the platform's; an institution's administrator can see the state
+ * and nothing more. The upstream call is a stub here: CI must never spend Azure quota.
+ */
+test('the AI assistant is switched by the platform and refused before any outbound call', async t => {
+  const calls = [];
+  const aiProxy = {
+    status: () => ({ provider: 'azure-openai', configured: true, model: 'deployment', fallbackModel: null }),
+    assist: async body => {
+      calls.push(body);
+      return { kind: body.kind, proposal: { status: 'MATCH' }, aiAssist: { at: new Date().toISOString(), provider: 'azure-openai', model: 'deployment', requestId: `req_test_${calls.length}` }, fallback: null, usage: { inputTokens: 3, outputTokens: 4 }, durationMs: 7, rows: 1, chunks: 1 };
+    },
+  };
+  const f = await fixture(t, { aiProxy });
+  const admin = await f.account('ADMIN', 'admin@example.test');
+  const member = await f.account('MEMBER', 'member@example.test');
+  const ask = who => f.request('/api/ai/assist', { method: 'POST', ...who, body: { kind: 'draft', text: 'x' } });
+
+  // Off by default: the request is refused here, and nothing was sent anywhere.
+  assert.equal((await ask(member)).status, 403);
+  assert.equal(calls.length, 0);
+  // The status still answers, because it holds no part of the key.
+  assert.deepEqual((await f.request('/api/ai/status', member)).value, { provider: 'azure-openai', configured: true, model: 'deployment', fallbackModel: null, enabled: false });
+
+  // An institution administrator used to turn this on; from phase 5 it is the platform's.
+  assert.equal((await f.request('/api/admin/features', { method: 'PUT', ...admin, body: { key: 'aiAssistant', enabled: true } })).status, 403);
+  const platform = await f.platform(admin);
+  const opened = await f.request('/api/admin/features', { method: 'PUT', ...platform, body: { key: 'aiAssistant', enabled: true } });
+  assert.equal(opened.status, 200);
+  assert.equal(opened.value.features.aiAssistant, true);
+
+  // A request naming another institution does not borrow its switch: the server uses the
+  // session's organisation and ignores the body's id.
+  const other = createOrg(f.auth, 'org-other', 'Other');
+  assert.equal((await f.request('/api/ai/assist', { method: 'POST', ...member, body: { kind: 'draft', text: 'x', orgId: other.id } })).status, 200);
+  assert.equal(f.auth.all("SELECT enabled FROM org_features WHERE org_id=? AND key='aiAssistant'", other.id).length, 0);
+
+  const answered = await ask(member);
+  assert.equal(answered.status, 200);
+  assert.equal(answered.value.proposal.status, 'MATCH');
+  assert.equal(calls.length, 2);
+  // The audit says who used it and which request it was — and nothing about the content.
+  const events = f.auth.all("SELECT actor, action, target FROM audit WHERE action='ai_assist'");
+  assert.deepEqual(events.map(event => [event.actor, event.target]), [[member.id, 'req_test_1'], [member.id, 'req_test_2']]);
+  // The issued ids are on record for the marker check that phase 5 PR5 adds.
+  assert.deepEqual(f.auth.all("SELECT request_id, org_id, kind, status, rows FROM ai_requests ORDER BY request_id").map(row => ({ ...row })), [
+    { request_id: 'req_test_1', org_id: DEFAULT_ORG_ID, kind: 'draft', status: 'MATCH', rows: 1 },
+    { request_id: 'req_test_2', org_id: DEFAULT_ORG_ID, kind: 'draft', status: 'MATCH', rows: 1 },
+  ]);
+});

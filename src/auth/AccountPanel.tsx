@@ -8,14 +8,14 @@ interface Device { id: string; created_at: number; seen_at: number; current: boo
 /** An institution as the platform administrator sees it: who is in it and its own switches. */
 interface Org { id: string; name: string; admins: number; members: number; accounts: number; features: FeatureSwitches; }
 interface AuditEvent { id: number; time: number; action: string; actor_email?: string; target_email?: string; target?: string; }
-const actions: Record<string, string> = { login: '登入', login_failed: '登入失敗', logout: '登出', user_created: '建立帳號', user_updated: '修改帳號', password_link_created: '生成設定密碼連結', password_set: '設定密碼', password_changed: '修改密碼', other_sessions_revoked: '撤銷其他登入', operator_recovery: '運維恢復管理員', platform_admin_granted: '設為平台管理員', org_created: '建立機構', org_renamed: '機構改名', user_moved: '移到另一機構', platform_admin_revoked: '取消平台管理員', feature_enabled: '開啟功能', feature_disabled: '關閉功能', workspace_saved: '同步工作區', workspace_cleared: '清空工作區', ai_assisted_write: 'AI 協助寫入', workspace_key_created: '設定機構密語', workspace_key_rewrapped: '更改機構密語', workspace_key_replaced: '更換機構密鑰', ai_key_set: '設定 AI 密鑰', ai_key_changed: '更換 AI 密鑰', ai_key_removed: '移除 AI 密鑰' };
+const actions: Record<string, string> = { login: '登入', login_failed: '登入失敗', logout: '登出', user_created: '建立帳號', user_updated: '修改帳號', password_link_created: '生成設定密碼連結', password_set: '設定密碼', password_changed: '修改密碼', other_sessions_revoked: '撤銷其他登入', operator_recovery: '運維恢復管理員', platform_admin_granted: '設為平台管理員', org_created: '建立機構', org_renamed: '機構改名', user_moved: '移到另一機構', platform_admin_revoked: '取消平台管理員', feature_enabled: '開啟功能', feature_disabled: '關閉功能', workspace_saved: '同步工作區', workspace_cleared: '清空工作區', ai_assisted_write: 'AI 協助寫入', ai_assist: '使用 AI 助手', workspace_key_created: '設定機構密語', workspace_key_rewrapped: '更改機構密語', workspace_key_replaced: '更換機構密鑰', ai_key_set: '設定 AI 密鑰', ai_key_changed: '更換 AI 密鑰', ai_key_removed: '移除 AI 密鑰' };
 /** Provider ids as they appear in an audit target, `azure-openai@org-id`. Mirrors server/orgAi.mjs. */
 const providerText: Record<string, string> = { 'azure-openai': 'Azure OpenAI', openai: 'OpenAI', anthropic: 'Anthropic', deepseek: 'DeepSeek' };
 /** What each site-wide switch does, in staff wording. Keys match server/features.mjs. */
 const featureText: Record<keyof FeatureSwitches, { label: string; detail: string }> = {
   photoIntake: { label: '照片回錄（Azure 辨識）', detail: '開啟後，同事可以上傳紙本照片，照片會傳送到 Azure 辨識。關閉時頂欄不顯示入口，伺服器也拒絕轉送照片。' },
   workspaceSync: { label: '跨裝置同步（加密後存到伺服器）', detail: '開啟後，同一機構的同事在不同裝置看到同一份資料。住戶姓名、電話、備註和記錄文字先在瀏覽器用機構密語加密，伺服器只存加密後的內容。關閉時資料只留在各自的裝置，伺服器拒絕讀寫。需要先在下面設定機構密語。' },
-  aiAssistant: { label: 'AI 助手', detail: '開啟後，同事在頁首的「AI 助手」對話框裡可以貼上文字或上傳表格，請 AI 整理成待確認的記錄，或建議欄位對應；AI 只提建議，下一步會列出「將執行的目標」，由登入的同事確認後署名寫入。需要先在下面設定機構的 AI 密鑰。這個開關由機構管理員決定，其他兩項由平台管理員決定。' },
+  aiAssistant: { label: 'AI 助手', detail: '開啟後，同事在頁首的「AI 助手」對話框裡可以貼上文字或上傳表格，請 AI 整理成待確認的記錄，或建議欄位對應；AI 只提建議，下一步會列出「將執行的目標」，由登入的同事確認後署名寫入。AI 由伺服器代理 Azure，密鑰只由平台管理員在伺服器設定，因此這個開關也由平台管理員決定；關閉時伺服器不會把任何內容送到 Azure。' },
 };
 export function AccountPanel({ session, features = {}, onFeaturesChanged, onKeyChanged, onClose, onSignedOut, advanced }: { session: Session; /** Site-wide switches; only an administrator sees and changes them. */ features?: FeatureSwitches; onFeaturesChanged?: (features: FeatureSwitches) => void; /** The institution key on this device changed. */ onKeyChanged?: () => void; onClose: () => void; onSignedOut: () => void; /** Workspace settings, folded under 高級設定. */ advanced?: ReactNode }) {
   const [users, setUsers] = useState<Account[]>([]);
@@ -87,8 +87,13 @@ export function AccountPanel({ session, features = {}, onFeaturesChanged, onKeyC
   };
   /** The AI-assisted rows are a disclosure of how a record was produced, not an accusation. */
   const aiEvents = auditFilter === 'ai' ? events.filter(event => event.action === 'ai_assisted_write') : events;
-  /** An institution's own switch is its administrator's call; the others are the platform's. */
-  const mayTurn = (key: keyof FeatureSwitches) => platform || key === 'aiAssistant';
+  /**
+   * Every switch here sends data off this deployment, and the AI key is now the platform's
+   * (server `.env`), so none of them is an institution administrator's call
+   * (`docs/AI_ASSISTANT.md` 2.2 decision 18). An institution's administrator still sees the
+   * state; the server refuses the change either way.
+   */
+  const mayTurn = () => platform;
   return <section className="account-page" aria-label="設定">
     <header><div><h1>設定</h1><p>{session.user.name} · {session.user.email}</p></div><button onClick={onClose}>返回工作台</button></header>
     {error && <p role="alert" className="account-error">{error}</p>}
@@ -116,7 +121,7 @@ export function AccountPanel({ session, features = {}, onFeaturesChanged, onKeyC
         ? '照片回錄影響全站；跨裝置同步和 AI 助手按機構分開，這裡是本機構的，其他機構的同步在下面「機構」裡開關，AI 助手由各機構自己的管理員開關。預設全部關閉，每次開關都記在操作記錄裡。'
         : '照片回錄和跨裝置同步由平台管理員（CareFlow 團隊）設定；AI 助手是本機構的事，由你在下面開關。'}</p>
         <ul>{(Object.keys(featureText) as (keyof FeatureSwitches)[]).map(key => <li key={key}>
-          <label><input type="checkbox" checked={features[key] === true} disabled={busy || !mayTurn(key)} onChange={e => toggle(key, e.target.checked)} /><strong>{featureText[key].label}</strong>{!mayTurn(key) && <span className="account-features__state">{features[key] ? '已開啟' : '已關閉'}</span>}</label>
+          <label><input type="checkbox" checked={features[key] === true} disabled={busy || !mayTurn()} onChange={e => toggle(key, e.target.checked)} /><strong>{featureText[key].label}</strong>{!mayTurn() && <span className="account-features__state">{features[key] ? '已開啟' : '已關閉'}</span>}</label>
           <p>{featureText[key].detail}</p>
           {key === 'photoIntake' && azureReady === false && <p className="account-features__warn">伺服器未設定 Azure 金鑰：即使開啟，照片也無法辨識。</p>}
         </li>)}</ul>

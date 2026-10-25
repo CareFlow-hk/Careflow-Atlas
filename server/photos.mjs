@@ -1,4 +1,5 @@
 import { HttpError, requireValue } from './auth.mjs';
+import { azureSettings } from './azure.mjs';
 
 export const PHOTO_BODY_LIMIT = 5 * 1024 * 1024;
 const nullableText = { type: ['string', 'null'], maxLength: 200 };
@@ -49,15 +50,8 @@ export function validateExtraction(value, schema = extractionSchema) {
   if (type === 'object') return value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).every(key => Object.hasOwn(schema.properties, key)) && schema.required.every(key => Object.hasOwn(value, key) && validateExtraction(value[key], schema.properties[key]));
   return false;
 }
-export function photoSettings(env = process.env) {
-  const endpoint = env.AZURE_OPENAI_ENDPOINT || 'https://CareFlow-VPS.services.ai.azure.com/openai/v1';
-  const model = env.AZURE_OPENAI_DEPLOYMENT || 'gpt-6-luna';
-  const fallbackModel = (env.AZURE_OPENAI_FALLBACK_DEPLOYMENT ?? 'gpt-6.1-sol').trim();
-  const key = env.AZURE_OPENAI_API_KEY?.trim();
-  let valid = false;
-  try { const url = new URL(endpoint); valid = url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash && url.pathname.replace(/\/$/, '') === '/openai/v1'; } catch { /* unavailable configuration */ }
-  return { endpoint: endpoint.replace(/\/$/, ''), model, fallbackModel, key, configured: Boolean(key && valid) };
-}
+/** Photo recognition and the AI assistant read the same deployment settings. */
+export const photoSettings = azureSettings;
 export function validateImage(body) {
   requireValue(typeof body.image === 'string' && body.image.length <= PHOTO_BODY_LIMIT - 1024, 413, '照片過大，請縮小後再試。');
   const match = body.image.match(/^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/);

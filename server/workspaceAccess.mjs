@@ -1,5 +1,5 @@
 import { requireValue } from './auth.mjs';
-import { PROVIDERS } from './orgAi.mjs';
+import { assertAiAssist } from './aiAssist.mjs';
 
 /**
  * Who may change what inside the institution's shared snapshot.
@@ -84,28 +84,6 @@ function isOwnWithdrawal(change, user) {
 }
 
 const hasRecords = snapshot => WORKSPACE_COLLECTIONS.some(collection => rowsOf(snapshot, collection).length > 0);
-
-const AI_ASSIST_KEYS = new Set(['at', 'provider', 'model']);
-/** The same model-name shape the AI key settings accept (`server/orgAi.mjs`). */
-const AI_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/;
-
-/**
- * The AI disclosure a record carries, checked for shape only.
- *
- * The server cannot know whether an assistant was really used, so this is a disclosure,
- * not a proof, and it never decides who may write (`docs/AI_ASSISTANT.md` 6.3). It stays
- * plain text — a sealed value would be unreadable to the administrator who must see it —
- * which is also why the whitelist check rejects anything the browser wrapped.
- */
-function assertAiAssist(row) {
-  const value = row?.aiAssist;
-  if (value === undefined) return;
-  requireValue(value && typeof value === 'object' && !Array.isArray(value), 400, 'AI 協助標記格式不正確。');
-  requireValue(Object.keys(value).every(key => AI_ASSIST_KEYS.has(key)), 400, 'AI 協助標記含有多餘的欄位。');
-  requireValue(typeof value.provider === 'string' && Object.hasOwn(PROVIDERS, value.provider), 400, 'AI 協助標記的供應商不在允許清單內。');
-  requireValue(typeof value.model === 'string' && AI_MODEL.test(value.model), 400, 'AI 協助標記的型號格式不正確。');
-  requireValue(typeof value.at === 'string' && value.at.length <= 40 && Number.isFinite(Date.parse(value.at)), 400, 'AI 協助標記的時間格式不正確。');
-}
 
 /**
  * The signatures both roles must get right. Skipped only when an administrator fills an
