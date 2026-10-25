@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildReminders, hkDay, msUntilNextHkDay } from './reminders';
+import { buildReminderAdvice, buildReminders, hkDay, msUntilNextHkDay } from './reminders';
 import type { Observation, OutreachSnapshot } from './types';
 
 /*
@@ -92,6 +92,44 @@ describe('what is still open and when', () => {
     const book = buildReminders(withdrawn, { now: NOW, from: 0, to: 0 });
     // Withdrawn, and the task the later record resolved: neither is still to do.
     expect(book.tasks.map(task => task.observationId)).toEqual(['o-open']);
+  });
+});
+
+describe('an order of work, grouped by the person the record names', () => {
+  const advice = buildReminderAdvice(buildReminders(all(), { now: NOW, from: 0, to: null }));
+
+  it('puts overdue and today first, then later dates, and keeps undated work off every day', () => {
+    const chen = advice.owners.find(owner => owner.assignee === '陳大文')!;
+    expect(chen.steps.map(step => [step.label, step.tasks.map(task => task.observationId)])).toEqual([
+      ['今天先做（已逾期或今天到期）', ['o-overdue', 'o-today']],
+      ['之後（按到期日排）', ['o-later']],
+      ['未排期（沒有填日期）', ['o-undated']],
+    ]);
+    // The undated task is still listed, just never given a day.
+    const undated = chen.steps.find(step => step.label.includes('未排期'))!;
+    expect(undated.tasks.every(task => task.dueDate === undefined)).toBe(true);
+  });
+
+  it('starts with the person whose work is most urgent', () => {
+    expect(advice.owners.map(owner => owner.assignee)).toEqual(['陳大文', '李小明']);
+  });
+
+  it('counts the buildings the work touches', () => {
+    expect(advice.buildings).toEqual([{ name: '合成大廈', count: 5 }]);
+  });
+
+  it('lists unassigned work apart instead of handing it to someone', () => {
+    const withNobody = scene([...all().observations, open('o-nobody', { action: '待分派', status: 'OPEN', dueDate: '2026-10-24' })]);
+    const next = buildReminderAdvice(buildReminders(withNobody, { now: NOW, from: 0, to: null }));
+    expect(next.unassigned.map(task => task.observationId)).toEqual(['o-nobody']);
+    expect(next.owners.flatMap(owner => owner.steps.flatMap(step => step.tasks)).some(task => task.observationId === 'o-nobody')).toBe(false);
+    expect(next.total).toBe(6);
+  });
+
+  it('gives an employee only their own sequence', () => {
+    const own = buildReminderAdvice(buildReminders(all(), { now: NOW, viewer: { name: '陳大文', role: 'MEMBER' }, from: 0, to: null }));
+    expect(own.owners.map(owner => owner.name)).toEqual(['陳大文']);
+    expect(own.total).toBe(4);
   });
 });
 

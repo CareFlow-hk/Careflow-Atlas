@@ -35,7 +35,7 @@ describe('the assistant dialog', () => {
 
   it('offers both inputs and one button for them together', () => {
     const html = render();
-    expect(html).toContain('貼一段紙本原話或口述');
+    expect(html).toContain('貼上紙本原話、口述，或問一句');
     expect(html).toContain('拖放 Excel／CSV 檔案到這裡');
     // One door in: the note and the sheet are read and confirmed as one piece of work.
     expect(html).toContain('上傳');
@@ -60,6 +60,29 @@ describe('the assistant dialog', () => {
 
   it('keeps the key out of the markup', () => {
     expect(render()).not.toContain('sk-');
+  });
+
+  it('offers the task questions and the advice request, answered from this device', () => {
+    const html = render();
+    expect(html).toContain('這兩天有什麼跟進？');
+    expect(html).toContain('給我行動建議');
+    expect(html).toContain('建議按記錄上的到期日排出先後');
+  });
+
+  it('takes a sentence rather than a menu of buttons', () => {
+    const html = render();
+    // The examples are grey text that only fills the box; nothing is chosen for the person.
+    expect(html).toContain('cf-ai__hint');
+    expect(html).not.toContain('cf-ai__hints"><button');
+  });
+
+  it('keeps the task answer available when the AI switch is off', () => {
+    const html = render({ aiEnabled: false });
+    expect(html).toContain('AI 助手目前未開啟');
+    expect(html).toContain('任務提醒');
+    expect(html).toContain('問一問');
+    // Nothing that would leave the device is offered while the switch is off.
+    expect(html).not.toContain('拖放 Excel／CSV 檔案到這裡');
   });
 });
 

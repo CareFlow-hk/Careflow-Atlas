@@ -69,6 +69,10 @@ export interface ReminderOptions {
   from?: number;
   /** Last calendar day asked about; `null` means no upper bound. */
   to?: number | null;
+  /** Only this building's tasks; a question that named one building, matched literally. */
+  buildingId?: string;
+  /** Only this owner's tasks; an exact assignee name, never a guess at one. */
+  assignee?: string;
 }
 
 export interface ReminderBook {
@@ -84,7 +88,51 @@ export interface ReminderBook {
   ownOnly: boolean;
   /** Listed tasks that name the viewer. */
   mine: number;
+  /**
+   * The narrowing the question asked for, kept on the answer so the screen can say what it
+   * was narrowed to instead of showing a shorter list without explanation.
+   */
+  buildingId?: string;
+  buildingName?: string;
+  assignee?: string;
 }
+
+/** One step of an owner's sequence: what to do first, then next. */
+export interface ReminderAdviceStep {
+  label: string;
+  tasks: ReminderTask[];
+}
+
+/**
+ * One person's open work, in the order the records already imply.
+ *
+ * The order is derived, not invented: an overdue or today task comes first, tomorrow
+ * next, then later dates in due order. An undated task is kept in its own step and never
+ * put on a day — `CLAUDE.md` 4 forbids the system choosing a date the record does not have.
+ */
+export interface ReminderAdviceOwner {
+  assignee: string;
+  name: string;
+  total: number;
+  steps: ReminderAdviceStep[];
+}
+
+export interface ReminderAdvice {
+  total: number;
+  /** Named owners, most urgent first. */
+  owners: ReminderAdviceOwner[];
+  /** Tasks that name nobody: listed apart, never handed to a person by the system. */
+  unassigned: ReminderTask[];
+  /** How many open tasks each building carries, busiest first. */
+  buildings: { name: string; count: number }[];
+}
+
+const adviceStepLabels = {
+  NOW: '今天先做（已逾期或今天到期）',
+  TOMORROW: '明天',
+  LATER: '之後（按到期日排）',
+  UNDATED: '未排期（沒有填日期）',
+} as const;
 
 const DAY = 86_400_000;
 
@@ -143,6 +191,10 @@ export function buildReminders(snapshot: OutreachSnapshot, options: ReminderOpti
       if (assignee) hidden.others += 1; else hidden.unassigned += 1;
       continue;
     }
+    // A narrowing the question asked for is not work anyone was denied: it is left out
+    // silently, while the answer names what it was narrowed to.
+    if (options.buildingId && task.buildingId !== options.buildingId) continue;
+    if (options.assignee && assignee !== options.assignee) continue;
     const daysAway = task.dueDate ? daysBetween(today, task.dueDate) : undefined;
     if (daysAway === undefined) {
       // A task with no date is still a task today, but it is not an answer to "明天".
@@ -190,5 +242,55 @@ export function buildReminders(snapshot: OutreachSnapshot, options: ReminderOpti
   return {
     today, windowDays, from, to, tasks, counts, hidden, ownOnly,
     mine: viewerName ? tasks.filter(task => task.assignee === viewerName).length : 0,
+    buildingId: options.buildingId,
+    buildingName: options.buildingId ? buildings.get(options.buildingId)?.name : undefined,
+    assignee: options.assignee,
   };
+}
+
+/** How many listed tasks each building carries, busiest first. */
+export function reminderBuildings(tasks: readonly ReminderTask[]): { name: string; count: number }[] {
+  const counts = new Map<string, number>();
+  tasks.forEach(task => counts.set(task.buildingName, (counts.get(task.buildingName) ?? 0) + 1));
+  return [...counts]
+    .map(([name, count]) => ({ name, count }))
+    .sort((left, right) => right.count - left.count || left.name.localeCompare(right.name, 'zh-HK'));
+}
+
+const bucketRank = (task: ReminderTask) => reminderBuckets.indexOf(task.bucket);
+
+/**
+ * The same open tasks, arranged as an order of work rather than a list of buckets.
+ *
+ * This is advice only in the sense of sequence: each task keeps the date its record
+ * carries, and the ranking is 「已逾期／今天 → 明天 → 之後」. It does not invent a due
+ * date, does not split one task into several visits, and does not hand unassigned work to
+ * anyone — an owner only ever appears because a record named them.
+ */
+export function buildReminderAdvice(book: ReminderBook): ReminderAdvice {
+  const byOwner = new Map<string, ReminderTask[]>();
+  const unassigned: ReminderTask[] = [];
+  for (const task of book.tasks) {
+    if (!task.assignee) { unassigned.push(task); continue; }
+    const list = byOwner.get(task.assignee);
+    if (list) list.push(task); else byOwner.set(task.assignee, [task]);
+  }
+
+  const stepsFor = (tasks: ReminderTask[]): ReminderAdviceStep[] => [
+    { label: adviceStepLabels.NOW, tasks: tasks.filter(task => task.bucket === 'OVERDUE' || task.bucket === 'TODAY') },
+    { label: adviceStepLabels.TOMORROW, tasks: tasks.filter(task => task.daysAway === 1) },
+    { label: adviceStepLabels.LATER, tasks: tasks.filter(task => task.daysAway !== undefined && task.daysAway >= 2) },
+    { label: adviceStepLabels.UNDATED, tasks: tasks.filter(task => task.bucket === 'UNSCHEDULED') },
+  ].filter(step => step.tasks.length > 0);
+
+  const owners = [...byOwner]
+    .map(([assignee, tasks]) => ({ assignee, name: assignee, total: tasks.length, steps: stepsFor(tasks) }))
+    .sort((left, right) => {
+      const urgency = (owner: ReminderAdviceOwner) => Math.min(...owner.steps.flatMap(step => step.tasks.map(bucketRank)));
+      return urgency(left) - urgency(right)
+        || right.total - left.total
+        || left.name.localeCompare(right.name, 'zh-HK');
+    });
+
+  return { total: book.tasks.length, owners, unassigned, buildings: reminderBuildings(book.tasks) };
 }

@@ -25,9 +25,9 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import type { DragEvent } from 'react';
-import { AlertTriangle, CheckCircle2, FileSpreadsheet, Sparkles, Upload, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, FileSpreadsheet, ShieldCheck, Sparkles, Upload, X } from 'lucide-react';
 import { assessmentLabels, contactLabels, coverageLabels } from '../domain/presentation';
-import type { ReminderBook, ReminderTask, ReminderViewer } from '../domain/reminders';
+import type { ReminderAdvice, ReminderBook, ReminderTask, ReminderViewer } from '../domain/reminders';
 import type { NamedBuilding } from '../domain/buildingMentions';
 import { mentionedPlace } from '../domain/locationMentions';
 import { proposeLocation, type LocationProposal } from '../domain/structure';
@@ -42,10 +42,10 @@ import { PlanRowEditor, RowDetails, SkippedSection } from './AiPlanRows';
 import type { AiAssistMarker } from '../ai/client';
 import { canonicalOptions, type AiDraft, type AiSuggestion } from '../ai/contract';
 import { buildPreview, outboundSummary, type OutboundPreview } from '../ai/preview';
-import { reminderBook, shouldAnswerReminder } from '../ai/reminderQuery';
+import { looksLikeTaskFollowUp, reminderAnswer, shouldAnswerReminder } from '../ai/reminderQuery';
 import { SCOPE_REFUSAL } from '../ai/scope';
 import { suggestDraft, suggestFileMapping, suggestPatches } from '../ai/suggest';
-import { ReminderAnswer } from './ReminderAnswer';
+import { ReminderAdviceView, ReminderAnswer } from './ReminderAnswer';
 
 export interface AiAssistantDialogProps {
   open: boolean;
@@ -69,6 +69,19 @@ export interface AiAssistantDialogProps {
    * absent in demo mode, where there is nobody to narrow to.
    */
   viewer?: ReminderViewer;
+  /**
+   * The Hong Kong day the dialog is open on. Task answers use it instead of reading the
+   * clock here, so the reminder and the sidebar badge always name the same day, including
+   * after the page has sat open past midnight.
+   */
+  today?: string;
+  /**
+   * Whether the institution has the AI assistant switched on. When it is off the dialog is
+   * still the place to ask about open follow-ups: that answer is computed on this device
+   * and must not disappear with a server-side switch. Everything that would leave the
+   * device stays unavailable.
+   */
+  aiEnabled?: boolean;
   /** Opens a task's building and unit. Absent when the dialog cannot move the map. */
   onOpenTask?: (task: ReminderTask) => void;
 }
@@ -119,7 +132,16 @@ type Stage =
   | { kind: 'idle' }
   | { kind: 'busy'; label: string }
   | { kind: 'plan'; plan: Plan; notice?: string }
-  | { kind: 'reminder'; book: ReminderBook; text: string }
+  | {
+    kind: 'reminder';
+    book: ReminderBook;
+    text: string;
+    advice?: ReminderAdvice;
+    /** Names the question mentioned but could not be narrowed to one. */
+    ambiguous?: string[];
+    /** The narrowing to keep for the next question, when it names nobody new. */
+    narrow?: { buildingId?: string; assignee?: string };
+  }
   | { kind: 'error'; message: string }
   | { kind: 'done'; message: string };
 
@@ -177,7 +199,7 @@ const unmappedColumns = (preview: OutboundPreview, columns: Partial<Record<Canon
 const extraColumnsFor = (preview: OutboundPreview, columns: Partial<Record<CanonicalField, number | null>>) =>
   unmappedColumns(preview, columns);
 
-export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onApplyProposal, viewer, onOpenTask }: AiAssistantDialogProps) {
+export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onApplyProposal, viewer, today, aiEnabled = true, onOpenTask }: AiAssistantDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [stage, setStage] = useState<Stage>({ kind: 'idle' });
@@ -190,13 +212,15 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
   const [chat, setChat] = useState<PlanChatTurn[]>([]);
   const [ask, setAsk] = useState('');
   const [asking, setAsking] = useState(false);
+  /** A further question typed on the task screen; each one is read on its own. */
+  const [followUp, setFollowUp] = useState('');
 
   useEffect(() => { const dialog = dialogRef.current; if (!dialog) return; if (open && !dialog.open) dialog.showModal(); else if (!open && dialog.open) dialog.close(); }, [open]);
   useEffect(() => {
     if (!open) {
       setStage({ kind: 'idle' }); setText(''); setDragging(false);
       setFileDraft(null); setForm(blankDraft);
-      setEdits(NO_EDITS); setChat([]); setAsk(''); setAsking(false);
+      setEdits(NO_EDITS); setChat([]); setAsk(''); setAsking(false); setFollowUp('');
     }
   }, [open]);
 
@@ -284,9 +308,16 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
    * provider just to count tasks would break the promise the encryption makes. The
    * office can overrule the reading with 「改為整理成記錄」 and send it as a draft.
    */
-  const answerReminder = (raw: string) => {
+  const answerReminder = (raw: string, keep?: { buildingId?: string; assignee?: string }) => {
     if (!snapshot) return;
-    setStage({ kind: 'reminder', book: reminderBook(snapshot, raw, viewer), text: raw });
+    // One reading for the first question and every question after it (`src/ai/reminderQuery.ts`).
+    const { book, advice, scope } = reminderAnswer(snapshot, raw, { viewer, now: today, keep });
+    setFollowUp('');
+    setStage({
+      kind: 'reminder', book, text: raw, advice,
+      ambiguous: scope.ambiguous,
+      narrow: { buildingId: book.buildingId, assignee: book.assignee },
+    });
   };
 
   /** Put the reviewed draft into the form; the person can still change every field. */
@@ -317,9 +348,12 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
     const typed = (raw ?? text).trim();
     if (!fileDraft && !typed) return;
     if (!snapshot) { setStage({ kind: 'error', message: '尚未載入工作區資料，無法核對大廈與單位。' }); return; }
-    if (!orgId) { setStage({ kind: 'error', message: '未設定機構，無法使用 AI 助手。' }); return; }
     // A sheet in the box keeps the sheet route: the note beside it is its heading, not a question.
+    // Task questions are answered before any AI check, so switching the assistant off never
+    // takes away the person's own task list (`docs/AI_ASSISTANT.md` 8).
     if (shouldAnswerReminder(typed, { hasFile: !!fileDraft, asReminder })) { answerReminder(typed); return; }
+    if (!aiEnabled) { setStage({ kind: 'error', message: 'AI 助手目前未開啟。這裡仍然可以問未完成的跟進；整理文字或表格要等管理員開啟 AI 助手。' }); return; }
+    if (!orgId) { setStage({ kind: 'error', message: '未設定機構，無法使用 AI 助手。' }); return; }
     // No local keyword check otherwise: the assistant's own reply decides (`docs/AI_ASSISTANT.md` 7).
     setStage({ kind: 'busy', label: fileDraft ? '正在讀取檔案…' : '正在整理草稿…' });
     try {
@@ -511,18 +545,49 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
 
   return <dialog aria-labelledby="ai-title" ref={dialogRef} className="cf-dialog cf-dialog--ai" onCancel={event => { event.preventDefault(); onClose(); }} onClose={() => { if (open) onClose(); }}>
     <div className="cf-ai">
-      <header className="cf-dialog__header"><div><span className="cf-eyebrow">AI 助手</span><h2 id="ai-title">說一句，或放一份表</h2></div><button className="cf-icon-button" onClick={onClose} aria-label="關閉"><X /></button></header>
+      <header className="cf-dialog__header"><div><span className="cf-eyebrow">AI 助手</span><h2 id="ai-title">{aiEnabled ? '說一句，或放一份表' : '問未完成的跟進'}</h2></div><button className="cf-icon-button" onClick={onClose} aria-label="關閉"><X /></button></header>
 
       {stage.kind === 'idle' && <>
-        <p className="cf-callout">AI 只提出草稿或欄位建議，<strong>不會寫入任何資料</strong>。下一步會列出「將執行的目標」；你看過、按下「確認並執行」，記錄才會以你的身分存入，並標明「由 AI 協助」。文字和檔案可以一起放入，整理成同一份清單、同一次確認。貼上的文字會送交 AI，但問未完成跟進除外（那一類在本機回答）；檔案會先顯示行數與欄數，姓名、電話等欄不會送出。</p>
         {!snapshot && <p className="cf-error" role="alert"><AlertTriangle />尚未載入工作區資料，先載入後再使用。</p>}
-        <label className="cf-ai__label" htmlFor="ai-note">貼一段紙本原話或口述（可留空）</label>
-        <textarea id="ai-note" className="cf-ai__text" rows={5} value={text} placeholder="例如：在裕安樓 5 樓 B 室增加以下記錄，或直接寫 10月9日晚上 7 點，3樓 A 室拍門無人應門；下星期再上門。" onChange={event => setText(event.target.value)} />
-        <p className="cf-ai__note">放了檔案時，這段文字也是整份表的抬頭：寫「在裕安樓 5 樓 B 室」，沒有填大廈／樓層／單位的行就按它處理；行裡自己寫了位置就照行裡的。也可以直接問「今天還有什麼未完成的跟進？」——這一類在工作區本機計算，內容不會送交 AI；員工帳號只會看到指派給自己的任務。</p>
-        <div className={`cf-dropzone ${dragging ? 'is-dragging' : ''}`} role="button" tabIndex={0} onClick={() => inputRef.current?.click()} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') inputRef.current?.click(); }} onDragOver={event => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={(event: DragEvent) => { event.preventDefault(); setDragging(false); const file = event.dataTransfer.files?.[0]; if (file) void readFile(file); }}>
-          <Upload size={26} /><strong>拖放 Excel／CSV 檔案到這裡</strong><span>或按此選擇檔案。上限 5 MB、5000 行、64 欄；超出會請你先拆檔，不會偷偷截斷。</span>
+
+        {/* One sheet, not a wall of instructions: the box is the whole screen, the
+            examples are grey text under it, and everything about what leaves the device
+            sits in one line plus a folded note. */}
+        <div className="cf-ai__compose">
+          <label className="cf-visually-hidden" htmlFor="ai-note">{aiEnabled ? '說一句，或貼上一段文字' : '問未完成的跟進'}</label>
+          <textarea
+            id="ai-note"
+            className="cf-ai__text"
+            rows={4}
+            value={text}
+            placeholder={aiEnabled ? '貼上紙本原話、口述，或問一句…' : '問一句，例如：這兩天有什麼跟進？'}
+            onChange={event => setText(event.target.value)}
+          />
+          {/* Examples, not a menu: the box above takes any sentence, and these only fill it in. */}
+          <p className="cf-ai__hints">
+            <span>試試</span>
+            {['今天有什麼未完成的跟進？', '這兩天有什麼跟進？', '給我行動建議'].map(question => <button key={question} type="button" className="cf-ai__hint" onClick={() => { setText(question); void submit(true, question); }}>{question}</button>)}
+          </p>
         </div>
-        <input ref={inputRef} className="cf-visually-hidden" type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" onChange={event => { const file = event.currentTarget.files?.[0]; if (file) void readFile(file); }} />
+
+        {aiEnabled && <>
+          <div
+            className={`cf-ai__drop ${dragging ? 'is-dragging' : ''}`}
+            role="button"
+            tabIndex={0}
+            onClick={() => inputRef.current?.click()}
+            onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') inputRef.current?.click(); }}
+            onDragOver={event => { event.preventDefault(); setDragging(true); }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={(event: DragEvent) => { event.preventDefault(); setDragging(false); const file = event.dataTransfer.files?.[0]; if (file) void readFile(file); }}
+          >
+            <Upload size={17} />
+            <strong>拖放 Excel／CSV 檔案到這裡</strong>
+            <span>5 MB · 5000 行 · 64 欄，超出會請你先拆檔，不會偷偷截斷</span>
+          </div>
+          <input ref={inputRef} className="cf-visually-hidden" type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" onChange={event => { const file = event.currentTarget.files?.[0]; if (file) void readFile(file); }} />
+        </>}
+
         {fileDraft && <section className="cf-ai__file">
           <h3><FileSpreadsheet size={16} />{fileDraft.preview.fileName}</h3>
           <p>{outboundSummary(fileDraft.preview, fileDraft.preview.sensitiveColumns)}</p>
@@ -531,10 +596,25 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
             <button className="cf-button cf-button--ghost" onClick={() => setFileDraft(null)}>換一個檔案</button>
           </div>
         </section>}
-        <div className="cf-ai__send">
-          <button className="cf-button cf-button--primary" disabled={!snapshot || (!fileDraft && !text.trim())} onClick={() => void submit()}><Upload size={16} />上傳</button>
+
+        <div className="cf-ai__submit">
+          <p className="cf-ai__promise"><ShieldCheck size={15} />
+            {aiEnabled
+              ? <span>AI 只提出草稿，<strong>不會寫入任何資料</strong>；你看過、按下「確認並執行」，記錄才會以你的身分存入，並標明「由 AI 協助」。</span>
+              : <span>AI 助手目前未開啟，只可以使用任務提醒。清單和先後次序都在這部裝置計算，不會送交 AI，也沒有寫入任何資料。</span>}
+          </p>
+          <button className="cf-button cf-button--primary" disabled={!snapshot || (!fileDraft && !text.trim())} onClick={() => void submit()}>{aiEnabled ? <Upload size={16} /> : <Sparkles size={16} />}{aiEnabled ? '上傳' : '問一問'}</button>
         </div>
-        <p className="cf-ai__note">文字和檔案會一起處理：文字整理成 1 筆記錄，檔案整理成逐行記錄，列在同一份「將執行的目標」裡，按一次確認全部寫入。對談內容只留在這部裝置，不上傳、不進匯出檔。AI 不會自己新增或改寫任何資料：表格寫到而工作區沒有的樓層／單位，會列在「將執行的目標」裡，由你確認後才建立；大廈本身仍要在地圖上新增。要更正舊記錄，只會產生一筆帶「更正原記錄」的追加記錄。</p>
+
+        <details className="cf-ai__about">
+          <summary>使用說明</summary>
+          {aiEnabled && <p>文字和檔案可以一起處理：文字整理成 1 筆記錄，檔案整理成逐行記錄，列在同一份「將執行的目標」裡，按一次確認全部寫入。對談內容<strong>只留在這部裝置</strong>，不上傳、不進匯出檔。</p>}
+          <p>問未完成跟進、或問「給我行動建議」，都在工作區本機計算，內容不會送交 AI；<strong>建議按記錄上的到期日排出先後</strong>，不會替任務補日期或分派負責人。員工帳號只會看到指派給自己的任務。</p>
+          {aiEnabled && <>
+            <p>貼上的文字會送交 AI；檔案會先顯示行數與欄數，姓名、電話等欄不會送出。放了檔案時，這段文字也是整份表的抬頭：寫「在裕安樓 5 樓 B 室」，沒有填大廈／樓層／單位的行就按它處理；行裡自己寫了位置就照行裡的。</p>
+            <p>AI 不會自己新增或改寫任何資料：表格寫到而工作區沒有的樓層／單位，會列在「將執行的目標」裡，由你確認後才建立；大廈本身仍要在地圖上新增。要更正舊記錄，只會產生一筆帶「更正原記錄」的追加記錄。</p>
+          </>}
+        </details>
       </>}
 
       {stage.kind === 'busy' && <p className="cf-ai__busy" role="status"><Sparkles size={18} />{stage.label}</p>}
@@ -549,12 +629,46 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
         onRun={runPlan} onBack={() => { setStage({ kind: 'idle' }); setEdits(NO_EDITS); setChat([]); setAsk(''); }} />}
 
       {stage.kind === 'reminder' && <>
-        <ReminderAnswer book={stage.book} onOpenTask={onOpenTask} />
+        {stage.advice
+          ? <ReminderAdviceView book={stage.book} advice={stage.advice} onOpenTask={onOpenTask} />
+          : <ReminderAnswer book={stage.book} onOpenTask={onOpenTask} />}
+
+        {stage.ambiguous && stage.ambiguous.length > 0 && <p className="cf-reminder__hidden">
+          <AlertTriangle size={14} />你在句子裡提到多個名字（{stage.ambiguous.join('、')}），系統沒有替你挑一個，所以沒有按名字篩選。請只寫一個名字。
+        </p>}
+        {stage.book.assignee && <p className="cf-reminder__note">已只看 {stage.book.assignee} 的任務；問「全部」或寫另一個名字可以換回。</p>}
+
+        {/* Not a fixed menu: any sentence is read on the spot, and the shortcuts are
+            examples in grey rather than choices that limit what can be asked. */}
+        <form className="cf-reminder__ask" onSubmit={event => {
+          event.preventDefault();
+          const question = followUp.trim();
+          if (!question || !snapshot) return;
+          if (!looksLikeTaskFollowUp(snapshot, question)) {
+            // A sentence that is not about tasks is offered as a record instead of being ignored.
+            if (aiEnabled) void submit(false, question);
+            else setStage({ kind: 'error', message: '這句話不像在問未完成的跟進。可以寫「明天有什麼？」「裕安樓有什麼？」「陳大文要做什麼？」或「給我行動建議」。' });
+            return;
+          }
+          answerReminder(question, stage.narrow);
+        }}>
+          <label className="cf-visually-hidden" htmlFor="cf-reminder-ask">再問一句</label>
+          <input id="cf-reminder-ask" className="cf-reminder__askinput" value={followUp} placeholder="再問一句，例如：明天呢？／裕安樓有什麼？／陳大文要做什麼？" onChange={event => setFollowUp(event.target.value)} />
+          <button type="submit" className="cf-button cf-button--primary" disabled={!followUp.trim()}>問</button>
+        </form>
+        <p className="cf-reminder__hints">
+          <span>可以這樣問：</span>
+          {['明天呢？', '未來 7 天', '所有未完成', '裕安樓有什麼？', '給我行動建議'].map(example => <button key={example} type="button" className="cf-reminder__hint" onClick={() => setFollowUp(example)}>{example}</button>)}
+        </p>
+
         <footer className="cf-dialog__footer">
-          <span>這份清單在工作區本機計算，沒有送交 AI，也沒有寫入任何資料。</span>
+          <span>{stage.advice ? '這份先後次序在工作區本機排出，沒有送交 AI，也沒有替任何人分派工作。' : '這份清單在工作區本機計算，沒有送交 AI，也沒有寫入任何資料。'}</span>
           <div>
-            <button className="cf-button cf-button--ghost" onClick={() => void submit(false, stage.text)}>這不是提醒，改為整理成記錄</button>
-            <button className="cf-button cf-button--primary" onClick={() => setStage({ kind: 'idle' })}>返回</button>
+            {stage.advice
+              ? <button type="button" className="cf-reminder__softlink" onClick={() => setStage({ ...stage, advice: undefined })}>只看清單</button>
+              : <button type="button" className="cf-reminder__softlink" onClick={() => answerReminder('給我行動建議', stage.narrow)}>按負責人看先後次序</button>}
+            {aiEnabled && <button type="button" className="cf-reminder__softlink" onClick={() => void submit(false, stage.text)}>改成整理成一筆記錄</button>}
+            <button type="button" className="cf-button cf-button--primary" onClick={() => setStage({ kind: 'idle' })}>返回</button>
           </div>
         </footer>
       </>}

@@ -89,6 +89,16 @@ test('a caller cannot set the model, store, endpoint, prompt or timeout', () => 
   assert.equal(readAiRequest({ ...mappingBody(), orgId: 'another-org' }).kind, 'mapping');
 });
 
+test('a mapping request may carry the sheet header row it read', () => {
+  // `headers` here is the worksheet's own column headers, not the outbound HTTP headers:
+  // the page sends it with the part that holds the header row. Refusing it made every
+  // sheet with a detected header fail before the model was ever asked (2026-10-25).
+  const headers = ['大廈', '日期', '電話'];
+  const request = readAiRequest(mappingBody({ headers }));
+  assert.deepEqual(request.request.headers, headers);
+  assert.equal(request.kind, 'mapping');
+});
+
 test('the request carries the server prompt, the configured deployment and store:false', async () => {
   let seen;
   const service = createAiService({ settings, fetchImpl: async (url, options) => {

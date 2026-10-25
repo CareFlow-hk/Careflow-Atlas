@@ -74,7 +74,13 @@ export async function suggestFileMapping({ preview, fetcher, withheld = [], cont
       sheetName: preview.sheetName,
       part: { index: index + 1, count: parts },
       headerRow: localHeader,
-      headers: localHeader === null ? headers : undefined,
+      /*
+       * The header names travel with a part that does not contain the header row, so the
+       * columns can still be read there. A workbook where no header row was found has no
+       * names to send: an empty array would claim to name zero columns while the request
+       * carries several, and the server refuses it (2026-10-25) — so it is left out.
+       */
+      headers: localHeader === null && headers.length ? headers : undefined,
       rows: chunkRows(preview, chunk, withheld),
       columnCount: preview.columnCount,
       profileIds: FORMAT_PROFILES.map(profile => profile.id),

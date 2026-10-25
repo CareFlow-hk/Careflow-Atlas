@@ -36,10 +36,16 @@ export const AI_MAX_LOCATIONS = 400;
 /** Per institution, in flight at once. Two people reading a sheet each is already generous. */
 export const AI_MAX_CONCURRENT = 2;
 
-/** Fields that decide how the request is made. The server owns all of them. */
+/**
+ * Fields that decide how the request is made. The server owns all of them.
+ *
+ * `headers` is deliberately not one of them: in a mapping request it is the sheet's own
+ * column headers (`headers: ['大廈', '日期']`, sent with the part that holds the header
+ * row), and the outbound HTTP headers are assembled here, never from the body.
+ */
 const SERVER_OWNED = [
   'model', 'deployment', 'store', 'endpoint', 'endpointUrl', 'system', 'instructions', 'schema',
-  'timeout', 'timeoutMs', 'retry', 'apiKey', 'key', 'provider', 'headers',
+  'timeout', 'timeoutMs', 'retry', 'apiKey', 'key', 'provider',
 ];
 
 const isObject = value => typeof value === 'object' && value !== null && !Array.isArray(value);

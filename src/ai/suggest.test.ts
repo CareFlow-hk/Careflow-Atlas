@@ -60,6 +60,17 @@ describe('asking for a column mapping', () => {
     expect(body.rows[1]).toContain('陳大文');
   });
 
+  it('leaves the header names out when the sheet has no header row to name', async () => {
+    // A workbook the rule detector could not find a header in is exactly the one the
+    // assistant is asked about. Sending `headers: []` there claimed to name zero columns
+    // while the request carried several, and the server refused the whole request with
+    // 400 before the model ever saw it (2026-10-25).
+    const { bodies, fetcher } = capture({ ...suggestion, headerRow: undefined });
+    await suggestFileMapping({ preview: preview({ headerRow: null, headers: [] }), fetcher });
+    expect(bodies[0]).not.toHaveProperty('headers');
+    expect(bodies[0].columnCount).toBe(2);
+  });
+
   it('keeps the server’s marker so every record can say which request read the sheet', async () => {
     const { fetcher } = capture(suggestion);
     const result = await suggestFileMapping({ preview: preview(), fetcher });

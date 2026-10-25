@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { Bell, Building2, Check, ChevronDown, ChevronRight, CircleHelp, FileSpreadsheet, Footprints, MapPin, RotateCcw, Search, Sparkles, Upload, X } from 'lucide-react';
+import { Building2, Check, ChevronDown, ChevronRight, CircleHelp, FileSpreadsheet, Footprints, MapPin, RotateCcw, Search, Sparkles, Upload, X } from 'lucide-react';
 import { useWorkspace } from './store';
 import { PhotoIntake } from '../photos/PhotoIntake';
 import { Camera } from 'lucide-react';
@@ -15,8 +15,7 @@ import { PaperForm } from '../components/PaperForm';
 import { SyncConflictDialog } from '../components/SyncConflictDialog';
 import { AccountMenu } from '../components/AccountMenu';
 import { AiAssistantDialog } from '../components/AiAssistantDialog';
-import { ReminderDialog } from '../components/ReminderDialog';
-import { buildReminders, type ReminderTask, type ReminderViewer } from '../domain/reminders';
+import type { ReminderTask, ReminderViewer } from '../domain/reminders';
 import { useHkToday } from './useHkToday';
 import { features } from './features';
 import { useAccount } from '../auth/accountContext';
@@ -96,7 +95,6 @@ export default function App() {
   const [photoOpen, setPhotoOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const aiAssistant = account?.features.aiAssistant === true;
-  const [reminderOpen, setReminderOpen] = useState(false);
   const [importError, setImportError] = useState<string>();
   const [importLoading, setImportLoading] = useState(false);
   const [editTarget, setEditTarget] = useState<EditTarget>();
@@ -118,22 +116,19 @@ export default function App() {
   const [finderOpen, setFinderOpen] = useState(true);
   const hasSnapshot = Boolean(snapshot);
   useEffect(() => { setFinderOpen(!hasSnapshot); }, [hasSnapshot]);
-  // Reminders are counted here, not on a server: the tasks are encrypted there and never
-  // reach it in the clear. An employee is shown their own tasks only; an administrator sees
-  // every open task. `dueNow` is what the sidebar badge means: overdue or due today.
+  // Task questions are answered on this device, not on a server: the tasks are encrypted
+  // there and never reach it in the clear. An employee is shown their own tasks only; an
+  // administrator sees every open task. The same `today` is what the answer names, and it
+  // changes after midnight so a page left open does not keep answering with yesterday.
   const accountName = account?.name;
   const accountRole = account?.role;
   const viewer = useMemo<ReminderViewer | undefined>(() => accountName ? { name: accountName, role: accountRole } : undefined, [accountName, accountRole]);
-  // The badge must mean the same day as the list, including after the page has sat open
-  // past midnight; `today` changes then and re-runs the count.
   const today = useHkToday();
-  const dueNow = useMemo(() => snapshot ? buildReminders(snapshot, { now: today, viewer, from: 0, to: 0 }) : undefined, [snapshot, viewer, today]);
   const openTask = (task: ReminderTask) => {
     workspace.selectBuilding(task.buildingId);
     if (task.unitId) workspace.selectUnit(task.unitId);
     else if (task.floorId) workspace.selectFloor(task.floorId);
     setFinderOpen(false);
-    setReminderOpen(false);
     setAiOpen(false);
   };
   /** What the floating cards cover, so the camera centres a building in the visible map.
@@ -357,7 +352,7 @@ export default function App() {
       <button ref={helpButtonRef} className="help-button icon-button" aria-label="示範說明" aria-expanded={helpOpen} aria-controls="demo-help" onClick={() => setHelpOpen(!helpOpen)}><CircleHelp size={19} /></button>
       <AccountMenu />
       {snapshot && photoIntake && <button className="photo-entry" onClick={() => setPhotoOpen(true)}><Camera size={16} />照片回錄</button>}
-      {snapshot && aiAssistant && <button className="photo-entry" onClick={() => setAiOpen(true)}><Sparkles size={16} />AI 助手</button>}
+      {snapshot && <button className="photo-entry" onClick={() => setAiOpen(true)}><Sparkles size={16} />AI 助手</button>}
     </header>
     <main className={`workspace ${selectedBuildingId ? 'has-selection' : ''}`}>
       {/* On desktop the finder floats over the map: a one-line bar, opened when needed to
@@ -386,7 +381,6 @@ export default function App() {
           : <div className="start-import"><span className="import-file-icon"><FileSpreadsheet size={30} strokeWidth={1.4} /></span><h2>開始使用</h2><p>載入一個虛構街區試用：20 幢大廈、多次探訪和待跟進事項。也可以下載空白範本，填上你們自己的大廈再匯入。</p><button className="primary-button" disabled={importLoading} onClick={() => void loadDemo()}><Upload size={16} />{importLoading ? '載入中…' : '載入示範資料'}<ChevronRight size={16} /></button><button className="start-import__secondary" onClick={openImport}><FileSpreadsheet size={16} />匯入自己的 Excel／下載空白範本</button></div>}
         {/* One way into paper and Excel: printing, exporting and importing all live in that dialog. */}
         {snapshot && <div className="sidebar-footer">
-          <button onClick={() => setReminderOpen(true)}><Bell size={16} />任務提醒{(dueNow?.counts.OVERDUE ?? 0) + (dueNow?.counts.TODAY ?? 0) > 0 && <b className="reminder-badge">{(dueNow?.counts.OVERDUE ?? 0) + (dueNow?.counts.TODAY ?? 0)}</b>}</button>
           <button onClick={openImport}><FileSpreadsheet size={16} />紙本與 Excel</button>
         </div>}
         </div>
@@ -408,8 +402,9 @@ export default function App() {
     {helpOpen && <div ref={helpRef} id="demo-help" className="help-popover" role="region" aria-label="示範說明"><strong>這是一個外展流程示範</strong><p>大廈、住戶及記錄全部虛構。資料存放在機構工作區：同一機構的成員換一部裝置登入，會看到同一份；但這仍是示範資料，不是正式的機構業務資料庫。</p><h3>顏色</h3><ul className="help-legend">{OUTREACH_STATES.map(state => <li key={state}><i style={{ background: stateColors[state] }} /><b>{stateLabels[state]}</b>{stateLegendNotes[state]}</li>)}</ul><p>「沒有記錄」不等於「沒有發現」：先查看上次結果，再決定下一步。</p><p className="help-credit">地圖底圖由 OpenFreeMap / OpenStreetMap 提供。</p><button onClick={() => setHelpOpen(false)}>知道了</button></div>}
     <ImportDialog notice={toast.startsWith('Excel 已準備') ? toast : undefined} open={importOpen} review={importReview} loading={importLoading} error={importError} onClose={() => setImportOpen(false)} onFile={loadFile} onLoadDistrict={loadDistrict} onExport={() => void (snapshot ? exportExcel() : exportBlank())} exportLabel={snapshot ? undefined : '下載空白範本'} onPrint={snapshot?.buildings.length ? () => { setImportOpen(false); setPaperOpen(true); } : undefined} onRetry={openImport} onRemap={remapImport} onConfirmReplace={confirmImport} />
     {workspace.conflictsOpen && workspace.pendingConflicts.length > 0 && <SyncConflictDialog conflicts={workspace.pendingConflicts} onResolve={workspace.resolveConflicts} onDefer={workspace.deferConflicts} />}
-    {snapshot && <ReminderDialog open={reminderOpen} onClose={() => setReminderOpen(false)} snapshot={snapshot} viewer={viewer} orgId={workspace.orgId} accountId={workspace.operator?.accountId} today={today} onOpenTask={openTask} />}
-    {snapshot && aiAssistant && workspace.operator && <AiAssistantDialog open={aiOpen} onClose={() => setAiOpen(false)} snapshot={snapshot} orgId={workspace.orgId} viewer={viewer} onOpenTask={openTask} onApplyProposal={features.structureEditing ? workspace.applyLocationProposal : undefined} onWrite={inputs => { const result = workspace.recordBatch(inputs, false); setToast(`已寫入 ${result.saved} 筆由 AI 協助整理的記錄。`); }} />}
+    {/* One door for the assistant and the task list: the list is computed on this device,
+        so it stays available even when the institution has the AI switch off. */}
+    {snapshot && <AiAssistantDialog open={aiOpen} onClose={() => setAiOpen(false)} snapshot={snapshot} orgId={workspace.orgId} viewer={viewer} today={today} aiEnabled={aiAssistant} onOpenTask={openTask} onApplyProposal={features.structureEditing ? workspace.applyLocationProposal : undefined} onWrite={inputs => { const result = workspace.recordBatch(inputs, false); setToast(`已寫入 ${result.saved} 筆由 AI 協助整理的記錄。`); }} />}
     {paperOpen && snapshot && <PaperForm snapshot={snapshot} buildingId={selectedBuildingId} onClose={() => setPaperOpen(false)} />}
     {snapshot && photoIntake && workspace.operator && <PhotoIntake key={workspace.operator.accountId} onApplyProposal={features.structureEditing ? workspace.applyLocationProposal : undefined} open={photoOpen} snapshot={snapshot} operator={workspace.operator} onClose={() => setPhotoOpen(false)} onSave={workspace.savePhotoPages} onView={(buildingId, unitId) => { workspace.selectBuilding(buildingId); if (unitId) workspace.selectUnit(unitId); setFinderOpen(false); }} />}
     {editTarget && <ObservationEditor open targetLabel={editTarget.label} subjectId={editTarget.unitIds ? undefined : editTarget.unitId ?? editTarget.buildingId} subjectType={editTarget.unitId ? 'UNIT' : 'BUILDING'} batch={editTarget.unitIds ? { units: editTarget.unitIds.length } : undefined} optionPrefs={workspace.optionPrefs} defaultCoverage={editDefaults.coverage} defaultAssessment={editDefaults.assessment} onClose={() => setEditTarget(undefined)} onSubmit={saveObservation} />}

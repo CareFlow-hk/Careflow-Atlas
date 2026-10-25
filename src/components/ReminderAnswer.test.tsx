@@ -1,8 +1,8 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { buildReminders } from '../domain/reminders';
+import { buildReminderAdvice, buildReminders } from '../domain/reminders';
 import type { Observation, OutreachSnapshot } from '../domain/types';
-import { ReminderAnswer } from './ReminderAnswer';
+import { ReminderAdviceView, ReminderAnswer } from './ReminderAnswer';
 
 /*
  * What the person reads: the date each task carries, the original words when there is no
@@ -67,5 +67,52 @@ describe('the reminder answer', () => {
     expect(empty.tasks.length).toBeGreaterThan(0);
     const tomorrow = buildReminders(snapshot, { now: NOW, from: 1, to: 1 });
     expect(renderToStaticMarkup(<ReminderAnswer book={tomorrow} />)).toContain('沒有未完成跟進');
+  });
+
+  it('says which buildings the listed work touches', () => {
+    const html = renderToStaticMarkup(<ReminderAnswer book={buildReminders(snapshot, { now: NOW, from: 0, to: null })} />);
+    expect(html).toContain('涉及 1 幢大廈：合成大廈 4 項');
+  });
+
+  it('opens with the numbers, so each group can stay folded', () => {
+    const html = renderToStaticMarkup(<ReminderAnswer book={buildReminders(snapshot, { now: NOW, from: 0, to: null })} />);
+    expect(html).toContain('有 4 項未完成');
+    expect(html).toContain('已逾期');
+    expect(html).toContain('今天到期');
+    // Folded: one summary row per group, and `<details>` without `open`.
+    expect(html).toContain('<details class="cf-reminder__group">');
+    expect(html).not.toContain('<details class="cf-reminder__group" open');
+    expect(html.match(/<summary>/g)).toHaveLength(html.match(/<details/g)!.length);
+  });
+});
+
+describe('the advice answer', () => {
+  const book = buildReminders(snapshot, { now: NOW, viewer: { name: '管理員', role: 'ADMIN' }, from: 0, to: null });
+  const html = renderToStaticMarkup(<ReminderAdviceView book={book} advice={buildReminderAdvice(book)} />);
+
+  it('groups the work by the person the record names, in the order it should be done', () => {
+    expect(html).toContain('陳大文');
+    expect(html).toContain('李小明');
+    expect(html).toContain('今天先做（已逾期或今天到期）');
+    expect(html).toContain('未排期（沒有填日期）');
+  });
+
+  it('says the order was worked out here, not by AI, and never assigns unassigned work', () => {
+    expect(html).toContain('沒有送交 AI');
+    expect(html).toContain('未填負責人');
+    expect(html).toContain('系統不會替你分派給任何人');
+  });
+
+  it('folds each owner so the order is readable before anything is opened', () => {
+    expect(html).toContain('<summary>');
+    expect(html).toContain('cf-reminder__group-name">陳大文');
+    expect(html).not.toContain('<details class="cf-reminder__group" open');
+  });
+
+  it('gives an employee only their own sequence', () => {
+    const memberBook = buildReminders(snapshot, { now: NOW, viewer: { name: '陳大文', role: 'MEMBER' }, from: 0, to: null });
+    const member = renderToStaticMarkup(<ReminderAdviceView book={memberBook} advice={buildReminderAdvice(memberBook)} />);
+    expect(member).toContain('你的次序');
+    expect(member).not.toContain('李小明');
   });
 });
