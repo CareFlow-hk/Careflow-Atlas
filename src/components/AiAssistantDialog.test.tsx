@@ -5,7 +5,7 @@ import type { DraftForm, FilePlan } from './AiAssistantDialog';
 import { AiAssistantDialog, FilePlanPanel, PlanView } from './AiAssistantDialog';
 import { shownFields } from './aiMappingFields';
 import { NO_EDITS } from './planEdits';
-import { PlanRowEditor } from './AiPlanRows';
+import { PlanRowEditor, SkippedRowsTable } from './AiPlanRows';
 
 const render = (over: Partial<Parameters<typeof AiAssistantDialog>[0]> = {}) => renderToStaticMarkup(
   <AiAssistantDialog open onClose={() => undefined} snapshot={demoSnapshot} orgId="org-default" onWrite={() => undefined} {...over} />,
@@ -83,8 +83,11 @@ describe('the plan screen', () => {
       pending: [{ buildingId: 'bldg-yu-an', buildingName: '裕安樓', floorLabel: '9F', newFloor: true, unitLabel: '9F A室', rowNumbers: [5] }],
     },
   };
-  const html = renderToStaticMarkup(<FilePlanPanel plan={plan} canCreate edits={NO_EDITS} onEdit={() => undefined}
-    onChangeColumn={() => undefined} onRun={() => undefined} onBack={() => undefined} />);
+  const panel = (edits = NO_EDITS) => renderToStaticMarkup(<FilePlanPanel plan={plan} canCreate edits={edits} onEdit={() => undefined}
+    onEditMany={() => undefined} onChangeColumn={() => undefined} onRun={() => undefined} onBack={() => undefined} />);
+  const html = panel();
+  const skippedRows = renderToStaticMarkup(<SkippedRowsTable rows={[plan.result.rows[2]]} valuesOf={() => []} preview={preview}
+    columns={plan.columns} edits={NO_EDITS} onEdit={() => undefined} onEditMany={() => undefined} />);
 
   it('says what will happen where, not what each column was', () => {
     expect(html).toContain('在「裕安樓 · 5F B室」新增 1 筆到訪記錄');
@@ -104,14 +107,27 @@ describe('the plan screen', () => {
     expect(html).toContain('原樣記在備註');
   });
 
-  it('lists the rows it will not write, with the reason, instead of dropping them', () => {
+  it('lists the rows it will not write, instead of dropping them', () => {
     expect(html).toContain('不會寫入的 1 行');
-    expect(html).toContain('第 6 行');
-    expect(html).toContain('未填到訪日期。');
+    expect(html).toContain('一行一個單位，一行一欄');
   });
 
-  it('has nothing left to tick: the plan is confirmed as a whole', () => {
-    expect(html).not.toContain('type="checkbox"');
+  it('puts each row it will not write on one line, under the headers it would be written with', () => {
+    expect(skippedRows).toContain('第 6 行');
+    expect(skippedRows).toContain('未填到訪日期。');
+    // One column per canonical field the plan writes, not a card per row to open.
+    expect(skippedRows).toContain('大廈');
+    expect(skippedRows).toContain('到訪日期');
+    expect(skippedRows).toContain('覆蓋結果');
+    expect(skippedRows).toContain('接觸結果');
+    expect(skippedRows).toContain('住房判斷');
+  });
+
+  it('ticks rows only to choose where a bulk value lands, never to choose what runs', () => {
+    expect(skippedRows).toContain('type="checkbox"');
+    expect(skippedRows).toContain('套用到已選行');
+    // The run button belongs to the plan footer alone; the table adds no second confirmation.
+    expect(skippedRows).not.toContain('確認並執行');
   });
 
   it('never shows the key', () => {
@@ -133,7 +149,7 @@ describe('the plan screen', () => {
     };
     const view = (over: { form?: typeof form; notice?: string } = {}) => renderToStaticMarkup(<PlanView
       plan={{ source: 'both', file: plan, text }} snapshot={demoSnapshot} form={over.form ?? form}
-      canCreate notice={over.notice} edits={NO_EDITS} onEdit={() => undefined}
+      canCreate notice={over.notice} edits={NO_EDITS} onEdit={() => undefined} onEditMany={() => undefined}
       onChangeColumn={() => undefined} onChangeForm={() => undefined} onRun={() => undefined} onBack={() => undefined} />);
 
     it('stacks both sources under their own headings, with one confirmation for the pair', () => {
@@ -144,15 +160,15 @@ describe('the plan screen', () => {
     });
 
     it('will not let one press write only the half that was ready', () => {
-      // The draft lost its coverage, so neither footer may offer to run the pair.
-      expect(view({ form: { ...form, coverage: '' } })).toContain('文字部分還缺');
+      // The draft lost its worker, so neither footer may offer to run the pair.
+      expect(view({ form: { ...form, worker: '' } })).toContain('文字部分還缺');
     });
 
     it('keeps the file part when the text was only a heading for it', () => {
       const markup = renderToStaticMarkup(<PlanView
         plan={{ source: 'file', file: plan }} snapshot={demoSnapshot} form={form} canCreate
         notice="這段文字沒有另外整理成一筆記錄，只用作這次讀表的補充說明（例如「在裕安樓」）。"
-        edits={NO_EDITS} onEdit={() => undefined}
+        edits={NO_EDITS} onEdit={() => undefined} onEditMany={() => undefined}
         onChangeColumn={() => undefined} onChangeForm={() => undefined} onRun={() => undefined} onBack={() => undefined} />);
       expect(markup).toContain('在「裕安樓 · 5F B室」新增 1 筆到訪記錄');
       expect(markup).toContain('只用作這次讀表的補充說明');
@@ -195,7 +211,7 @@ describe('editing a row on the plan screen', () => {
     },
   };
   const view = (edits = NO_EDITS, chat?: Parameters<typeof FilePlanPanel>[0]['chat']) => renderToStaticMarkup(
-    <FilePlanPanel plan={plan} canCreate edits={edits} chat={chat} onEdit={() => undefined}
+    <FilePlanPanel plan={plan} canCreate edits={edits} chat={chat} onEdit={() => undefined} onEditMany={() => undefined}
       onChangeColumn={() => undefined} onRun={() => undefined} onBack={() => undefined} />,
   );
   const fields = (edits = NO_EDITS) => renderToStaticMarkup(

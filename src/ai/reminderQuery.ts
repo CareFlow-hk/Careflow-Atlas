@@ -1,4 +1,5 @@
-import { hkDay } from '../domain/reminders';
+import { buildReminders, hkDay, type ReminderBook, type ReminderViewer } from '../domain/reminders';
+import type { OutreachSnapshot } from '../domain/types';
 
 /**
  * Recognises the one kind of message the assistant answers from the workspace itself
@@ -25,6 +26,19 @@ export function isReminderQuestion(text: string): boolean {
   if (!value || value.length > 120) return false;
   if (!TASK.test(value) || NARRATION.test(value)) return false;
   return ENQUIRY.test(value);
+}
+
+/**
+ * Whether this message is answered here rather than by a provider.
+ *
+ * A file always takes the provider route, even when the note beside it reads like a
+ * question: 「在裕安樓增加以下記錄，還有什麼未完成？」 is a heading for the sheet, and
+ * answering it as a task list would drop the sheet. `asReminder: false` is the person's
+ * own override, 「這不是提醒，改為整理成記錄」.
+ */
+export function shouldAnswerReminder(text: string, options: { hasFile?: boolean; asReminder?: boolean } = {}): boolean {
+  if (options.hasFile || options.asReminder === false) return false;
+  return isReminderQuestion(text);
 }
 
 export interface ReminderQuestion {
@@ -59,4 +73,14 @@ export function readReminderQuestion(text: string, today: string = hkDay()): Rem
   if (/(明天|明日|聽日|听日)/.test(value)) return { from: 1, to: 1, label: '明天' };
   if (/(後天|后天)/.test(value)) return { from: 2, to: 2, label: '後天' };
   return { from: 0, to: 0, label: '今天' };
+}
+
+/**
+ * The list a question gets, from the words alone: the same reading the dialog uses, so a
+ * question typed into the box and the same question asked through 任務提醒 cannot end up
+ * with different ranges. `now` fixes the day in tests; the dialog leaves it out.
+ */
+export function reminderBook(snapshot: OutreachSnapshot, text: string, viewer?: ReminderViewer, now?: Date | string): ReminderBook {
+  const question = readReminderQuestion(text, now === undefined ? hkDay() : hkDay(now));
+  return buildReminders(snapshot, { now, viewer, from: question.from, to: question.to });
 }

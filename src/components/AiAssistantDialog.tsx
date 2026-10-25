@@ -27,8 +27,9 @@ import { useEffect, useRef, useState } from 'react';
 import type { DragEvent } from 'react';
 import { AlertTriangle, CheckCircle2, FileSpreadsheet, Sparkles, Upload, X } from 'lucide-react';
 import { assessmentLabels, contactLabels, coverageLabels } from '../domain/presentation';
-import { buildReminders, type ReminderBook, type ReminderTask, type ReminderViewer } from '../domain/reminders';
-import { namedBuilding, type NamedBuilding } from '../domain/buildingMentions';
+import type { ReminderBook, ReminderTask, ReminderViewer } from '../domain/reminders';
+import type { NamedBuilding } from '../domain/buildingMentions';
+import { mentionedPlace } from '../domain/locationMentions';
 import { proposeLocation, type LocationProposal } from '../domain/structure';
 import type { AiAssist, ContactOutcome, CoverageStatus, HousingAssessment, OutreachSnapshot, SaveObservationInput } from '../domain/types';
 import { detectWorkbook } from '../imports/detector';
@@ -37,11 +38,11 @@ import type { CanonicalField } from '../imports/profiles';
 import { REQUIRED_FIELDS, shownFields } from './aiMappingFields';
 import { placeKey, placesToCreate, planActions, plannedRows } from './aiPlan';
 import { NO_EDITS, cellKey, editCounts, fieldKey, planInput, toMapping, withEdit, withoutEdit, type EditSource, type PlanEdits } from './planEdits';
-import { PlanRowEditor, RowDetails } from './AiPlanRows';
+import { PlanRowEditor, RowDetails, SkippedSection } from './AiPlanRows';
 import { aiCredential, type AiCredential } from '../ai/credential';
 import { canonicalOptions, type AiDraft, type AiSuggestion } from '../ai/contract';
 import { buildPreview, outboundSummary, type OutboundPreview } from '../ai/preview';
-import { isReminderQuestion, readReminderQuestion } from '../ai/reminderQuery';
+import { reminderBook, shouldAnswerReminder } from '../ai/reminderQuery';
 import { SCOPE_REFUSAL } from '../ai/scope';
 import { suggestDraft, suggestFileMapping, suggestPatches } from '../ai/suggest';
 import { ReminderAnswer } from './ReminderAnswer';
@@ -252,7 +253,10 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
    * 「大廈名稱在第 3 欄」 can explain the sheet; it can never add a column or a value.
    * Returns `null` when it has already put a reason on screen.
    */
-  const planFile = async (credential: AiCredential, context: string, defaultBuilding?: NamedBuilding): Promise<FilePlan | null | undefined> => {
+  const planFile = async (
+    credential: AiCredential, context: string, defaultBuilding?: NamedBuilding,
+    defaultPlace?: { buildingId: string; floorLabel: string; unitLabel: string },
+  ): Promise<FilePlan | null | undefined> => {
     const draft = fileDraft;
     if (!draft) return undefined;
     // Personal-looking columns never leave the device by default; their content is still
@@ -266,7 +270,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
     const headerRow = suggestion.headerRow ?? draft.preview.headerRow;
     if (headerRow === null || headerRow === undefined) { setStage({ kind: 'error', message: 'AI 找不到表頭，無法確定哪一行才是資料。請在工作表加上表頭後再試。' }); return null; }
     const columns = Object.fromEntries(suggestion.fields.map(field => [field.key, field.columnIndex]));
-    const run: ParseRun = { buffer: draft.buffer, sheetName: draft.preview.sheetName, headerRow: headerRow + 1, mapping: toMapping(columns), fileName: draft.preview.fileName, defaultBuilding };
+    const run: ParseRun = { buffer: draft.buffer, sheetName: draft.preview.sheetName, headerRow: headerRow + 1, mapping: toMapping(columns), fileName: draft.preview.fileName, defaultBuilding, defaultPlace };
     return withResult({ credential, preview: draft.preview, suggestion, columns, parse: run, matrix: draft.matrix }, edits);
   };
 
@@ -278,9 +282,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
    */
   const answerReminder = (raw: string) => {
     if (!snapshot) return;
-    const question = readReminderQuestion(raw);
-    const book = buildReminders(snapshot, { viewer, from: question.from, to: question.to });
-    setStage({ kind: 'reminder', book, text: raw });
+    setStage({ kind: 'reminder', book: reminderBook(snapshot, raw, viewer), text: raw });
   };
 
   /** Put the reviewed draft into the form; the person can still change every field. */
@@ -312,16 +314,23 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
     if (!fileDraft && !typed) return;
     if (!snapshot) { setStage({ kind: 'error', message: '尚未載入工作區資料，無法核對大廈與單位。' }); return; }
     if (!orgId) { setStage({ kind: 'error', message: '未設定機構，無法使用 AI 助手。' }); return; }
-    if (asReminder && !fileDraft && isReminderQuestion(typed)) { answerReminder(typed); return; }
+    // A sheet in the box keeps the sheet route: the note beside it is its heading, not a question.
+    if (shouldAnswerReminder(typed, { hasFile: !!fileDraft, asReminder })) { answerReminder(typed); return; }
     // No local keyword check otherwise: the assistant's own reply decides (`docs/AI_ASSISTANT.md` 7).
     setStage({ kind: 'busy', label: fileDraft ? '正在讀取檔案…' : '正在整理草稿…' });
     try {
       const credential = await aiCredential(orgId);
-      // The note the person typed is how a sheet with no 大廈 column gets one. Matched
-      // locally against the workspace's own names, so only a building they actually named
-      // can be used, and only for rows that name none (CLAUDE.md §4).
-      const fallback = fileDraft ? namedBuilding(snapshot.buildings, typed).building : undefined;
-      const file = await planFile(credential, typed, fallback);
+      // The note the person typed is how a sheet with no 大廈 column gets one, and how a
+      // sheet that never prints 樓層／單位 gets the place they named — 「在裕安樓 5 樓 B 室」.
+      // Both are matched locally against the workspace's own names, so only a building and
+      // a place they actually wrote can be used, and only for rows that name none
+      // (CLAUDE.md §4). Two places in one sentence is not a choice the system may make.
+      const mentioned = fileDraft ? mentionedPlace(snapshot.buildings, typed) : undefined;
+      const fallback = mentioned?.building;
+      const placeNotice = mentioned?.ambiguousPlaces
+        ? `你在文字裡提到多個地點（${mentioned.ambiguousPlaces.join('、')}），系統沒有替你挑一個，所以沒有套用到沒有填樓層／單位的行。請只寫一個地點，或直接在表內補上。`
+        : undefined;
+      const file = await planFile(credential, typed, fallback, mentioned?.place && fallback ? { buildingId: fallback.id, ...mentioned.place } : undefined);
       if (file === null) return;
       let draft: TextPlan | undefined;
       let notice: string | undefined;
@@ -342,7 +351,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
           notice = `文字部分沒有整理成功（${message(error)}），下面只有檔案的部分。`;
         }
       }
-      showPlan(file ?? undefined, draft, notice);
+      showPlan(file ?? undefined, draft, [notice, placeNotice].filter(Boolean).join(' ') || undefined);
     } catch (error) { fail(error); }
   };
 
@@ -361,6 +370,17 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
     setEdits(next);
     showPlan(withResult(baseOf(plan.file), next), plan.source === 'both' ? plan.text : undefined, stage.kind === 'plan' ? stage.notice : undefined);
   };
+
+  /** A bulk fill from the skipped table: one override layer, one re-parse of the sheet. */
+  const editCells = (changes: readonly { key: string; value: string | null }[], source: EditSource) => {
+    if (!plan || plan.source === 'text' || !changes.length) return;
+    const next = changes.reduce((current, change) => change.value === null
+      ? withoutEdit(current, change.key)
+      : withEdit(current, change.key, change.value, source), edits);
+    setEdits(next);
+    showPlan(withResult(baseOf(plan.file), next), plan.source === 'both' ? plan.text : undefined, stage.kind === 'plan' ? stage.notice : undefined);
+  };
+
   const runPlan = () => {
     if (!plan) return;
     runPlanWith(plan.source === 'text' ? undefined : plan.file, plan.source === 'file' ? undefined : plan.text);
@@ -415,8 +435,8 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
 
   /** Turn the reviewed form into one record, creating its floor/unit first if the workspace lacks it. */
   const draftRecord = (draft: TextPlan, start: OutreachSnapshot): { input: SaveObservationInput; created?: string } | undefined => {
-    if (!form.buildingId || !form.date || !form.coverage || !form.worker.trim()) {
-      setStage({ kind: 'error', message: '大廈、日期、覆蓋結果與工作員都必須由人填寫。' });
+    if (!form.buildingId || !form.date || !form.worker.trim()) {
+      setStage({ kind: 'error', message: '大廈、日期與工作員都必須由人填寫。覆蓋結果可以留空。' });
       return undefined;
     }
     let latest = start;
@@ -438,7 +458,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
         id: `ai:${crypto.randomUUID()}`, visitId: `ai-visit:${crypto.randomUUID()}`, buildingId: form.buildingId,
         floorId: location.floorId, unitId: location.unitId,
         occurredAt: form.time ? `${form.date}T${form.time}:00+08:00` : form.date,
-        recordedAt: new Date().toISOString(), workerName: form.worker.trim(), coverage: form.coverage,
+        recordedAt: new Date().toISOString(), workerName: form.worker.trim(), coverage: form.coverage || undefined,
         contactOutcome: form.contact || undefined, assessment: form.assessment || undefined,
         note: form.note.trim() || undefined, evidence: [],
         followUp: form.action.trim() ? { action: form.action.trim(), status: 'OPEN', assignee: form.assignee.trim() || undefined, dueDate: form.dueDate || undefined } : undefined,
@@ -494,8 +514,8 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
         <p className="cf-callout">AI 只提出草稿或欄位建議，<strong>不會寫入任何資料</strong>。下一步會列出「將執行的目標」；你看過、按下「確認並執行」，記錄才會以你的身分存入，並標明「由 AI 協助」。文字和檔案可以一起放入，整理成同一份清單、同一次確認。貼上的文字會送交 AI，但問未完成跟進除外（那一類在本機回答）；檔案會先顯示行數與欄數，姓名、電話等欄不會送出。</p>
         {!snapshot && <p className="cf-error" role="alert"><AlertTriangle />尚未載入工作區資料，先載入後再使用。</p>}
         <label className="cf-ai__label" htmlFor="ai-note">貼一段紙本原話或口述（可留空）</label>
-        <textarea id="ai-note" className="cf-ai__text" rows={5} value={text} placeholder="例如：10月9日晚上 7 點，3樓 A 室拍門無人應門，門外有水電單；下星期再上門。" onChange={event => setText(event.target.value)} />
-        <p className="cf-ai__note">也可以直接問「今天還有什麼未完成的跟進？」。這一類問題在工作區本機計算，內容不會送交 AI；員工帳號只會看到指派給自己的任務。</p>
+        <textarea id="ai-note" className="cf-ai__text" rows={5} value={text} placeholder="例如：在裕安樓 5 樓 B 室增加以下記錄，或直接寫 10月9日晚上 7 點，3樓 A 室拍門無人應門；下星期再上門。" onChange={event => setText(event.target.value)} />
+        <p className="cf-ai__note">放了檔案時，這段文字也是整份表的抬頭：寫「在裕安樓 5 樓 B 室」，沒有填大廈／樓層／單位的行就按它處理；行裡自己寫了位置就照行裡的。也可以直接問「今天還有什麼未完成的跟進？」——這一類在工作區本機計算，內容不會送交 AI；員工帳號只會看到指派給自己的任務。</p>
         <div className={`cf-dropzone ${dragging ? 'is-dragging' : ''}`} role="button" tabIndex={0} onClick={() => inputRef.current?.click()} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') inputRef.current?.click(); }} onDragOver={event => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={(event: DragEvent) => { event.preventDefault(); setDragging(false); const file = event.dataTransfer.files?.[0]; if (file) void readFile(file); }}>
           <Upload size={26} /><strong>拖放 Excel／CSV 檔案到這裡</strong><span>或按此選擇檔案。上限 5 MB、5000 行、64 欄；超出會請你先拆檔，不會偷偷截斷。</span>
         </div>
@@ -522,7 +542,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
         edits={edits}
         chat={plan.source === 'text' ? undefined : { turns: chat, value: ask, asking, onChange: setAsk, onAsk: () => void askPlan() }}
         onChangeColumn={changeColumn} onChangeForm={(key, value) => setForm({ ...form, [key]: value })}
-        onEdit={editCell}
+        onEdit={editCell} onEditMany={editCells}
         onRun={runPlan} onBack={() => { setStage({ kind: 'idle' }); setEdits(NO_EDITS); setChat([]); setAsk(''); }} />}
 
       {stage.kind === 'reminder' && <>
@@ -556,12 +576,13 @@ const assistOf = (credential: AiCredential): AiAssist => ({ at: new Date().toISO
  * writes it. Two sources stack with their own headings and their own rules, but they share
  * one footer — one press always means the whole list, never only the half that was ready.
  */
-export function PlanView({ plan, snapshot, form, canCreate, notice, edits, chat, onChangeColumn, onChangeForm, onEdit, onRun, onBack }: {
+export function PlanView({ plan, snapshot, form, canCreate, notice, edits, chat, onChangeColumn, onChangeForm, onEdit, onEditMany, onRun, onBack }: {
   plan: Plan; snapshot: OutreachSnapshot; form: DraftForm; canCreate: boolean; notice?: string;
   edits: PlanEdits; chat?: PlanChat;
   onChangeColumn: (key: CanonicalField, index: number | null) => void;
   onChangeForm: (key: keyof DraftForm, value: string) => void;
   onEdit: (key: string, value: string | null, source: EditSource) => void;
+  onEditMany: (changes: readonly { key: string; value: string | null }[], source: EditSource) => void;
   onRun: () => void; onBack: () => void;
 }) {
   const file = plan.source === 'text' ? undefined : plan.file;
@@ -573,11 +594,11 @@ export function PlanView({ plan, snapshot, form, canCreate, notice, edits, chat,
   const ready = !!both && writable > 0 && draftComplete(form);
   const note = !both ? '' : !writable
     ? '檔案部分沒有可以寫入的行（原因列在上面），請先修正欄位對應或取消。'
-    : !draftComplete(form) ? '文字部分還缺：大廈、日期、覆蓋結果與工作員都必須由人填寫。'
+    : !draftComplete(form) ? '文字部分還缺：大廈、日期與工作員都必須由人填寫。'
     : '兩部分會在同一次寫入裡完成，以你的帳號署名，並標明「由 AI 協助」。';
   return <>
     {file && <FilePlanPanel plan={file} canCreate={canCreate} label={both ? `檔案：${file.preview.fileName}` : undefined}
-      edits={edits} chat={chat} onChangeColumn={onChangeColumn} onEdit={onEdit} onRun={both ? undefined : onRun} onBack={onBack} />}
+      edits={edits} chat={chat} onChangeColumn={onChangeColumn} onEdit={onEdit} onEditMany={onEditMany} onRun={both ? undefined : onRun} onBack={onBack} />}
     {text && <DraftPlanPanel snapshot={snapshot} value={text.value} form={form} canCreate={canCreate}
       label={both ? '文字：由這段原話整理的 1 筆記錄' : undefined} onChange={onChangeForm}
       onRun={both ? undefined : onRun} onBack={onBack} />}
@@ -602,17 +623,18 @@ function filePlanRows(plan: FilePlan, canCreate: boolean) {
 }
 
 /** What a draft record needs from the person, whichever screen is asking. */
-const draftComplete = (form: DraftForm) =>!!form.buildingId && !!form.date && !!form.coverage && !!form.worker.trim();
+const draftComplete = (form: DraftForm) => !!form.buildingId && !!form.date && !!form.worker.trim();
 
 /**
  * The list of things that will happen, one line each, and the details folded behind it.
  * Each record opens into the cells it came from: a value per header, the source of the
  * last change (人 or AI), and a way to supply a field the sheet never printed.
  */
-export function FilePlanPanel({ plan, canCreate, label, edits, chat, onChangeColumn, onEdit, onRun, onBack }: {
+export function FilePlanPanel({ plan, canCreate, label, edits, chat, onChangeColumn, onEdit, onEditMany, onRun, onBack }: {
   plan: FilePlan; canCreate: boolean; label?: string; edits: PlanEdits; chat?: PlanChat;
   onChangeColumn: (key: CanonicalField, index: number | null) => void;
   onEdit: (key: string, value: string | null, source: EditSource) => void;
+  onEditMany: (changes: readonly { key: string; value: string | null }[], source: EditSource) => void;
   onRun?: () => void; onBack: () => void;
 }) {
   const { result, preview, suggestion } = plan;
@@ -650,15 +672,8 @@ export function FilePlanPanel({ plan, canCreate, label, edits, chat, onChangeCol
         : <p className="cf-ai__note">這份表沒有任何可以直接執行的事。下面列出的行都缺了必要內容，可以直接在行內補上，或叫 AI 幫你改。</p>}
       {extras.length > 0 && <p className="cf-ai__note">原表另有 {extras.length} 欄系統沒有對應（{extras.map(column => column.header || `第 ${column.columnIndex + 1} 欄`).join('、')}）：不用的話不用管，寫入時會把每一行的內容原樣記在備註，不會丟掉。</p>}
       {result.pending.length > 0 && !canCreate && <p className="cf-error"><AlertTriangle />結構編輯目前關閉，不能在這裡新增樓層或單位。請先在「編輯結構」新增，再回來執行。</p>}
-      {skipped.length > 0 && <details className="cf-ai__skipped">
-        <summary>不會寫入的 {skipped.length} 行（可以展開修正）</summary>
-        <ul>{skipped.map(row => <li key={row.rowNumber}>
-          <RowDetails summary={<span><strong>第 {row.rowNumber} 行 · {row.buildingName ?? '未知大廈'}{row.location ? ` · ${row.location}` : ''}</strong>
-            <small>{skipReason(row)} · 可以展開修正</small></span>}>
-            {editor(row.rowNumber)}
-          </RowDetails>
-        </li>)}</ul>
-      </details>}
+      {skipped.length > 0 && <SkippedSection rows={skipped} valuesOf={valuesOf} preview={preview}
+        columns={plan.columns} edits={edits} onEdit={onEdit} onEditMany={onEditMany} />}
       {chat && <PlanChatBox chat={chat} />}
     </section>
     <details className="cf-ai__mapping-details">
@@ -687,13 +702,6 @@ function PlanChatBox({ chat }: { chat: PlanChat }) {
       <button className="cf-button cf-button--primary" type="submit" disabled={chat.asking || !chat.value.trim()}>{chat.asking ? '正在核對…' : '請 AI 改'}</button>
     </form>
   </section>;
-}
-
-/** Why a row is not in the plan, in the person's words rather than an issue code. */
-function skipReason(row: FilePlan['result']['rows'][number]): string {
-  if (row.suspectedDuplicateOf) return '疑似與現有記錄重複，未自動寫入；請先在記錄歷史核對。';
-  if (row.suspectedDuplicateOfRow) return `疑似與檔內第 ${row.suspectedDuplicateOfRow} 行重複，未自動寫入；請先核對原表。`;
-  return row.issues.map(issue => issue.message).join(' ') || '缺少必要內容。';
 }
 
 function MappingTable({ preview, suggestion, columns, onChange }: {
@@ -761,7 +769,7 @@ function DraftPlanPanel({ snapshot, value, form, canCreate, label, onChange, onR
         </li>}
         <li className="is-record"><span className="cf-ai__rowmark">＋</span><div>
           <strong>在「{where}」新增 1 筆到訪記錄</strong>
-          <small>{[form.date, form.worker.trim(), form.coverage ? coverageLabels[form.coverage] : '', form.coverage ? '' : '缺覆蓋結果'].filter(Boolean).join(' · ') || '尚未填寫'}</small>
+          <small>{[form.date, form.worker.trim(), form.coverage ? coverageLabels[form.coverage] : '未更新覆蓋狀態'].filter(Boolean).join(' · ') || '尚未填寫'}</small>
         </div></li>
       </ul>
       {proposal && !canCreate && <p className="cf-error"><AlertTriangle />結構編輯目前關閉，不能在這裡新增樓層或單位。請先在「編輯結構」新增，再回來執行。</p>}
@@ -788,7 +796,7 @@ function DraftPlanPanel({ snapshot, value, form, canCreate, label, onChange, onR
       </div>
     </details>
     {onRun && <footer className="cf-dialog__footer">
-      <span>{complete ? '寫入後會標明由 AI 協助，署名是你的帳號。' : '大廈、日期、覆蓋結果與工作員都必須由人填寫。'}</span>
+      <span>{complete ? '寫入後會標明由 AI 協助，署名是你的帳號。' : '大廈、日期與工作員都必須由人填寫；覆蓋結果留空就是不更新。'}</span>
       <div><button className="cf-button cf-button--ghost" onClick={onBack}>取消</button><button className="cf-button cf-button--primary" disabled={!complete} onClick={onRun}>確認並執行</button></div>
     </footer>}
   </>;

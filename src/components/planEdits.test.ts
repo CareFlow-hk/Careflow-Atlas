@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CanonicalField } from '../imports/profiles';
-import { NO_EDITS, cellKey, editCounts, fieldKey, planInput, readEditKey, syntheticColumn, withEdit, withoutEdit } from './planEdits';
+import { NO_EDITS, cellKey, editCounts, fieldEditKey, fieldKey, planInput, readEditKey, syntheticColumn, withEdit, withoutEdit } from './planEdits';
 
 const columns: Partial<Record<CanonicalField, number | null>> = { buildingName: 0, occurredAt: 1, worker: 4, coverage: 5 };
 
@@ -50,6 +50,20 @@ describe('the mapping handed to the parser', () => {
     edits = withEdit(edits, fieldKey(3, 'coverage'), '未接觸', 'ai');
     const { mapping } = planInput({ buildingName: 0 }, edits);
     expect(mapping.filter(entry => entry.key === 'coverage')).toHaveLength(1);
+  });
+});
+
+describe('where a value for a field lives', () => {
+  it('is the sheet’s own cell when that field has a column', () => {
+    expect(fieldEditKey(3, 'occurredAt', columns)).toBe(cellKey(3, 1));
+  });
+
+  it('is a field of its own when the sheet never had that column', () => {
+    expect(fieldEditKey(3, 'coverage', { buildingName: 0 })).toBe(fieldKey(3, 'coverage'));
+  });
+
+  it('treats an explicitly unmapped column (null) as no column', () => {
+    expect(fieldEditKey(3, 'worker', { worker: null })).toBe(fieldKey(3, 'worker'));
   });
 });
 

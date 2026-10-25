@@ -10,8 +10,15 @@
 import type { CanonicalField } from '../imports/profiles';
 import { GENERIC_FIELDS } from '../imports/genericRows';
 
-/** Without these the parser cannot place a row or read its visit; they are always shown. */
-export const REQUIRED_FIELDS = new Set<CanonicalField>(['buildingId', 'buildingName', 'occurredAt', 'worker', 'coverage']);
+/**
+ * Without these the parser cannot place a row or read its visit; they are shown, badged
+ * 必須, and a row missing one is never written. 覆蓋結果 is not one of them since
+ * 2026-10-25: a blank cell is a visit that stated no result (CLAUDE.md §4).
+ */
+export const REQUIRED_FIELDS = new Set<CanonicalField>(['buildingId', 'buildingName', 'occurredAt', 'worker']);
+
+/** Mapped often enough that it stays visible even when the AI did not name it. */
+const ALWAYS_SHOWN = new Set<CanonicalField>([...REQUIRED_FIELDS, 'coverage']);
 
 export function shownFields(
   suggested: ReadonlySet<CanonicalField>,
@@ -22,6 +29,6 @@ export function shownFields(
   // could act on.
   const keys: CanonicalField[] = [...GENERIC_FIELDS];
   for (const key of suggested) if (!keys.includes(key)) keys.push(key);
-  const shown = keys.filter(key => REQUIRED_FIELDS.has(key) || suggested.has(key) || typeof columns[key] === 'number');
+  const shown = keys.filter(key => ALWAYS_SHOWN.has(key) || suggested.has(key) || typeof columns[key] === 'number');
   return { keys, shown, folded: keys.filter(key => !shown.includes(key)) };
 }

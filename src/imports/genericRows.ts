@@ -122,6 +122,14 @@ export interface GenericParseInput {
    */
   defaultBuilding?: { id: string; name: string };
   /**
+   * The floor and unit the person typed beside the file — 「在裕安樓 5 樓 B 室」. Used only
+   * for a row whose own 樓層 and 單位 cells are both empty, and only when the row resolved
+   * to the same building. The place goes through the ordinary location rules: an existing
+   * one is used, a missing one is offered for creation, unreadable wording is refused.
+   * It is the person's own sentence, not a value the assistant invented (`CLAUDE.md` §4).
+   */
+  defaultPlace?: { buildingId: string; floorLabel: string; unitLabel: string };
+  /**
    * The sheet, already read. When given, the buffer is not decoded again; the dialog
    * re-parses on every edit and decoding a 700-row workbook each time would be wasteful.
    */
@@ -324,6 +332,8 @@ export function parseGenericRows(input: GenericParseInput): GenericParseResult {
   let blankRows = 0;
   /** Rows that got their building from what the person typed, not from the sheet. */
   let defaultRows = 0;
+  /** Rows that got their floor/unit from what the person typed, not from the sheet. */
+  let defaultPlaceRows = 0;
 
   for (let index = input.headerRow; index < matrix.length; index++) {
     const original = matrix[index] ?? [];
@@ -354,8 +364,10 @@ export function parseGenericRows(input: GenericParseInput): GenericParseResult {
     if (!workerName) issues.push({ code: 'MISSING_WORKER', message: '未填工作員（紙本上落樓的同事，不是入 Excel 的人）。' });
 
     const coverage = readOption<CoverageStatus>(at(values, 'coverage'), coverageLabels, acceptedCoverage);
+    // A blank cell means the sheet did not state a result, not that it found nothing: the
+    // record is written without `coverage` and the place's earlier result keeps standing
+    // (CLAUDE.md §4). Only a value nobody can read blocks the row.
     if (coverage === false) issues.push({ code: 'COVERAGE', message: '「覆蓋結果」不是可選的寫法。' });
-    else if (coverage === undefined) issues.push({ code: 'MISSING_COVERAGE', message: '未填「覆蓋結果」。資料不足請選「暫無可靠記錄」，不能留空。' });
 
     const contactOutcome = readOption<ContactOutcome>(at(values, 'contactOutcome'), contactLabels, acceptedContact);
     if (contactOutcome === false) issues.push({ code: 'CONTACT', message: '「接觸結果」不是可選的寫法。' });
@@ -373,7 +385,14 @@ export function parseGenericRows(input: GenericParseInput): GenericParseResult {
     if (!action && followBits.length) issues.push({ code: 'MISSING_ACTION', message: '填了跟進資料，但沒寫「跟進行動」。請寫明要做什麼。' });
     if (action && dueDay && typeof dueDay === 'string' && day && typeof day === 'string' && dueDay < day) issues.push({ code: 'DUE_BEFORE_VISIT', message: '「確定跟進日期」早於到訪日期，請核對。' });
 
-    const floorText = optional(at(values, 'floor')), unitText = optional(at(values, 'unit'));
+    // A mark on the sheet page says 「this file is 5樓 B室」; it is applied only where both
+    // cells are empty and the building is the one that sentence named. A row that names
+    // its own floor or unit keeps it, even if it disagrees with the note.
+    const ownFloor = optional(at(values, 'floor')), ownUnit = optional(at(values, 'unit'));
+    const fallbackPlace = input.defaultPlace && buildingId === input.defaultPlace.buildingId && !ownFloor && !ownUnit
+      ? input.defaultPlace : undefined;
+    if (fallbackPlace) defaultPlaceRows++;
+    const floorText = ownFloor ?? fallbackPlace?.floorLabel, unitText = ownUnit ?? fallbackPlace?.unitLabel;
     let location: { floorId?: string; unitId?: string } | undefined;
     let waiting: Missing | undefined;
     if (buildingId) {
@@ -478,6 +497,9 @@ export function parseGenericRows(input: GenericParseInput): GenericParseResult {
   // on every line, but not that it was their own sentence rather than the sheet's.
   if (defaultRows && input.defaultBuilding) {
     notes.push(`${defaultRows} 行沒有填大廈，都按你在補充說明寫的「${input.defaultBuilding.name}」處理。要改就改上面的文字再上傳。`);
+  }
+  if (defaultPlaceRows && input.defaultPlace) {
+    notes.push(`${defaultPlaceRows} 行沒有填樓層／單位，都按你在補充說明寫的「${input.defaultPlace.floorLabel} ${input.defaultPlace.unitLabel}」處理。要改就改上面的文字再上傳。`);
   }
 
   const counts = { READY: 0, NEEDS_REVIEW: 0, INVALID: 0 };

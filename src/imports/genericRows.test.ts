@@ -75,12 +75,21 @@ describe('a row that can be written', () => {
 });
 
 describe('rows that need a person', () => {
-  it('does not fill a missing date, worker or coverage', () => {
-    const result = parse([row({ 1: '', 4: '', 5: '' })]);
+  it('does not fill a missing date or worker', () => {
+    const result = parse([row({ 1: '', 4: '' })]);
     const [first] = result.rows;
     expect(first.status).toBe('NEEDS_REVIEW');
     expect(first.input).toBeUndefined();
-    expect(first.issues.map(issue => issue.code)).toEqual(expect.arrayContaining(['MISSING_DATE', 'MISSING_WORKER', 'MISSING_COVERAGE']));
+    expect(first.issues.map(issue => issue.code)).toEqual(expect.arrayContaining(['MISSING_DATE', 'MISSING_WORKER']));
+  });
+
+  it('writes a blank 覆蓋結果 as no coverage at all, not as 「暫無可靠記錄」', () => {
+    // CLAUDE.md §4 (2026-10-25): a blank cell says nothing about coverage, so the place's
+    // earlier result keeps standing. Writing UNKNOWN would paint the place grey again.
+    const result = parse([row({ 5: '' })]);
+    expect(result.rows[0].status).toBe('READY');
+    expect(result.rows[0].input!.coverage).toBeUndefined();
+    expect(result.rows[0].issues.map(issue => issue.code)).not.toContain('MISSING_COVERAGE');
   });
 
   it('refuses an unreadable date instead of guessing the day order', () => {
@@ -306,14 +315,80 @@ describe('a sheet with no 大廈 column, and the building the person typed', () 
   });
 });
 
+describe('a sheet that never prints a floor or unit, and the place the person typed', () => {
+  const NO_PLACE = [
+    { key: 'occurredAt' as const, columnIndex: 0 }, { key: 'worker' as const, columnIndex: 1 },
+    { key: 'coverage' as const, columnIndex: 2 },
+  ];
+  const run = (rows: unknown[][], over: Partial<Parameters<typeof parseGenericRows>[0]> = {}) => {
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([['探訪日期', '負責同事', '覆蓋結果'], ...rows]), '探訪記錄');
+    return parseGenericRows({
+      buffer: XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer,
+      sheetName: '探訪記錄', headerRow: 1, mapping: NO_PLACE, snapshot: demoSnapshot,
+      fileName: '探訪.xlsx', now: '2026-10-23T02:00:00.000Z', newId: () => `p-${++counter}`, ...over,
+    });
+  };
+  const defaultBuilding = { id: building.id, name: building.name };
+  const defaultPlace = { buildingId: building.id, floorLabel: floor.label, unitLabel: unit.label };
+
+  it('puts rows with no place at the one the person typed, and says so', () => {
+    const result = run([['2026-10-05', '陳同事', '已嘗試接觸']], { defaultBuilding, defaultPlace });
+    expect(result.rows[0].status).toBe('READY');
+    expect(result.rows[0].input!.floorId).toBe(floor.id);
+    expect(result.rows[0].input!.unitId).toBe(unit.id);
+    expect(result.notes.join('')).toContain(`1 行沒有填樓層／單位，都按你在補充說明寫的「${floor.label} ${unit.label}」處理`);
+  });
+
+  it('leaves a row that names its own place where it says', () => {
+    const otherFloor = demoSnapshot.floors.find(item => item.buildingId === building.id && item.id !== floor.id)!;
+    const otherUnit = demoSnapshot.units.find(item => item.floorId === otherFloor.id && !item.parentUnitId)!;
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+      ['探訪日期', '樓層', '單位', '負責同事', '覆蓋結果'],
+      ['2026-10-05', otherFloor.label, otherUnit.label, '陳同事', '已嘗試接觸'],
+    ]), '探訪記錄');
+    const result = parseGenericRows({
+      buffer: XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer,
+      sheetName: '探訪記錄', headerRow: 1, snapshot: demoSnapshot, fileName: '探訪.xlsx',
+      now: '2026-10-23T02:00:00.000Z', newId: () => `p-${++counter}`,
+      mapping: [
+        { key: 'occurredAt', columnIndex: 0 }, { key: 'floor', columnIndex: 1 }, { key: 'unit', columnIndex: 2 },
+        { key: 'worker', columnIndex: 3 }, { key: 'coverage', columnIndex: 4 },
+      ],
+      defaultBuilding, defaultPlace,
+    });
+    expect(result.rows[0].input!.unitId).toBe(otherUnit.id);
+    expect(result.notes.join('')).not.toContain('沒有填樓層／單位');
+  });
+
+  it('does not put one building’s place on a row that resolved to another building', () => {
+    const other = demoSnapshot.buildings.find(item => item.id !== building.id)!;
+    const result = run([['2026-10-05', '陳同事', '已嘗試接觸']], {
+      defaultBuilding: { id: other.id, name: other.name }, defaultPlace,
+    });
+    expect(result.rows[0].input!.floorId).toBeUndefined();
+    expect(result.rows[0].input!.unitId).toBeUndefined();
+    expect(result.notes.join('')).not.toContain('沒有填樓層／單位');
+  });
+});
+
 describe('cells changed after the plan was shown', () => {
   it('reads an edit exactly like the cell had said so in the first place', () => {
-    const before = parse([row({ 5: '' })]);
+    const before = parse([row({ 1: '' })]);
     expect(before.rows[0].status).toBe('NEEDS_REVIEW');
-    expect(before.rows[0].issues.map(issue => issue.code)).toContain('MISSING_COVERAGE');
+    expect(before.rows[0].issues.map(issue => issue.code)).toContain('MISSING_DATE');
+
+    const after = parse([row({ 1: '' })], { overrides: [{ row: 2, column: 1, value: '2026-10-11' }] });
+    expect(after.rows[0].status).toBe('READY');
+    expect(after.rows[0].input!.occurredAt).toBe('2026-10-11');
+  });
+
+  it('fills a blank 覆蓋結果 cell from a person without changing the other cells', () => {
+    const before = parse([row({ 5: '' })]);
+    expect(before.rows[0].input!.coverage).toBeUndefined();
 
     const after = parse([row({ 5: '' })], { overrides: [{ row: 2, column: 5, value: '已嘗試接觸' }] });
-    expect(after.rows[0].status).toBe('READY');
     expect(after.rows[0].input!.coverage).toBe('ATTEMPTED');
   });
 

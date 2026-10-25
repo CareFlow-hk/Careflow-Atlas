@@ -31,6 +31,16 @@ export const cellKey = (row: number, column: number) => `c:${row}:${column}`;
 /** A field the sheet has no column for; it becomes a synthetic column when read. */
 export const fieldKey = (row: number, field: CanonicalField) => `f:${row}:${field}`;
 
+/**
+ * The key a value for `field` in `row` is stored under: the sheet's own cell when it has
+ * that column, a field of its own when it does not. The one place that decides this, so
+ * the compact table and the row editor cannot drift apart.
+ */
+export const fieldEditKey = (row: number, field: CanonicalField, columns: Partial<Record<CanonicalField, number | null>>) => {
+  const column = columns[field];
+  return typeof column === 'number' ? cellKey(row, column) : fieldKey(row, field);
+};
+
 export type EditTarget =
   | { kind: 'cell'; row: number; column: number }
   | { kind: 'field'; row: number; field: CanonicalField };

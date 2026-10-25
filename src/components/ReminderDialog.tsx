@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { buildReminders, type ReminderTask, type ReminderViewer } from '../domain/reminders';
 import type { OutreachSnapshot } from '../domain/types';
-import { readReminderPrefs, reminderPrefsKey, writeReminderPrefs, type ReminderPrefs } from '../data/reminderPrefs';
+import { readReminderPrefs, reminderPrefsKey, REMINDER_WINDOWS, writeReminderPrefs, type ReminderPrefs } from '../data/reminderPrefs';
 import { ReminderAnswer } from './ReminderAnswer';
 
 /**
@@ -14,11 +14,9 @@ import { ReminderAnswer } from './ReminderAnswer';
  * The look-ahead is remembered per institution and account on this device only.
  */
 
+const WINDOW_LABELS: Record<number, string> = { 1: '今天', 3: '3 天', 7: '7 天', 14: '14 天' };
 const WINDOWS: { days: number | null; label: string }[] = [
-  { days: 1, label: '今天' },
-  { days: 3, label: '3 天' },
-  { days: 7, label: '7 天' },
-  { days: 14, label: '14 天' },
+  ...REMINDER_WINDOWS.map(days => ({ days, label: WINDOW_LABELS[days] })),
   { days: null, label: '全部' },
 ];
 
@@ -29,10 +27,12 @@ export interface ReminderDialogProps {
   viewer?: ReminderViewer;
   orgId?: string;
   accountId?: string;
+  /** The Hong Kong day the dialog is open on; a new value re-reads 今天 without waiting for data. */
+  today?: string;
   onOpenTask: (task: ReminderTask) => void;
 }
 
-export function ReminderDialog({ open, onClose, snapshot, viewer, orgId, accountId, onOpenTask }: ReminderDialogProps) {
+export function ReminderDialog({ open, onClose, snapshot, viewer, orgId, accountId, today, onOpenTask }: ReminderDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const key = reminderPrefsKey(orgId, accountId);
   const [prefs, setPrefs] = useState<ReminderPrefs>(() => readReminderPrefs(key));
@@ -43,8 +43,8 @@ export function ReminderDialog({ open, onClose, snapshot, viewer, orgId, account
   const name = viewer?.name;
   const role = viewer?.role;
   const book = useMemo(() => snapshot
-    ? buildReminders(snapshot, { viewer: name ? { name, role } : undefined, from: 0, to: prefs.days === null ? null : prefs.days - 1 })
-    : undefined, [snapshot, name, role, prefs.days]);
+    ? buildReminders(snapshot, { now: today, viewer: name ? { name, role } : undefined, from: 0, to: prefs.days === null ? null : prefs.days - 1 })
+    : undefined, [snapshot, name, role, prefs.days, today]);
 
   const choose = (days: number | null) => {
     setPrefs({ days });

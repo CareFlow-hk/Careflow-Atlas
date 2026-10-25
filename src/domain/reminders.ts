@@ -96,6 +96,22 @@ export function hkDay(now: Date | string = new Date()): string {
   return `${value('year')}-${value('month')}-${value('day')}`;
 }
 
+/**
+ * How long until the Hong Kong calendar day changes.
+ *
+ * A page left open past midnight would otherwise keep answering 今天 with yesterday's
+ * date: the list is computed in a memo that only re-runs when data changes. The caller
+ * waits this long and asks again. Never negative — at exactly midnight a whole day is due.
+ */
+export function msUntilNextHkDay(now: Date = new Date()): number {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Hong_Kong', hourCycle: 'h23', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(now);
+  const value = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find(part => part.type === type)?.value ?? 0);
+  const elapsed = ((value('hour') * 60 + value('minute')) * 60 + value('second')) * 1000 + now.getMilliseconds();
+  return Math.max(0, DAY - elapsed);
+}
+
 export function addDays(day: string, days: number): string {
   return new Date(Date.parse(`${day}T00:00:00Z`) + days * DAY).toISOString().slice(0, 10);
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildReminders, hkDay } from './reminders';
+import { buildReminders, hkDay, msUntilNextHkDay } from './reminders';
 import type { Observation, OutreachSnapshot } from './types';
 
 /*
@@ -40,6 +40,17 @@ describe('what is still open and when', () => {
   it('reads today in Hong Kong time, not the device time zone', () => {
     expect(hkDay(NOW)).toBe('2026-10-24');
     expect(hkDay('2026-10-24T17:00:00Z')).toBe('2026-10-25');
+  });
+
+  it('knows how long the page can sit open before 今天 has changed', () => {
+    const hour = 3_600_000;
+    // 15:59:30Z is 23:59:30 in Hong Kong: half a minute to the next day.
+    expect(msUntilNextHkDay(new Date('2026-10-24T15:59:30Z'))).toBe(30_000);
+    // Exactly Hong Kong midnight: a whole day is due, not zero.
+    expect(msUntilNextHkDay(new Date('2026-10-24T16:00:00Z'))).toBe(24 * hour);
+    // Noon in Hong Kong.
+    expect(msUntilNextHkDay(new Date('2026-10-24T04:00:00Z'))).toBe(12 * hour);
+    expect(msUntilNextHkDay(new Date('2026-10-24T04:00:00.250Z'))).toBe(12 * hour - 250);
   });
 
   it('sorts every task into overdue, today, soon, later or unscheduled', () => {

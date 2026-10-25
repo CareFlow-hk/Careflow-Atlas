@@ -14,15 +14,22 @@ export interface ReminderPrefs {
 
 export const DEFAULT_REMINDER_DAYS = 3;
 
+/** The windows the dialog offers. A stored value outside this list is not a choice anyone made. */
+export const REMINDER_WINDOWS = [1, 3, 7, 14] as const;
+
 export function reminderPrefsKey(orgId?: string, accountId?: string): string {
   return orgId && accountId ? `careflow-atlas.org.${orgId}.${accountId}.reminders` : 'careflow-atlas.device.reminders';
 }
 
-/** Only whole days between 1 and 365, or "everything". Anything else is not a preference. */
+/**
+ * Only the windows the dialog offers, or "everything". A hand-edited 5 would compute five
+ * days while leaving every window button unselected, so it is read as the default instead
+ * (`docs/AI_ASSISTANT.md` 8).
+ */
 export function parseReminderPrefs(value: unknown): ReminderPrefs {
   const days = (value as { days?: unknown } | null)?.days;
   if (days === null) return { days: null };
-  if (typeof days === 'number' && Number.isInteger(days) && days >= 1 && days <= 365) return { days };
+  if (typeof days === 'number' && (REMINDER_WINDOWS as readonly number[]).includes(days)) return { days };
   return { days: DEFAULT_REMINDER_DAYS };
 }
 

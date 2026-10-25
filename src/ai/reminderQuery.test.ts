@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { isReminderQuestion, readReminderQuestion } from './reminderQuery';
+import type { Observation, OutreachSnapshot } from '../domain/types';
+import { isReminderQuestion, readReminderQuestion, reminderBook, shouldAnswerReminder } from './reminderQuery';
 
 /*
  * Only an actual question is answered from the workspace. A visit note that mentions
@@ -48,5 +49,66 @@ describe('which days the question is about', () => {
 
   it('reads 「全部」 as no upper bound', () => {
     expect(readReminderQuestion('所有未完成的跟進', today)).toEqual({ from: 0, to: null, label: '所有未完成的跟進' });
+  });
+});
+
+describe('which messages the dialog answers from the workspace', () => {
+  it('answers a task question when no file came with it', () => {
+    expect(shouldAnswerReminder('今天還有什麼未完成的跟進？')).toBe(true);
+    expect(shouldAnswerReminder('今天還有什麼未完成的跟進？', { hasFile: false, asReminder: true })).toBe(true);
+  });
+
+  it('keeps a sheet on the sheet route, even when the note beside it reads like a question', () => {
+    // 「在裕安樓增加以下記錄，還有什麼未完成？」 is that sheet's heading: answering it as a
+    // task list would drop the rows the person actually brought.
+    expect(shouldAnswerReminder('今天的跟進有什麼？', { hasFile: true })).toBe(false);
+  });
+
+  it('lets the person overrule the reading with 「這不是提醒」', () => {
+    expect(shouldAnswerReminder('今天還有什麼未完成的跟進？', { asReminder: false })).toBe(false);
+  });
+
+  it('leaves a visit note on the ordinary draft route', () => {
+    expect(shouldAnswerReminder('10月9日，3樓 A 室拍門無人應門，下星期再跟進。')).toBe(false);
+  });
+});
+
+describe('the list a question gets', () => {
+  const flags = { isSynthetic: true as const, provisional: true as const };
+  const NOW = new Date('2026-10-24T04:00:00Z'); // 12:00 in Hong Kong, still 24 October
+  const open = (id: string, followUp: NonNullable<Observation['followUp']>): Observation => ({
+    ...flags, id, visitId: 'v1', buildingId: 'b1', floorId: 'f1', unitId: 'u1',
+    occurredAt: '2026-10-20T02:00:00.000Z', recordedAt: '2026-10-20T02:00:00.000Z',
+    workerName: '合成工作員', coverage: 'VISITED_WITH_FINDING', evidence: [], followUp,
+  });
+  const snapshot: OutreachSnapshot = {
+    schemaVersion: '0.1-demo', isSynthetic: true, notice: '合成示例',
+    buildings: [{ ...flags, id: 'b1', name: '合成大廈', address: '合成地址', coordinates: { lng: 114.14, lat: 22.28 }, layoutDeclared: true }],
+    floors: [{ ...flags, id: 'f1', buildingId: 'b1', level: 1, label: '1樓' }],
+    units: [{ ...flags, id: 'u1', buildingId: 'b1', floorId: 'f1', label: '1樓 A室' }],
+    households: [], people: [], householdMemberships: [], householdResidences: [], memberships: [],
+    visits: [{ ...flags, id: 'v1', occurredAt: '2026-10-20T02:00:00.000Z', recordedAt: '2026-10-20T02:00:00.000Z', workerName: '合成工作員' }],
+    observations: [
+      open('o-today', { action: '再訪', status: 'OPEN', dueDate: '2026-10-24', assignee: '陳大文' }),
+      open('o-later', { action: '約見', status: 'OPEN', dueDate: '2026-10-30', assignee: '陳大文' }),
+      open('o-nobody', { action: '待分派', status: 'OPEN', dueDate: '2026-10-24' }),
+    ],
+  };
+
+  it('reads 「今天」 exactly as the reminder dialog does', () => {
+    const book = reminderBook(snapshot, '今天還有什麼未完成的跟進？', undefined, NOW);
+    expect(book.tasks.map(task => task.observationId).sort()).toEqual(['o-nobody', 'o-today']);
+  });
+
+  it('reads 「所有」 as every open task', () => {
+    const book = reminderBook(snapshot, '所有未完成的跟進', undefined, NOW);
+    expect(book.tasks.map(task => task.observationId).sort()).toEqual(['o-later', 'o-nobody', 'o-today']);
+  });
+
+  it('narrows the same question to an employee’s own tasks', () => {
+    const book = reminderBook(snapshot, '所有未完成的跟進', { name: '陳大文', role: 'MEMBER' }, NOW);
+    expect(book.ownOnly).toBe(true);
+    expect(book.tasks.map(task => task.observationId).sort()).toEqual(['o-later', 'o-today']);
+    expect(book.hidden).toEqual({ others: 0, unassigned: 1 });
   });
 });
