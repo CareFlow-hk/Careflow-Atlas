@@ -431,7 +431,7 @@ test('an AI-assisted record carries a readable marker, and the administrator can
   const record = { id: 'obs-ai', createdBy: { accountId: member.id, name: 'member' }, note: sealed('ai helped'), aiAssist: marker };
   // The first write has no earlier version to compare with, and is still checked.
   const first = await f.request('/api/workspace', { method: 'PUT', ...member, body: { snapshot: { ...base, observations: [record] } } });
-  assert.equal(first.status, 200); const version = first.value.version;
+  assert.equal(first.status, 200); let version = first.value.version;
   // The marker stays readable and only a count reaches the audit table, never the record.
   const aiAudit = f.auth.all("SELECT target FROM audit WHERE action='ai_assisted_write'");
   assert.equal(aiAudit.length, 1);
@@ -439,7 +439,13 @@ test('an AI-assisted record carries a readable marker, and the administrator can
   const stored = () => f.request('/api/workspace', member).then(result => result.value.snapshot);
   assert.deepEqual((await stored()).observations[0].aiAssist, marker);
 
-  // Only the providers this build can actually call may appear in a marker.
+  // Historical deepseek records must not lock future whole-workspace saves.
+  const savedAgain = await f.request('/api/workspace', { method: 'PUT', ...member, body: {
+    snapshot: { ...base, observations: [record] }, baseVersion: version,
+  } });
+  assert.equal(savedAgain.status, 200);
+  version = savedAgain.value.version;
+  // The whitelist accepts history, not selectable providers.
   const put = (snapshot, who = member) => f.request('/api/workspace', { method: 'PUT', ...who, body: { snapshot, baseVersion: version } });
   assert.equal((await put({ ...base, observations: [{ ...record, aiAssist: { ...marker, provider: 'some-vendor' } }] })).status, 400);
   // A sealed value would be unreadable to the administrator who has to see it.
