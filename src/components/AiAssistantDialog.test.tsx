@@ -43,6 +43,15 @@ describe('the assistant dialog', () => {
     expect(html).not.toContain('整理這份表');
   });
 
+  it('warns that AI sees all typed text and explains server processing', () => {
+    const html = render();
+    expect(html).toContain('請不要輸入姓名、電話等個人資料；AI 會讀到你輸入的全部文字。');
+    expect(html).toContain('aria-describedby="ai-personal-data-note"');
+    expect(html).toContain('經自家伺服器記憶體轉交 Azure');
+    expect(html).toContain('內容不落庫、不進伺服器日誌');
+    expect(html).not.toContain('不上傳、不進匯出檔');
+  });
+
   it('says what the assistant must not do', () => {
     const html = render();
     expect(html).toContain('AI 不會自己新增或改寫任何資料');

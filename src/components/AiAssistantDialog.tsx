@@ -586,12 +586,14 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
           <label className="cf-visually-hidden" htmlFor="ai-note">{aiEnabled ? '說一句，或貼上一段文字' : '問未完成的跟進'}</label>
           <textarea
             id="ai-note"
+            aria-describedby={aiEnabled ? 'ai-personal-data-note' : undefined}
             className="cf-ai__text"
             rows={4}
             value={text}
             placeholder={aiEnabled ? '貼上紙本原話、口述，或問一句…' : '問一句，例如：這兩天有什麼跟進？'}
             onChange={event => setText(event.target.value)}
           />
+          {aiEnabled && <p id="ai-personal-data-note" className="cf-ai__note">請不要輸入姓名、電話等個人資料；AI 會讀到你輸入的全部文字。</p>}
           {/* Examples, not a menu: the box above takes any sentence, and these only fill it in. */}
           <p className="cf-ai__hints">
             <span>試試</span>
@@ -637,7 +639,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
 
         <details className="cf-ai__about">
           <summary>使用說明</summary>
-          {aiEnabled && <p>文字和檔案可以一起處理：文字按每戶整理成多筆記錄，檔案整理成逐行記錄，列在同一份「將執行的目標」裡，按一次確認全部寫入。對談內容<strong>只留在這部裝置</strong>，不上傳、不進匯出檔。</p>}
+          {aiEnabled && <p>文字和檔案可以一起處理：文字按每戶整理成多筆記錄，檔案整理成逐行記錄，列在同一份「將執行的目標」裡，按一次確認全部寫入。對談紀錄<strong>只留在這部裝置</strong>，不進匯出檔；送交 AI 的文字會經自家伺服器記憶體轉交 Azure，內容不落庫、不進伺服器日誌。</p>}
           <p>問未完成跟進、或問「給我行動建議」，都在工作區本機計算，內容不會送交 AI；<strong>建議按記錄上的到期日排出先後</strong>，不會替任務補日期或分派負責人。員工帳號只會看到指派給自己的任務。</p>
           {aiEnabled && <>
             <p>貼上的文字會送交 AI；檔案會先顯示行數與欄數，姓名、電話等欄不會送出。放了檔案時，這段文字也是整份表的抬頭：寫「在裕安樓 5 樓 B 室」，沒有填大廈／樓層／單位的行就按它處理；行裡自己寫了位置就照行裡的。</p>
@@ -907,10 +909,11 @@ function PlanChatBox({ chat }: { chat: PlanChat }) {
       <p>AI：{aiUiText(turn.answer)}{turn.changed > 0 ? `（改了 ${turn.changed} 格）` : ''}</p>
     </li>)}</ol>}
     <form className="cf-ai__askform" onSubmit={event => { event.preventDefault(); chat.onAsk(); }}>
-      <input aria-label="叫 AI 改這份表" value={chat.value} disabled={chat.asking} placeholder="用一句話說明要改什麼"
+      <input aria-label="叫 AI 改這份表" aria-describedby="ai-patch-personal-data-note" value={chat.value} disabled={chat.asking} placeholder="用一句話說明要改什麼"
         onChange={event => chat.onChange(event.target.value)} />
       <button className="cf-button cf-button--primary" type="submit" disabled={chat.asking || !chat.value.trim()}>{chat.asking ? '正在核對…' : '請 AI 改'}</button>
     </form>
+    <p id="ai-patch-personal-data-note" className="cf-ai__note">請不要輸入姓名、電話等個人資料；AI 會讀到你輸入的全部文字。</p>
   </section>;
 }
 
