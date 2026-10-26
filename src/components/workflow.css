@@ -318,3 +318,7 @@
 @media(max-width:650px){.cf-reminder__group ul{max-height:none}}
 
 .cf-ai__form [aria-invalid="true"]{border-color:#b34738;background:#fff8f7;outline-color:#b34738}
+
+/* Each optional structure is a separate, readable decision in the target list. */
+.cf-ai__structures label { display: flex; align-items: flex-start; gap: .45rem; margin: .5rem 0; }
+.cf-ai__structures input { flex: 0 0 auto; margin-top: .2rem; }

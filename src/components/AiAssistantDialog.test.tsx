@@ -181,6 +181,11 @@ describe('the plan screen', () => {
     expect(markup).toContain('A 單位分成 2 間');
     const section = markup.match(/cf-ai__structures[^]*?<\/section>/)?.[0] ?? '';
     expect(section).not.toContain('checked');
+    const selected = { ...structural, selectedStructures: ['bldg-yu-an|3樓|a1室、a2室'] };
+    const accepted = renderToStaticMarkup(<FilePlanPanel plan={selected} canCreate edits={NO_EDITS} onEdit={() => undefined}
+      onEditMany={() => undefined} onChangeColumn={() => undefined} onBack={() => undefined} />);
+    expect(accepted).toContain('並新增 2 個樓層／單位');
+
   });
 
   it('keeps repaired rows held through edits until explicit confirmation, and re-holds invalidated rows', () => {

@@ -843,7 +843,7 @@ export function FilePlanPanel({ plan, canCreate, label, edits, chat, onConfirmRo
   const needsYear = plan.matrix.matrix.slice(plan.parse.headerRow).some(row => dateColumns.some(index => yearlessDate(row[index])));
   const { places, writable, candidates } = filePlanRows(plan, canCreate);
   const actions = planActions(places, writable);
-  const creating = places.length;
+  const creating = places.reduce((count, place) => count + (place.structureUnits?.length ?? 1), 0);
   const planned = new Set(writable.map(row => row.rowNumber));
   const skipped = result.rows.filter(row => !planned.has(row.rowNumber));
   const extras = unmappedColumns(preview, plan.columns);
