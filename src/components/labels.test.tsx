@@ -188,7 +188,7 @@ describe('the housing mark and the housing words are the same statement', () => 
       if (assessmentMarks[option.value]) expect(key).toContain(`${assessmentMarks[option.value]} ${option.label}`);
     }
     // 無更新 is the blank choice: no mark, and it stores nothing.
-    expect(editor).toContain(assessmentLabels.NOT_UPDATED);
+    expect(editor).not.toContain(assessmentLabels.NOT_UPDATED);
     expect(key).toContain(assessmentLabels.NOT_UPDATED);
     expect(assessmentMarks.NOT_UPDATED).toBe('');
   });
@@ -277,9 +277,9 @@ describe('the editor offers the shared option tables', () => {
     expect(impliedByCoverage('contactOutcome', 'VISITED_NO_FINDING')).toBe('CONTACTED');
   });
 
-  it('lets housing and source be left blank', () => {
+  it('requires housing and source without preselecting an answer', () => {
     expect(markup).toContain('value=""');
-    expect(markup).toContain(assessmentLabels.NOT_UPDATED);
+    expect(markup).not.toContain(assessmentLabels.NOT_UPDATED);
     expect(markup).toContain('未分類');
     for (const option of assessmentOptions) expect(markup).toContain(option.label);
     for (const option of sourceOptions) expect(markup).toContain(option.label);
@@ -315,8 +315,8 @@ describe('self-defined choices reach the menu (§10.4)', () => {
     for (const option of coverageOptionGroups) expect(plain).toContain(option.label);
     // The built-ins plus the blank choice, which states that this visit leaves the
     // earlier result — and its colour — as it was.
-    expect(count(plain)).toBe(menuChoices('coverage', {}).length + 1);
-    expect(count(markup)).toBe(menuChoices('coverage', {}).length + 2);
+    expect(count(plain)).toBe(menuChoices('coverage', {}).length);
+    expect(count(markup)).toBe(menuChoices('coverage', {}).length + 1);
   });
 
   it('reads a saved record back in the wording that was chosen', () => {
@@ -391,13 +391,15 @@ describe('the entry form has no free-text 「其他」', () => {
     expect(markup).not.toContain('cf-choice--other');
     expect(markup).not.toContain('>其他<');
   });
-  it('pre-selects the blank coverage choice, and requires none', () => {
+  it('requires all three choices without preselecting coverage', () => {
+    for (const name of ['coverageStatus', 'housingAssessment', 'sourceType']) {
+      const radios = [...markup.matchAll(new RegExp(`<input[^>]*name="${name}"[^>]*>`, 'g'))].map(match => match[0]);
+      expect(radios.length).toBeGreaterThan(0);
+      expect(radios.every(tag => tag.includes('required'))).toBe(true);
+      expect(radios.some(tag => tag.includes('value=""'))).toBe(false);
+    }
     const radios = [...markup.matchAll(/<input[^>]*name="coverageStatus"[^>]*>/g)].map(match => match[0]);
-    expect(radios.filter(tag => tag.includes('checked'))).toHaveLength(1);
-    // The one ticked is the blank choice: nothing is stored, so the earlier result stands.
-    expect(radios.find(tag => tag.includes('checked'))).toContain('value=""');
-    // No coverage choice is required any more; the date is the only required field.
-    expect(radios.some(tag => tag.includes('required'))).toBe(false);
+    expect(radios.filter(tag => tag.includes('checked'))).toHaveLength(0);
   });
   it('has one free-text box for the record, and folds the rest under 更多', () => {
     expect(markup).toContain('name="note"');
@@ -475,7 +477,7 @@ describe('the entry form for a whole selection', () => {
   it('asks the same three questions as a single record, in the same words', () => {
     for (const legend of ['覆蓋狀態', '住房判斷', '資料來源']) expect(batch).toContain(`<legend>${legend}`);
     for (const option of assessmentOptions) expect(batch).toContain(option.label);
-    expect(batch).toContain(assessmentLabels.NOT_UPDATED);
+    expect(batch).not.toContain(assessmentLabels.NOT_UPDATED);
   });
 
   /* A follow-up is one place needing one thing done; three units is three different things. */
@@ -534,15 +536,15 @@ describe('the form a 劏房 room opens with', () => {
   /* The one case the review asked to change: no record, no answer. The blank choice is
      ticked, and it stores nothing — so no earlier result is claimed either. */
   it('answers nothing at all for a room with no record', () => {
-    expect(chosen(editor({ defaultAssessment: 'STAFF_VERIFIED' }), 'coverageStatus')).toBe('');
+    expect(chosen(editor({ defaultAssessment: 'STAFF_VERIFIED' }), 'coverageStatus')).toBeUndefined();
   });
 
   /* Ordinary units keep opening unanswered: coverage on the blank choice and housing on
      its blank choice, both of which store nothing. */
   it('leaves an ordinary unit unanswered', () => {
     const plain = editor({});
-    expect(chosen(plain, 'coverageStatus')).toBe('');
-    expect(chosen(plain, 'housingAssessment')).toBe('');
+    expect(chosen(plain, 'coverageStatus')).toBeUndefined();
+    expect(chosen(plain, 'housingAssessment')).toBeUndefined();
   });
 });
 

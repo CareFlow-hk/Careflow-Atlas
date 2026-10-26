@@ -12,10 +12,9 @@ import { GENERIC_FIELDS } from '../imports/genericRows';
 
 /**
  * Without these the parser cannot place a row or read its visit; they are shown, badged
- * 必須, and a row missing one is never written. 覆蓋結果 is not one of them since
- * 2026-10-25: a blank cell is a visit that stated no result (CLAUDE.md §4).
+ * 必須, and a row missing one is never written (Oscar, 2026-10-26).
  */
-export const REQUIRED_FIELDS = new Set<CanonicalField>(['buildingId', 'buildingName', 'occurredAt', 'worker']);
+export const REQUIRED_FIELDS = new Set<CanonicalField>(['buildingId', 'buildingName', 'occurredAt', 'worker', 'coverage', 'assessment', 'sourceType']);
 
 /** Mapped often enough that it stays visible even when the AI did not name it. */
 const ALWAYS_SHOWN = new Set<CanonicalField>([...REQUIRED_FIELDS, 'coverage']);

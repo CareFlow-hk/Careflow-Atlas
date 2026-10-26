@@ -13,7 +13,7 @@
 import { Fragment, useEffect, useState, type ReactNode } from 'react';
 import { IDENTITY_FIELDS, canonicalOptions } from '../ai/contract';
 import type { OutboundPreview } from '../ai/preview';
-import { acceptedAssessment, acceptedContact, acceptedCoverage, assessmentLabels, contactLabels, coverageLabels } from '../domain/presentation';
+import { acceptedAssessment, acceptedContact, acceptedCoverage, acceptedSource, assessmentLabels, contactLabels, coverageLabels, sourceLabels } from '../domain/presentation';
 import { GENERIC_FIELDS, readOption, type ParsedRow } from '../imports/genericRows';
 import type { CanonicalField } from '../imports/profiles';
 import { cellKey, fieldEditKey, fieldKey, type EditSource, type PlanEdits } from './planEdits';
@@ -25,7 +25,7 @@ import { cellKey, fieldEditKey, fieldKey, type EditSource, type PlanEdits } from
  */
 const FILLABLE = new Set<CanonicalField>([
   'buildingName', 'floor', 'unit', 'occurredAt', 'occurredTime', 'worker', 'coverage',
-  'contactOutcome', 'assessment', 'note', 'followUpAction', 'followUpDueDate',
+  'contactOutcome', 'assessment', 'sourceType', 'note', 'followUpAction', 'followUpDueDate',
 ]);
 
 interface Item {
@@ -197,10 +197,10 @@ const TABLE_FIELDS: readonly TableField[] = [
   { field: 'occurredAt', label: '到訪日期', kind: 'date', required: true },
   { field: 'occurredTime', label: '到訪時間', kind: 'time' },
   { field: 'worker', label: '工作員', kind: 'text', required: true },
-  // 覆蓋結果 is optional since 2026-10-25: a blank cell is a visit that stated no result.
-  optionField('coverage', '覆蓋結果', coverageLabels, acceptedCoverage),
+  optionField('coverage', '覆蓋結果', coverageLabels, acceptedCoverage, true),
   optionField('contactOutcome', '接觸結果', contactLabels, acceptedContact),
-  optionField('assessment', '住房判斷', assessmentLabels, acceptedAssessment),
+  optionField('assessment', '住房判斷', assessmentLabels, acceptedAssessment, true),
+  optionField('sourceType', '資料來源', sourceLabels, acceptedSource, true),
   { field: 'note', label: '備註', kind: 'text' },
 ];
 
@@ -209,7 +209,7 @@ const stillMissing = (row: ParsedRow, field: CanonicalField): boolean =>
   field === 'buildingName' ? !row.buildingName
     : field === 'occurredAt' ? !row.occurredAt
     : field === 'worker' ? !row.workerName
-    : false;
+    : row.issues.some(issue => issue.code === ({ coverage: 'MISSING_COVERAGE', assessment: 'MISSING_ASSESSMENT', sourceType: 'MISSING_SOURCE' } as Record<string, string>)[field]);
 
 const dayOf = (row: ParsedRow) => row.occurredAt?.slice(0, 10) ?? '';
 const timeOf = (row: ParsedRow) => row.occurredAt && row.occurredAt.length > 10 ? row.occurredAt.slice(11, 16) : '';

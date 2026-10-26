@@ -3,7 +3,23 @@ import { describe, expect, it } from 'vitest';
 import { demoSnapshot } from '../data/demoFixture';
 import { floorNumber } from '../domain/structure';
 import type { CanonicalField } from './profiles';
-import { parseGenericRows, readSheetMatrix } from './genericRows';
+import { parseGenericRows as parseRows, readSheetMatrix } from './genericRows';
+
+// These location/date fixtures explicitly include the newly required housing/source
+// answers. Tests of absent answers below call parseRows directly, without this fixture.
+const parseGenericRows = (input: Parameters<typeof parseRows>[0]) => {
+  const sheet = input.matrix ?? readSheetMatrix(input.buffer, input.sheetName)!;
+  const matrix = sheet.matrix.map((row, index) => {
+    const copy = [...row];
+    if (index >= input.headerRow && row.some(value => value !== '' && value != null)) {
+      copy[62] = 'UNKNOWN'; copy[63] = 'STAFF_OBSERVATION';
+    }
+    return copy;
+  });
+  return parseRows({ ...input, matrix: { ...sheet, matrix }, mapping: [
+    ...input.mapping, { key: 'assessment', columnIndex: 62 }, { key: 'sourceType', columnIndex: 63 },
+  ] });
+};
 
 const building = demoSnapshot.buildings[0];
 const unit = demoSnapshot.units.find(item => item.buildingId === building.id && !item.parentUnitId)!;
@@ -83,13 +99,22 @@ describe('rows that need a person', () => {
     expect(first.issues.map(issue => issue.code)).toEqual(expect.arrayContaining(['MISSING_DATE', 'MISSING_WORKER']));
   });
 
-  it('writes a blank 覆蓋結果 as no coverage at all, not as 「暫無可靠記錄」', () => {
-    // CLAUDE.md §4 (2026-10-25): a blank cell says nothing about coverage, so the place's
-    // earlier result keeps standing. Writing UNKNOWN would paint the place grey again.
+  it('keeps absent coverage in review until a person supplies it', () => {
     const result = parse([row({ 5: '' })]);
-    expect(result.rows[0].status).toBe('READY');
-    expect(result.rows[0].input!.coverage).toBeUndefined();
-    expect(result.rows[0].issues.map(issue => issue.code)).not.toContain('MISSING_COVERAGE');
+    expect(result.rows[0].status).toBe('NEEDS_REVIEW');
+    expect(result.rows[0].input).toBeUndefined();
+    expect(result.rows[0].issues.map(issue => issue.code)).toContain('MISSING_COVERAGE');
+  });
+
+  it.each(['coverage', 'assessment', 'sourceType'] as const)('requires %s even when other answers are present', key => {
+    const mapping = [...MAPPING, { key: 'assessment' as const, columnIndex: 7 }, { key: 'sourceType' as const, columnIndex: 8 }];
+    const values = [...row(), 'UNKNOWN', 'STAFF_OBSERVATION'];
+    values[mapping.find(field => field.key === key)!.columnIndex] = '';
+    const result = parseRows({ buffer: book([values]), sheetName: '探訪', headerRow: 1, mapping, snapshot: demoSnapshot, fileName: '必填合成.xlsx' });
+    expect(result.rows[0].status).toBe('NEEDS_REVIEW');
+    expect(result.rows[0].input).toBeUndefined();
+    const filled = parseRows({ buffer: book([[...row(), 'UNKNOWN', 'STAFF_OBSERVATION']]), sheetName: '探訪', headerRow: 1, mapping, snapshot: demoSnapshot, fileName: '必填合成.xlsx' });
+    expect(filled.rows[0].status).toBe('READY');
   });
 
   it('refuses an unreadable date instead of guessing the day order', () => {
@@ -386,7 +411,7 @@ describe('cells changed after the plan was shown', () => {
 
   it('fills a blank 覆蓋結果 cell from a person without changing the other cells', () => {
     const before = parse([row({ 5: '' })]);
-    expect(before.rows[0].input!.coverage).toBeUndefined();
+    expect(before.rows[0].input).toBeUndefined();
 
     const after = parse([row({ 5: '' })], { overrides: [{ row: 2, column: 5, value: '已嘗試接觸' }] });
     expect(after.rows[0].input!.coverage).toBe('ATTEMPTED');

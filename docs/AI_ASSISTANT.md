@@ -423,7 +423,7 @@ POST /api/ai/assist
 - 文字被拒、文件有效 → 仍然进入第二屏，只显示檔案部分，文字那一段换成一句固定说明
   （「這段文字沒有另外整理成一筆記錄，只用作這次讀表的補充說明」），文字留在输入框。
   一次拒绝不取消另一半。
-- 两边都在 → **一个 footer**，两部分的就绪条件都要成立（文件至少一行可写、草稿的大厦／日期／工作员齐备），
+- 两边都在 → **一个 footer**，两部分的就绪条件都要成立（文件至少一行可写、草稿的大厦／日期／工作员／覆盖结果／住房判断／资料来源齐备），
   否则按钮不可按并写明缺哪一边——不允许按一次键只写了碰巧准备好的那一半。
 - 拒绝仍然按整份算：任何一段 JSON 不合契约，那一段整份作废，不保留部分结果。
 
@@ -985,7 +985,7 @@ POST /api/ai/assist
 | 文字命中两幢大厦 | 不套用任何预设，那些行照常报「未填大廈」（`src/domain/buildingMentions.test.ts`） |
 | 第二屏就地改一格 | 改的是 `(行号, 栏序)` override，整份表重判一次；改回原值等于撤销；改值可以让原本 `NEEDS_REVIEW` 的行变成 `READY`（`src/components/planEdits.test.ts`、`src/imports/genericRows.test.ts`） |
 | 原表没有的栏也能补 | 补「接觸結果」这类没有对应栏位的值，走额外栏序仍按同一套规则判定，写入的值与从原表读到的完全一样（`src/imports/genericRows.test.ts`） |
-| 覆蓋結果留空 | 原表那一栏空着，这一行照样 `READY`，写出的记录**没有** `coverage`（不是 `UNKNOWN`）；`08_超長儲存格_截斷.xlsx` 加上「在裕安樓」后 3 行全部可写（`src/imports/genericRows.test.ts`） |
+| 覆蓋結果、住房判斷或資料來源留空 | 行留在「不會寫入」，草稿不可执行；补齐后由人确认，不以默认值代填（2026-10-26 Oscar 决定） |
 | 文字说明单位 | 「在裕安樓 5 樓 B 室」＋一份没有楼层／单位栏的表：两格都空的行落到 5樓 B室，行里自己写了位置的不受影响；文字说两个地点时不挑一个、并写明原因（`src/domain/locationMentions.test.ts`、`src/imports/genericRows.test.ts`） |
 | 不会写入的表格 | 一行一列：每个表头一栏（大廈／到訪日期／覆蓋結果…），空格可点即改，勾选几行后可批量补同一栏；改完走同一个 override 层、整份表重判，行一补好就移到上面的目标清单（`src/components/AiAssistantDialog.test.tsx`、`src/components/planEdits.test.ts`） |
 | 对话只改现有行 | 提案里出现表外的行号、越界栏序、身份栏位、不送交 AI 的栏 → 整份作废，一格都不落了；`value: ""` 是清空而不是「没改」（`src/ai/contract.test.ts`） |

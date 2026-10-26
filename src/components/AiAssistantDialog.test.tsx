@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { demoSnapshot } from '../data/demoFixture';
 import type { DraftForm, FilePlan } from './AiAssistantDialog';
-import { AiAssistantDialog, FilePlanPanel, PlanView } from './AiAssistantDialog';
+import { AiAssistantDialog, FilePlanPanel, PlanView, draftComplete } from './AiAssistantDialog';
 import { shownFields } from './aiMappingFields';
 import { NO_EDITS } from './planEdits';
 import { PlanRowEditor, SkippedRowsTable } from './AiPlanRows';
@@ -163,9 +163,13 @@ describe('the plan screen', () => {
   describe('with a note in the same upload', () => {
     const form: DraftForm = {
       buildingId: 'bldg-yu-an', floor: '3樓', unit: 'A室', date: '2026-10-24', time: '',
-      worker: '陳同事', coverage: 'ATTEMPTED', contact: '', assessment: '',
+      worker: '陳同事', coverage: 'ATTEMPTED', contact: '', assessment: 'UNKNOWN', sourceType: 'STAFF_OBSERVATION',
       note: '', action: '', dueDate: '', assignee: '',
     };
+    it.each(['coverage', 'assessment', 'sourceType'] as const)('cannot execute without %s', field => {
+      expect(draftComplete(form)).toBe(true);
+      expect(draftComplete({ ...form, [field]: '' })).toBe(false);
+    });
     const text = {
       aiAssist: marker,
       value: {
@@ -187,7 +191,7 @@ describe('the plan screen', () => {
 
     it('will not let one press write only the half that was ready', () => {
       // The draft lost its worker, so neither footer may offer to run the pair.
-      expect(view({ form: { ...form, worker: '' } })).toContain('文字部分還缺');
+      expect(view({ form: { ...form, worker: '' } })).toContain('文字部分還有必填內容未填妥');
     });
 
     it('keeps the file part when the text was only a heading for it', () => {

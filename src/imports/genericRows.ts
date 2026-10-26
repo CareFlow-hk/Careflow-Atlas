@@ -364,16 +364,16 @@ export function parseGenericRows(input: GenericParseInput): GenericParseResult {
     if (!workerName) issues.push({ code: 'MISSING_WORKER', message: '未填工作員（紙本上落樓的同事，不是入 Excel 的人）。' });
 
     const coverage = readOption<CoverageStatus>(at(values, 'coverage'), coverageLabels, acceptedCoverage);
-    // A blank cell means the sheet did not state a result, not that it found nothing: the
-    // record is written without `coverage` and the place's earlier result keeps standing
-    // (CLAUDE.md §4). Only a value nobody can read blocks the row.
+    if (!coverage) issues.push({ code: 'MISSING_COVERAGE', message: '未填覆蓋結果。' });
     if (coverage === false) issues.push({ code: 'COVERAGE', message: '「覆蓋結果」不是可選的寫法。' });
 
     const contactOutcome = readOption<ContactOutcome>(at(values, 'contactOutcome'), contactLabels, acceptedContact);
     if (contactOutcome === false) issues.push({ code: 'CONTACT', message: '「接觸結果」不是可選的寫法。' });
     const assessment = readOption<HousingAssessment>(at(values, 'assessment'), assessmentLabels, acceptedAssessment);
+    if (assessment === undefined) issues.push({ code: 'MISSING_ASSESSMENT', message: '未填住房判斷。' });
     if (assessment === false) issues.push({ code: 'ASSESSMENT', message: '「住房判斷」不是可選的寫法。' });
     const sourceType = readOption<SourceType>(at(values, 'sourceType'), sourceLabels, acceptedSource);
+    if (sourceType === undefined) issues.push({ code: 'MISSING_SOURCE', message: '未填資料來源。' });
     if (sourceType === false) issues.push({ code: 'SOURCE', message: '「資料來源」不是可選的寫法。' });
     const category = readOption<SupportCategory>(at(values, 'followUpCategory'), supportCategoryLabels, {} as Record<string, SupportCategory>);
     if (category === false) issues.push({ code: 'CATEGORY', message: '「跟進類別」不是可選的寫法。' });

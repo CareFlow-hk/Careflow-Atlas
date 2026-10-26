@@ -1,7 +1,7 @@
 import { AlertCircle, CalendarDays, Save, X } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { previewState, type CoverageStatus, type HousingAssessment, type OptionField, type OptionNotes, type Observation } from "../domain/types";
-import { assessmentLabels, coverageNotUpdatedLabel, stateColors, supportCategoryLabels } from "../domain/presentation";
+import { stateColors, supportCategoryLabels } from "../domain/presentation";
 import { applyCoverageChange, markTouched, menuChoices, customOptionFor, type CustomOptions, type DependentFields } from "../domain/optionPrefs";
 
 /**
@@ -45,10 +45,9 @@ export interface ObservationDraft {
   subjectId?: string;
   /** A date alone is a complete answer: time is not required and is never invented. */
   occurredAt: string;
-  /** Absent when the visit stated no coverage; the place's earlier result keeps standing. */
-  coverage?: CoverageStatus;
-  assessment?: HousingAssessment;
-  sourceType?: "STAFF_OBSERVATION" | "RESIDENT_REPORT" | "UNKNOWN";
+  coverage: CoverageStatus;
+  assessment: HousingAssessment;
+  sourceType: "STAFF_OBSERVATION" | "RESIDENT_REPORT" | "UNKNOWN";
   optionNotes?: OptionNotes;
   note: string;
   evidence: string[];
@@ -118,10 +117,8 @@ const seedFields = (defaultCoverage?: CoverageStatus, defaultAssessment?: Housin
 });
 
 /*
- * v1 entry form. Nothing is pre-chosen for coverage on an ordinary unit. Leaving it at
- * the blank choice is a complete answer: the record says what this visit did
- * observe and the place's earlier coverage result keeps standing — the same reading the
- * housing row already uses for its own blank choice. Everything optional sits behind 「更多」.
+ * Coverage, housing and source must each be answered. Nothing is pre-chosen for
+ * coverage on an ordinary unit. Optional follow-up details sit behind 更多.
  * Tasks are closed from the task itself (標記完成), not from this form.
  *
  * A 劏房 room is the one subject that opens with a field already answered, and the two
@@ -190,12 +187,13 @@ export function ObservationEditor({ open, targetLabel, subjectId, batch, optionP
       const coverage = resolve("coverage", value("coverageStatus"));
       const assessment = resolve("assessment", fields.assessment?.value ?? "");
       const sourceType = resolve("sourceType", fields.sourceType?.value ?? "");
+      if (!coverage.value || !assessment.value || !sourceType.value) throw new Error("請填妥覆蓋狀態、住房判斷及資料來源。");
       // 接觸結果 is not asked, so it is not stored: a value nobody confirmed is not a fact.
       const optionNotes: OptionNotes = { coverage: coverage.note, assessment: assessment.note, sourceType: sourceType.note };
       await onSubmit({
         subjectId,
-        coverage: coverage.value as CoverageStatus | undefined,
-        assessment: assessment.value as HousingAssessment | undefined,
+        coverage: coverage.value as CoverageStatus,
+        assessment: assessment.value as HousingAssessment,
         sourceType: sourceType.value as ObservationDraft["sourceType"],
         optionNotes: Object.values(optionNotes).some(Boolean) ? optionNotes : undefined,
         occurredAt: occurredAtValue(occurredDate, value("occurredTime")),
@@ -221,23 +219,19 @@ export function ObservationEditor({ open, targetLabel, subjectId, batch, optionP
         {batch ? <p className="cf-editor__batch">會為已選的 {batch.units} 個單位各寫入一筆相同的記錄。</p> : null}
         {/* The dot beside a coverage choice is the colour it produces, from the same rule the map uses. */}
         <div className="cf-choice-grid">
-          {/* Not required: the blank choice is a real answer, and it stores nothing, so
-              the unit's last coverage result — and its colour — stands unchanged. */}
-          <ChoiceRow legend="覆蓋狀態" name="coverageStatus"
+          <ChoiceRow legend="覆蓋狀態" name="coverageStatus" required
             // Said only while the carried-over value is the one still chosen: once the
             // recorder picks another, nothing here is following the last record any more.
             note={defaultCoverage && fields.coverage?.value === defaultCoverage ? "沿用上次結果" : undefined}
-            choices={[{ value: "", label: coverageNotUpdatedLabel }, ...menuChoices("coverage", optionPrefs)]}
+            choices={menuChoices("coverage", optionPrefs)}
             value={fields.coverage?.value ?? ""}
             onChange={next => setFields({ ...applyCoverageChange(fields, resolved("coverage", next)), coverage: { value: next, touched: true } })}
             dotFor={choice => choice ? stateColors[previewState(resolved("coverage", choice) as CoverageStatus, undefined, false)] : undefined} />
-          {/* The blank choice stores nothing, so the unit's last judgement stands. Its
-              wording comes from the one table the elevation key and the ledger read. */}
-          <ChoiceRow legend="住房判斷" name="housingAssessment"
-            choices={[{ value: "", label: assessmentLabels.NOT_UPDATED }, ...menuChoices("assessment", optionPrefs)]}
+          <ChoiceRow legend="住房判斷" name="housingAssessment" required
+            choices={menuChoices("assessment", optionPrefs)}
             value={fields.assessment?.value ?? ""}
             onChange={next => setFields(markTouched(fields, "assessment", next))} />
-          <ChoiceRow legend="資料來源" name="sourceType"
+          <ChoiceRow legend="資料來源" name="sourceType" required
             choices={menuChoices("sourceType", optionPrefs)}
             value={fields.sourceType?.value ?? ""}
             onChange={next => setFields(markTouched(fields, "sourceType", next))} />
