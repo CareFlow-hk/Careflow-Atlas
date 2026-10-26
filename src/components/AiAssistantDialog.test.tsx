@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { demoSnapshot } from '../data/demoFixture';
 import type { DraftForm, FilePlan } from './AiAssistantDialog';
-import { AiAssistantDialog, FilePlanPanel, PlanView, draftComplete, draftProblems } from './AiAssistantDialog';
+import { AiAssistantDialog, FilePlanPanel, PlanView, draftComplete, draftProblems, filePlanRows, holdSkippedRows, confirmFileRows } from './AiAssistantDialog';
 import { shownFields } from './aiMappingFields';
 import { NO_EDITS } from './planEdits';
 import { PlanRowEditor, SkippedRowsTable } from './AiPlanRows';
@@ -135,7 +135,7 @@ describe('the plan screen', () => {
 
   it('lists the rows it will not write, instead of dropping them', () => {
     expect(html).toContain('不會寫入的 1 行');
-    expect(html).toContain('一行一個單位，一行一欄');
+    expect(html).toContain('一行一筆記錄，一行一欄');
   });
 
   it('puts each row it will not write on one line, under the headers it would be written with', () => {
@@ -172,6 +172,29 @@ describe('the plan screen', () => {
     expect(markup).toContain('A 單位分成 2 間');
     const section = markup.match(/cf-ai__structures[^]*?<\/section>/)?.[0] ?? '';
     expect(section).not.toContain('checked');
+  });
+
+  it('keeps repaired rows held through edits until explicit confirmation, and re-holds invalidated rows', () => {
+    const initial = holdSkippedRows(plan, true);
+    expect(initial.heldRows).toEqual([6]);
+    const repaired = holdSkippedRows({ ...initial, result: { ...plan.result, rows: [...plan.result.rows.slice(0, 2), { ...plan.result.rows[0], rowNumber: 6 }] } }, true);
+    expect(filePlanRows(repaired, true).candidates.map(row => row.rowNumber)).toEqual([2, 5, 6]);
+    expect(filePlanRows(repaired, true).writable.map(row => row.rowNumber)).toEqual([2, 5]);
+    const table = renderToStaticMarkup(<SkippedRowsTable rows={[repaired.result.rows[2]]} valuesOf={() => []} preview={preview}
+      columns={plan.columns} edits={NO_EDITS} onEdit={() => undefined} onEditMany={() => undefined} readyRows={new Set([6])} />);
+    expect(table).toContain('已補齊，待確認');
+    expect(table).toContain('確認這一行');
+    expect(table).toContain('更新清單');
+    const confirmed = confirmFileRows(repaired, [6], true);
+    expect(filePlanRows(confirmed, true).writable.map(row => row.rowNumber)).toEqual([2, 5, 6]);
+    const broken = holdSkippedRows({ ...confirmed, result: plan.result }, true);
+    expect(confirmFileRows(broken, [6], true).heldRows).toEqual([6]);
+  });
+
+  it('does not create a required location for an unconfirmed repaired row', () => {
+    const held = { ...plan, heldRows: [5] };
+    expect(filePlanRows(held, true).places).toEqual([]);
+    expect(filePlanRows(confirmFileRows(held, [5], true), true).places).toHaveLength(1);
   });
 
   it('never shows the key', () => {

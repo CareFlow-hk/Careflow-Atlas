@@ -255,6 +255,8 @@ function SelectCell({ item, onEdit }: { item: CellState; onEdit: PlanRowFieldsPr
 }
 
 export interface SkippedRowsProps {
+  readyRows?: ReadonlySet<number>;
+  onConfirmRows?: (rows: readonly number[]) => void;
   rows: readonly ParsedRow[];
   /** The worksheet row as it is, for the cells and for the full editor. */
   valuesOf: (rowNumber: number) => readonly unknown[];
@@ -266,7 +268,7 @@ export interface SkippedRowsProps {
   onEditMany: (changes: readonly { key: string; value: string | null }[], source: EditSource) => void;
 }
 
-export function SkippedRowsTable({ rows, valuesOf, preview, columns, edits, onEdit, onEditMany }: SkippedRowsProps) {
+export function SkippedRowsTable({ rows, valuesOf, preview, columns, edits, onEdit, onEditMany, readyRows, onConfirmRows }: SkippedRowsProps) {
   const [selected, setSelected] = useState<ReadonlySet<number>>(new Set());
   const [openRow, setOpenRow] = useState<number | null>(null);
   const [batchField, setBatchField] = useState<CanonicalField>('coverage');
@@ -284,6 +286,7 @@ export function SkippedRowsTable({ rows, valuesOf, preview, columns, edits, onEd
     onEditMany(picked.map(row => ({ key: fieldEditKey(row.rowNumber, field.field, columns), value: batchValue })), 'person');
   };
   return <>
+    <button type="button" className="cf-button cf-button--ghost" disabled={!rows.some(row => readyRows?.has(row.rowNumber))} onClick={() => onConfirmRows?.(rows.map(row => row.rowNumber))}>更新清單</button>
     <div className="cf-ai__batch">
       <span>批量補欄位：已選 {picked.length} 行</span>
       <select aria-label="批量補哪一欄" value={field.field} onChange={event => { setBatchField(event.target.value as CanonicalField); setBatchValue(''); }}>
@@ -311,7 +314,8 @@ export function SkippedRowsTable({ rows, valuesOf, preview, columns, edits, onEd
         </tr></thead>
         <tbody>{rows.map(row => {
           const values = valuesOf(row.rowNumber);
-          const reason = skipReason(row);
+          const ready = readyRows?.has(row.rowNumber);
+          const reason = ready ? '已補齊，待確認' : skipReason(row);
           return <Fragment key={row.rowNumber}>
             <tr className={selected.has(row.rowNumber) ? 'is-selected' : undefined}>
               <td className="cf-ai__pick">
@@ -327,7 +331,7 @@ export function SkippedRowsTable({ rows, valuesOf, preview, columns, edits, onEd
                   {item.kind === 'select' ? <SelectCell item={cell} onEdit={onEdit} /> : <Cell item={cell} onEdit={onEdit} />}
                 </td>;
               })}
-              <td className="cf-ai__why" title={reason}>{reason}</td>
+              <td className="cf-ai__why" title={reason}>{reason}{ready && <button type="button" className="cf-ai__link" onClick={() => onConfirmRows?.([row.rowNumber])}>確認這一行</button>}</td>
               <td className="cf-ai__more">
                 <button type="button" className="cf-ai__link" onClick={() => setOpenRow(current => current === row.rowNumber ? null : row.rowNumber)}>
                   {openRow === row.rowNumber ? '收起' : '詳情'}
@@ -351,7 +355,7 @@ export function SkippedSection(props: SkippedRowsProps) {
   const [open, setOpen] = useState(false);
   return <details className="cf-ai__skipped" onToggle={event => setOpen(event.currentTarget.open)}>
     <summary>不會寫入的 {props.rows.length} 行（可以展開修正）</summary>
-    <p className="cf-ai__note">一行一個單位，一行一欄。直接點格仔就可以補，或勾選幾行一次補同一欄；補好之後，這一行會移到上面的目標清單。</p>
+    <p className="cf-ai__note">一行一筆記錄，一行一欄。直接點格仔就可以補，或勾選幾行一次補同一欄；補好之後會留在原位，按「確認這一行」或「更新清單」才移到上面的目標清單。</p>
     {open && <SkippedRowsTable {...props} />}
   </details>;
 }

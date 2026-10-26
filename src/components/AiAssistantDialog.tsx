@@ -100,6 +100,8 @@ export interface FilePlan {
   matrix: SheetMatrix;
   result: GenericParseResult;
   selectedStructures?: readonly string[];
+  /** Repaired rows stay in place until an explicit row/list confirmation. */
+  heldRows?: readonly number[];
 }
 
 /** Everything a `FilePlan` is built from; the parse itself is always recomputed. */
@@ -263,20 +265,20 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
    */
   const withResult = (base: FilePlanBase, changes: PlanEdits): FilePlan => {
     const { mapping, overrides } = planInput(base.columns, changes);
-    return {
+    return holdSkippedRows({
       ...base,
       result: parseGenericRows({
         ...base.parse, mapping, matrix: base.matrix, overrides,
         snapshot: snapshot!, extraColumns: extraColumnsFor(base.preview, base.columns),
       }),
-    };
+    }, !!onApplyProposal);
   };
 
 
   /** A plan without the parse that is about to be recomputed. */
   const baseOf = (file: FilePlan): FilePlanBase => ({
     aiAssist: file.aiAssist, preview: file.preview, suggestion: file.suggestion,
-    columns: file.columns, parse: file.parse, matrix: file.matrix, selectedStructures: file.selectedStructures,
+    columns: file.columns, parse: file.parse, matrix: file.matrix, selectedStructures: file.selectedStructures, heldRows: file.heldRows,
   });
 
   /** One stage for one confirmed piece of work, whichever inputs went into it. */
@@ -449,6 +451,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
   const runPlanWith = (file: FilePlan | undefined, draft: TextPlan | undefined) => {
     if (!snapshot || (!file && !draft)) return;
     if (draft && (forms.length !== draft.drafts.length || forms.some(form => !draftComplete(form, snapshot, !!onApplyProposal)))) { fail(new Error('請先填妥全部草稿的必填內容。')); return; }
+    const approvedRows = new Set(file ? filePlanRows(file, !!onApplyProposal).writable.map(row => row.rowNumber) : []);
     let latest = snapshot;
     const made: string[] = [];
     if (file) {
@@ -475,7 +478,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
       // are writable, and anything still short of a date, worker or result stays out.
       const { mapping, overrides } = planInput(file.columns, edits);
       const result = parseGenericRows({ ...file.parse, mapping, matrix: file.matrix, overrides, snapshot: latest, extraColumns: extraColumnsFor(file.preview, file.columns) });
-      const chosen = plannedRows(result, new Set());
+      const chosen = plannedRows(result, new Set()).filter(row => approvedRows.has(row.rowNumber));
       if (!chosen.length && !draft) { setStage({ kind: 'error', message: '沒有任何一行可以寫入。未寫入的行都列在目標清單下面，並寫了原因。' }); return; }
       inputs.push(...chosen.map(row => ({ ...row.input!, aiAssist: file.aiAssist })));
     }
@@ -653,7 +656,11 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
           if (plan.source === 'text') return;
           const chosen = new Set(plan.file.selectedStructures ?? []);
           if (chosen.has(key)) chosen.delete(key); else chosen.add(key);
-          showPlan({ ...plan.file, selectedStructures: [...chosen] }, plan.source === 'both' ? plan.text : undefined);
+          showPlan(holdSkippedRows({ ...plan.file, selectedStructures: [...chosen] }, !!onApplyProposal), plan.source === 'both' ? plan.text : undefined);
+        }}
+        onConfirmRows={rows => {
+          if (plan.source === 'text') return;
+          showPlan(confirmFileRows(plan.file, rows, !!onApplyProposal), plan.source === 'both' ? plan.text : undefined);
         }}
         onChangeYear={year => {
           if (plan.source === 'text') return;
@@ -727,9 +734,10 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
  * writes it. Two sources stack with their own headings and their own rules, but they share
  * one footer — one press always means the whole list, never only the half that was ready.
  */
-export function PlanView({ plan, snapshot, forms, canCreate, notice, edits, chat, onToggleStructure, onChangeYear, onChangeColumn, onChangeForm, onEdit, onEditMany, onRun, onBack }: {
+export function PlanView({ plan, snapshot, forms, canCreate, notice, edits, chat, onConfirmRows, onToggleStructure, onChangeYear, onChangeColumn, onChangeForm, onEdit, onEditMany, onRun, onBack }: {
   plan: Plan; snapshot: OutreachSnapshot; forms: DraftForm[]; canCreate: boolean; notice?: string;
   edits: PlanEdits; chat?: PlanChat;
+  onConfirmRows?: (rows: readonly number[]) => void;
   onToggleStructure?: (key: string) => void;
   onChangeYear?: (year: number | undefined) => void;
   onChangeColumn: (key: CanonicalField, index: number | null) => void;
@@ -749,7 +757,7 @@ export function PlanView({ plan, snapshot, forms, canCreate, notice, edits, chat
     : '目標清單會在同一次寫入裡完成，以你的帳號署名，並標明「由 AI 協助」。';
   return <>
     {file && <FilePlanPanel plan={file} canCreate={canCreate} label={`檔案：${file.preview.fileName}`}
-      edits={edits} chat={chat} onToggleStructure={onToggleStructure} onChangeYear={onChangeYear} onChangeColumn={onChangeColumn} onEdit={onEdit} onEditMany={onEditMany} onBack={onBack} />}
+      edits={edits} chat={chat} onConfirmRows={onConfirmRows} onToggleStructure={onToggleStructure} onChangeYear={onChangeYear} onChangeColumn={onChangeColumn} onEdit={onEdit} onEditMany={onEditMany} onBack={onBack} />}
     {text && text.drafts.map((value, index) => <DraftPlanPanel key={index} snapshot={snapshot} value={value} form={forms[index] ?? blankDraft} canCreate={canCreate}
       label={`文字：第 ${index + 1}／${text.drafts.length} 筆記錄`} onChange={(key, value) => onChangeForm(index, key, value)} onBack={onBack} />)}
     {notice && <p className="cf-ai__note" role="status">{notice}</p>}
@@ -761,14 +769,31 @@ export function PlanView({ plan, snapshot, forms, canCreate, notice, edits, chat
 }
 
 /** The rows the file part can write, and the places it has to create first. */
-function filePlanRows(plan: FilePlan, canCreate: boolean) {
+export function filePlanRows(plan: FilePlan, canCreate: boolean) {
   // Without the structure edit nothing can be created, so the rows that wait for a new
   // floor/unit are not counted as writable — no footer may promise them. A place is only
   // created when it turns a row into something writable.
   const required = canCreate ? placesToCreate({ ...plan.result, pending: plan.result.pending.filter(place => !place.structureUnits) }) : [];
   const optional = canCreate ? plan.result.pending.filter(place => place.structureUnits && plan.selectedStructures?.includes(placeKey(place))) : [];
   const places = [...required, ...optional];
-  return { places, writable: plannedRows(plan.result, new Set(places.map(placeKey))) };
+  const candidates = plannedRows(plan.result, new Set(places.map(placeKey)));
+  const held = new Set(plan.heldRows ?? []);
+  const writable = candidates.filter(row => !held.has(row.rowNumber));
+  const approved = new Set(writable.map(row => row.rowNumber));
+  return { candidates, writable, places: [...required.filter(place => place.rowNumbers.some(row => approved.has(row))), ...optional] };
+}
+
+/** Remember blocked rows across every re-parse, including AI and bulk edits. */
+export function holdSkippedRows(plan: FilePlan, canCreate: boolean): FilePlan {
+  const candidates = new Set(filePlanRows(plan, canCreate).candidates.map(row => row.rowNumber));
+  return { ...plan, heldRows: [...new Set([...(plan.heldRows ?? []), ...plan.result.rows.filter(row => !candidates.has(row.rowNumber)).map(row => row.rowNumber)])] };
+}
+
+/** Confirmation only releases rows that currently pass all checks; it writes nothing. */
+export function confirmFileRows(plan: FilePlan, rows: readonly number[], canCreate: boolean): FilePlan {
+  const ready = new Set(filePlanRows(plan, canCreate).candidates.map(row => row.rowNumber));
+  const confirmed = new Set(rows.filter(row => ready.has(row)));
+  return { ...plan, heldRows: (plan.heldRows ?? []).filter(row => !confirmed.has(row)) };
 }
 
 /** What a draft record needs from the person, whichever screen is asking. */
@@ -800,8 +825,9 @@ export const draftComplete = (form: DraftForm, snapshot?: OutreachSnapshot, canC
  * Each record opens into the cells it came from: a value per header, the source of the
  * last change (人 or AI), and a way to supply a field the sheet never printed.
  */
-export function FilePlanPanel({ plan, canCreate, label, edits, chat, onToggleStructure, onChangeYear, onChangeColumn, onEdit, onEditMany, onRun, onBack }: {
+export function FilePlanPanel({ plan, canCreate, label, edits, chat, onConfirmRows, onToggleStructure, onChangeYear, onChangeColumn, onEdit, onEditMany, onRun, onBack }: {
   plan: FilePlan; canCreate: boolean; label?: string; edits: PlanEdits; chat?: PlanChat;
+  onConfirmRows?: (rows: readonly number[]) => void;
   onToggleStructure?: (key: string) => void;
   onChangeYear?: (year: number | undefined) => void;
   onChangeColumn: (key: CanonicalField, index: number | null) => void;
@@ -812,7 +838,7 @@ export function FilePlanPanel({ plan, canCreate, label, edits, chat, onToggleStr
   const { result, preview, suggestion } = plan;
   const dateColumns = [plan.columns.occurredAt, plan.columns.followUpDueDate].filter((index): index is number => typeof index === 'number');
   const needsYear = plan.matrix.matrix.slice(plan.parse.headerRow).some(row => dateColumns.some(index => yearlessDate(row[index])));
-  const { places, writable } = filePlanRows(plan, canCreate);
+  const { places, writable, candidates } = filePlanRows(plan, canCreate);
   const actions = planActions(places, writable);
   const creating = places.length;
   const planned = new Set(writable.map(row => row.rowNumber));
@@ -855,7 +881,8 @@ export function FilePlanPanel({ plan, canCreate, label, edits, chat, onToggleStr
       {extras.length > 0 && <p className="cf-ai__note">原表另有 {extras.length} 欄系統沒有對應（{extras.map(column => column.header || `第 ${column.columnIndex + 1} 欄`).join('、')}）：不用的話不用管，寫入時會把每一行的內容原樣記在備註，不會丟掉。</p>}
       {result.pending.length > 0 && !canCreate && <p className="cf-error"><AlertTriangle />結構編輯目前關閉，不能在這裡新增樓層或單位。請先在「編輯結構」新增，再回來執行。</p>}
       {skipped.length > 0 && <SkippedSection rows={skipped} valuesOf={valuesOf} preview={preview}
-        columns={plan.columns} edits={edits} onEdit={onEdit} onEditMany={onEditMany} />}
+        columns={plan.columns} edits={edits} onEdit={onEdit} onEditMany={onEditMany}
+        readyRows={new Set(candidates.map(row => row.rowNumber))} onConfirmRows={onConfirmRows} />}
       {chat && <PlanChatBox chat={chat} />}
     </section>
     <details className="cf-ai__mapping-details">
