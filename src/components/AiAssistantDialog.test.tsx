@@ -156,6 +156,14 @@ describe('the plan screen', () => {
     expect(skippedRows).not.toContain('確認並執行');
   });
 
+  it('asks for a sheet year without choosing one', () => {
+    const yearPlan = { ...plan, columns: { ...plan.columns, occurredAt: 1 }, matrix: { matrix: [['大廈', '日期'], ['裕安樓', '12/9']], date1904: false } };
+    const markup = renderToStaticMarkup(<FilePlanPanel plan={yearPlan} canCreate edits={NO_EDITS} onEdit={() => undefined}
+      onEditMany={() => undefined} onChangeColumn={() => undefined} onBack={() => undefined} />);
+    expect(markup).toContain('這份表是哪一年？');
+    expect(markup).toMatch(/aria-label="這份表是哪一年？"[^>]*value=""/);
+  });
+
   it('never shows the key', () => {
     expect(html).not.toContain('sk-');
   });

@@ -29,6 +29,7 @@ import { AlertTriangle, CheckCircle2, FileSpreadsheet, ShieldCheck, Sparkles, Up
 import { assessmentLabels, contactLabels, coverageLabels, aiCoverageLabels, sourceLabels } from '../domain/presentation';
 import type { ReminderAdvice, ReminderBook, ReminderTask, ReminderViewer } from '../domain/reminders';
 import type { NamedBuilding } from '../domain/buildingMentions';
+import { yearlessDate } from '../domain/sheetDate';
 import { mentionedPlace } from '../domain/locationMentions';
 import { proposeLocation, type LocationProposal } from '../domain/structure';
 import type { ContactOutcome, CoverageStatus, HousingAssessment, OutreachSnapshot, SaveObservationInput, SourceType } from '../domain/types';
@@ -625,6 +626,11 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
         notice={stage.kind === 'plan' ? stage.notice : undefined}
         edits={edits}
         chat={plan.source === 'text' ? undefined : { turns: chat, value: ask, asking, onChange: setAsk, onAsk: () => void askPlan() }}
+        onChangeYear={year => {
+          if (plan.source === 'text') return;
+          const base = baseOf(plan.file);
+          showPlan(withResult({ ...base, parse: { ...base.parse, sheetYear: year } }, edits), plan.source === 'both' ? plan.text : undefined);
+        }}
         onChangeColumn={changeColumn} onChangeForm={(key, value) => setForm({ ...form, [key]: value })}
         onEdit={editCell} onEditMany={editCells}
         onRun={runPlan} onBack={() => { setStage({ kind: 'idle' }); setEdits(NO_EDITS); setChat([]); setAsk(''); }} />}
@@ -692,9 +698,10 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
  * writes it. Two sources stack with their own headings and their own rules, but they share
  * one footer — one press always means the whole list, never only the half that was ready.
  */
-export function PlanView({ plan, snapshot, form, canCreate, notice, edits, chat, onChangeColumn, onChangeForm, onEdit, onEditMany, onRun, onBack }: {
+export function PlanView({ plan, snapshot, form, canCreate, notice, edits, chat, onChangeYear, onChangeColumn, onChangeForm, onEdit, onEditMany, onRun, onBack }: {
   plan: Plan; snapshot: OutreachSnapshot; form: DraftForm; canCreate: boolean; notice?: string;
   edits: PlanEdits; chat?: PlanChat;
+  onChangeYear?: (year: number | undefined) => void;
   onChangeColumn: (key: CanonicalField, index: number | null) => void;
   onChangeForm: (key: keyof DraftForm, value: string) => void;
   onEdit: (key: string, value: string | null, source: EditSource) => void;
@@ -714,7 +721,7 @@ export function PlanView({ plan, snapshot, form, canCreate, notice, edits, chat,
     : '兩部分會在同一次寫入裡完成，以你的帳號署名，並標明「由 AI 協助」。';
   return <>
     {file && <FilePlanPanel plan={file} canCreate={canCreate} label={both ? `檔案：${file.preview.fileName}` : undefined}
-      edits={edits} chat={chat} onChangeColumn={onChangeColumn} onEdit={onEdit} onEditMany={onEditMany} onRun={both ? undefined : onRun} onBack={onBack} />}
+      edits={edits} chat={chat} onChangeYear={onChangeYear} onChangeColumn={onChangeColumn} onEdit={onEdit} onEditMany={onEditMany} onRun={both ? undefined : onRun} onBack={onBack} />}
     {text && <DraftPlanPanel snapshot={snapshot} value={text.value} form={form} canCreate={canCreate}
       label={both ? '文字：由這段原話整理的 1 筆記錄' : undefined} onChange={onChangeForm}
       onRun={both ? undefined : onRun} onBack={onBack} />}
@@ -746,14 +753,17 @@ export const draftComplete = (form: DraftForm) => !!form.buildingId && !!form.da
  * Each record opens into the cells it came from: a value per header, the source of the
  * last change (人 or AI), and a way to supply a field the sheet never printed.
  */
-export function FilePlanPanel({ plan, canCreate, label, edits, chat, onChangeColumn, onEdit, onEditMany, onRun, onBack }: {
+export function FilePlanPanel({ plan, canCreate, label, edits, chat, onChangeYear, onChangeColumn, onEdit, onEditMany, onRun, onBack }: {
   plan: FilePlan; canCreate: boolean; label?: string; edits: PlanEdits; chat?: PlanChat;
+  onChangeYear?: (year: number | undefined) => void;
   onChangeColumn: (key: CanonicalField, index: number | null) => void;
   onEdit: (key: string, value: string | null, source: EditSource) => void;
   onEditMany: (changes: readonly { key: string; value: string | null }[], source: EditSource) => void;
   onRun?: () => void; onBack: () => void;
 }) {
   const { result, preview, suggestion } = plan;
+  const dateColumns = [plan.columns.occurredAt, plan.columns.followUpDueDate].filter((index): index is number => typeof index === 'number');
+  const needsYear = plan.matrix.matrix.slice(plan.parse.headerRow).some(row => dateColumns.some(index => yearlessDate(row[index])));
   const { places, writable } = filePlanRows(plan, canCreate);
   const actions = planActions(places, writable);
   const creating = places.length;
@@ -771,6 +781,8 @@ export function FilePlanPanel({ plan, canCreate, label, edits, chat, onChangeCol
   return <>
     <section className="cf-ai__preview">
       <h3>{label ?? '將執行的目標'}</h3>
+      {needsYear && <label className="cf-ai__year">這份表是哪一年？<input aria-label="這份表是哪一年？" type="number" min="1000" max="9999" step="1" placeholder="請填四位數年份" value={plan.parse.sheetYear ?? ''}
+        onChange={event => onChangeYear?.(event.target.value ? Number(event.target.value) : undefined)} /><small>只套用原表沒有年份的日期，整份表會重新核對。</small></label>}
       <p className="cf-ai__note">{preview.fileName}：「{preview.sheetName}」共 {preview.totalRows} 行 → 寫入 {writable.length} 筆記錄{creating ? `，並新增 ${creating} 個樓層／單位` : ''}{skipped.length ? `；${skipped.length} 行不會寫入（原因在下面）` : ''}。</p>
       {totalChanged > 0 && <p className="cf-ai__note" role="status">已改 {totalChanged} 格（人手 {changed.person}、AI {changed.ai}）。每次改動都由系統重新核對整份表，不是只改畫面上的字。</p>}
       {result.notes.map((note, index) => <p className="cf-error" key={index}><AlertTriangle />{note}</p>)}

@@ -9,6 +9,7 @@
  * building makes a row `NEEDS_REVIEW` or `INVALID`, never a default.
  */
 import * as XLSX from 'xlsx';
+import { yearlessDate, sheetDateWithYear } from '../domain/sheetDate';
 import { acceptedAssessment, acceptedContact, acceptedCoverage, acceptedSource, assessmentLabels, contactLabels, coverageLabels, sourceLabels, supportCategoryLabels } from '../domain/presentation';
 import { effectiveObservations, type Building, type ContactOutcome, type CoverageStatus, type HousingAssessment, type OutreachSnapshot, type SaveObservationInput, type SourceType, type SupportCategory } from '../domain/types';
 import { findPaperLocation, floorNumber, proposeLocation, readPaperFloor } from '../domain/structure';
@@ -140,6 +141,8 @@ export interface GenericParseInput {
    * (dates, options, locations, duplicates, corrections) sees the changed sheet.
    */
   overrides?: readonly CellOverride[];
+  /** Explicit year chosen by the person for this sheet; never defaults to this year. */
+  sheetYear?: number;
   now?: string;
   /** Test seam; production uses `crypto.randomUUID`. */
   newId?: () => string;
@@ -216,6 +219,7 @@ export function parseGenericRows(input: GenericParseInput): GenericParseResult {
   };
   const readDay = (value: unknown): string | undefined | false => {
     if (value == null || str(value).trim() === '') return undefined;
+    if (yearlessDate(value)) return sheetDateWithYear(value, input.sheetYear);
     let day = str(value).trim();
     if (typeof value === 'number') {
       const parsed = XLSX.SSF.parse_date_code(value, { date1904 });
@@ -355,7 +359,9 @@ export function parseGenericRows(input: GenericParseInput): GenericParseResult {
 
     const day = readDay(at(values, 'occurredAt'));
     if (day === false) issues.push({ code: 'DATE', message: '「到訪日期」看不懂是哪一天。請用 Excel 日期，或寫成 2026-10-09；不知道就留空。' });
-    if (day === undefined) issues.push({ code: 'MISSING_DATE', message: '未填到訪日期。系統不會替你補日期。' });
+    if (day === undefined) issues.push(yearlessDate(at(values, 'occurredAt'))
+      ? { code: 'MISSING_YEAR', message: '缺年份。請先選擇「這份表是哪一年？」。' }
+      : { code: 'MISSING_DATE', message: '未填到訪日期。系統不會替你補日期。' });
 
     const time = readTime(at(values, 'occurredTime'));
     if (time === false) issues.push({ code: 'TIME', message: '「到訪時間」看不懂。請寫成 24 小時制，例如 19:05；不知道就留空。' });
@@ -380,6 +386,7 @@ export function parseGenericRows(input: GenericParseInput): GenericParseResult {
 
     const action = optional(at(values, 'followUpAction'));
     const dueDay = readDay(at(values, 'followUpDueDate'));
+    if (dueDay === undefined && yearlessDate(at(values, 'followUpDueDate'))) issues.push({ code: 'MISSING_YEAR', message: '跟進日期缺年份。請先選擇「這份表是哪一年？」。' });
     if (dueDay === false) issues.push({ code: 'DUE_DATE', message: '「確定跟進日期」看不懂是哪一天；不知道就留空。' });
     const followBits = [category, optional(at(values, 'followUpAssignee')), dueDay, optional(at(values, 'followUpTimingNote'))].filter(Boolean);
     if (!action && followBits.length) issues.push({ code: 'MISSING_ACTION', message: '填了跟進資料，但沒寫「跟進行動」。請寫明要做什麼。' });

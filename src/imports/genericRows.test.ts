@@ -452,3 +452,18 @@ describe('cells changed after the plan was shown', () => {
     expect(result.rows[0].input!.coverage).toBe('ATTEMPTED');
   });
 });
+
+describe('one explicitly chosen year for a sheet', () => {
+  it('keeps yearless rows in review, then reparses all of them with the chosen year', () => {
+    const rows = [row({ 1: '12/9' }), row({ 1: '26/9' }), row({ 1: '8/10（三）' }), row({ 1: '2025-10-08' })];
+    const before = parse(rows);
+    expect(before.rows.slice(0, 3).every(row => row.status === 'NEEDS_REVIEW' && row.issues.some(issue => issue.code === 'MISSING_YEAR'))).toBe(true);
+    const after = parse(rows, { sheetYear: 2026 });
+    expect(after.rows.map(row => row.input?.occurredAt)).toEqual(['2026-09-12', '2026-09-26', '2026-10-08', '2025-10-08']);
+    expect(parse(rows, { sheetYear: undefined }).counts.NEEDS_REVIEW).toBe(3);
+  });
+  it('refuses an impossible date after a year is chosen', () => {
+    expect(parse([row({ 1: '29/2' })], { sheetYear: 2026 }).rows[0].input).toBeUndefined();
+    expect(parse([row({ 1: '29/2' })], { sheetYear: 2028 }).rows[0].input?.occurredAt).toBe('2028-02-29');
+  });
+});
