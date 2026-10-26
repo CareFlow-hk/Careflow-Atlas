@@ -101,3 +101,28 @@ describe('the three coverage results', () => {
     expect(read({ coverage }).ok).toBe(false);
   });
 });
+
+describe('multiple households from one sentence', () => {
+  const ctx = { ...context, text: '2026-10-09 19:05 阿珊去裕安樓3樓，B室冇人應門，C室合成街坊話業主叫佢搬' };
+  const item = (unitLabel: string, note: string) => {
+    const { status: _status, ...value } = draft({ unitLabel, note, missing: [] });
+    void _status;
+    return value;
+  };
+  it('keeps the two households, contact outcomes and notes separate', async () => {
+    const { readDrafts } = await import('./contract');
+    const result = readDrafts({ status: 'DRAFT', drafts: [item('B室', '冇人應門'), { ...item('C室', '業主叫佢搬'), contactOutcome: 'CONTACTED', sourceType: 'RESIDENT_REPORT' }] }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.drafts.map(row => [row.unitLabel, row.contactOutcome, row.note])).toEqual([
+      ['B室', 'NO_ANSWER', '冇人應門'], ['C室', 'CONTACTED', '業主叫佢搬'],
+    ]);
+  });
+  it('discards the entire array when one item is invalid or a single legacy object is returned', async () => {
+    const { readDrafts } = await import('./contract');
+    expect(readDrafts(draft(), ctx).ok).toBe(false);
+    expect(readDrafts({ status: 'DRAFT', drafts: [item('B室', '冇人應門'), { ...item('C室', '口述'), coverage: 'PARTIAL' }] }, ctx).ok).toBe(false);
+    expect(readDrafts({ status: 'REFUSE', drafts: [item('B室', '冇人應門')] }, ctx).ok).toBe(false);
+    expect(readDrafts({ status: 'DRAFT', drafts: [] }, ctx).ok).toBe(false);
+  });
+});

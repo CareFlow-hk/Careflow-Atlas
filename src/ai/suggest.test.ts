@@ -163,13 +163,13 @@ describe('a file and a note sent together', () => {
 
   it('anchors a relative day in the note to the day the caller supplies', async () => {
     const { bodies, fetcher } = capture({
-      status: 'DRAFT', buildingId: 'bldg-yu-an', floorLabel: null, unitLabel: null,
+      status: 'DRAFT', drafts: [{ buildingId: 'bldg-yu-an', floorLabel: null, unitLabel: null,
       occurredDate: '2026-10-24', occurredTime: null, workerName: null, coverage: null,
       contactOutcome: 'NO_ANSWER', assessment: null, sourceType: null, note: null,
-      followUp: null, missing: ['覆蓋結果'], warnings: [],
+      followUp: null, missing: ['覆蓋結果'], warnings: [], }],
     });
     const { draft, aiAssist } = await suggestDraft({ text: '今日去咗 3樓 A 室，冇人應門。', snapshot: demoSnapshot, fetcher, today: '2026-10-24' });
-    expect(draft.occurredDate).toBe('2026-10-24');
+    expect(draft.drafts[0].occurredDate).toBe('2026-10-24');
     expect(aiAssist).toEqual(marker);
     expect(bodies[0].today).toBe('2026-10-24');
   });

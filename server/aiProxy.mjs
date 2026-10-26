@@ -1,3 +1,4 @@
+import { AI_COVERAGE_STATUSES, draftReplySchema, validDraftReply } from '../shared/aiDraftContract.mjs';
 import { randomUUID } from 'node:crypto';
 import { HttpError, requireValue } from './auth.mjs';
 import { AI_ASSIST_PROVIDER } from './aiAssist.mjs';
@@ -48,7 +49,7 @@ const SERVER_OWNED = [
   'timeout', 'timeoutMs', 'retry', 'apiKey', 'key', 'provider',
 ];
 
-export const AI_COVERAGE_STATUSES = Object.freeze(['UNVISITED', 'ATTEMPTED', 'VISITED_NO_FINDING']);
+export { AI_COVERAGE_STATUSES };
 const coverageOptions = value => {
   const options = labelPairs(value, '覆蓋結果');
   requireValue(options.every(item => AI_COVERAGE_STATUSES.includes(item.key)), 400, '覆蓋結果不在可選範圍內。');
@@ -216,7 +217,7 @@ class UnreadableAnswer extends Error {}
 function judge(answer, kind) {
   if (!isObject(answer)) throw new UnreadableAnswer();
   requireValue(typeof answer.status === 'string', 502, 'AI 回覆格式不完整，請重試或改用人手對應。');
-  if (kind === 'draft' && answer.coverage != null && !AI_COVERAGE_STATUSES.includes(answer.coverage)) throw new UnreadableAnswer();
+  if (kind === 'draft' && !validDraftReply(answer)) throw new UnreadableAnswer();
   return answer;
 }
 
@@ -238,14 +239,7 @@ export function createAiService({ settings = azureSettings(), fetchImpl = fetch,
         instructions: prompt.system,
         input: [{ role: 'user', content: [{ type: 'input_text', text: prompt.user }] }],
         max_output_tokens: 8000,
-        /*
-         * No `text.format`: measured on the real resource (2026-10-25), `json_object` is
-         * rejected with 400 unless the **input messages** contain the literal word "json",
-         * and the sheet text usually does not (`instructions` do not count). A strict
-         * `json_schema` would mean porting the whole reply contract here; until that is
-         * done, the prompt asks for one JSON object and the page validates the answer
-         * against its contract, discarding it whole if it does not match.
-         */
+        ...(kind === 'draft' ? { text: { format: { type: 'json_schema', name: 'outreach_drafts', strict: true, schema: draftReplySchema } } } : {}),
       }),
     });
     if (!response.ok) {

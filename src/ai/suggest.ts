@@ -21,7 +21,7 @@ import { hkDay } from '../domain/reminders';
 import { CONTACT_OUTCOMES, HOUSING_ASSESSMENTS, SUPPORT_CATEGORIES, type OutreachSnapshot } from '../domain/types';
 import { FORMAT_PROFILES, type CanonicalField } from '../imports/profiles';
 import { AiRequestError, callAi, type AiAssistMarker } from './client';
-import { canonicalOptions, readDraft, readPatchReply, readSuggestion, type AiDraft, type AiFieldSuggestion, type AiPatchSet, type AiSuggestion, type ReadContext } from './contract';
+import { canonicalOptions, readDrafts, readPatchReply, readSuggestion, type AiDrafts, type AiFieldSuggestion, type AiPatchSet, type AiSuggestion, type ReadContext } from './contract';
 import { chunkHeaders, chunkRows, type OutboundPreview } from './preview';
 import type { DraftRequest, MappingRequest, PatchRequest } from './scope';
 
@@ -159,7 +159,7 @@ export interface DraftInput {
 const LOCATION_LIMIT = 400;
 
 /** Turns a note into one proposed visit. Never writes; the dialog shows the blanks. */
-export async function suggestDraft({ text, snapshot, fetcher, today = hkDay() }: DraftInput): Promise<{ draft: AiDraft; aiAssist: AiAssistMarker }> {
+export async function suggestDraft({ text, snapshot, fetcher, today = hkDay() }: DraftInput): Promise<{ draft: AiDrafts; aiAssist: AiAssistMarker }> {
   const floorOf = new Map(snapshot.floors.map(floor => [floor.id, floor]));
   const locations = snapshot.units
     .filter(unit => !unit.parentUnitId)
@@ -176,9 +176,9 @@ export async function suggestDraft({ text, snapshot, fetcher, today = hkDay() }:
     categories: SUPPORT_CATEGORIES.map(key => ({ key, label: supportCategoryLabels[key] })),
   };
   const { proposal, aiAssist } = await callAi<Record<string, unknown>>('draft', request, { fetcher });
-  const read = readDraft(proposal, { text, today, buildingIds: new Set(snapshot.buildings.map(building => building.id)) });
+  const read = readDrafts(proposal, { text, today, buildingIds: new Set(snapshot.buildings.map(building => building.id)) });
   if (!read.ok) throw no(read.reason);
-  if (snapshot.units.length > LOCATION_LIMIT) read.value.warnings.push(`單位清單超過 ${LOCATION_LIMIT} 個，只提供前 ${LOCATION_LIMIT} 個；未列出的位置請人手填寫。`);
+  if (snapshot.units.length > LOCATION_LIMIT) read.value.drafts.forEach(draft => draft.warnings.push(`單位清單超過 ${LOCATION_LIMIT} 個，只提供前 ${LOCATION_LIMIT} 個；未列出的位置請人手填寫。`));
   return { draft: read.value, aiAssist };
 }
 

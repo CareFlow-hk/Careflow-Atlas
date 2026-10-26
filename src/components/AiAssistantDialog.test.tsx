@@ -190,20 +190,20 @@ describe('the plan screen', () => {
     });
     const text = {
       aiAssist: marker,
-      value: {
+      drafts: [{
         status: 'DRAFT' as const, buildingId: 'bldg-yu-an', floorLabel: '3樓', unitLabel: 'A室',
         occurredDate: '2026-10-24', contactOutcome: 'NO_ANSWER' as const, missing: [], warnings: [],
-      },
+      }],
     };
     const view = (over: { form?: typeof form; notice?: string } = {}) => renderToStaticMarkup(<PlanView
-      plan={{ source: 'both', file: plan, text }} snapshot={demoSnapshot} form={over.form ?? form}
+      plan={{ source: 'both', file: plan, text }} snapshot={demoSnapshot} forms={[over.form ?? form]}
       canCreate notice={over.notice} edits={NO_EDITS} onEdit={() => undefined} onEditMany={() => undefined}
       onChangeColumn={() => undefined} onChangeForm={() => undefined} onRun={() => undefined} onBack={() => undefined} />);
 
     it('stacks both sources under their own headings, with one confirmation for the pair', () => {
       const markup = view();
       expect(markup).toContain('檔案：探訪.xlsx');
-      expect(markup).toContain('文字：由這段原話整理的 1 筆記錄');
+      expect(markup).toContain('文字：第 1／1 筆記錄');
       expect(markup.match(/確認並執行/g)).toHaveLength(1);
     });
 
@@ -214,6 +214,18 @@ describe('the plan screen', () => {
       for (const label of ['未填', '未到訪', '未能完成探訪', '已完成探訪']) expect(options).toContain(label);
     });
 
+    it('renders separate editable household drafts with one execution button', () => {
+      const textPlan = { ...text, drafts: [text.drafts[0], { ...text.drafts[0], unitLabel: 'C室' }] };
+      const markup = renderToStaticMarkup(<PlanView plan={{ source: 'text', text: textPlan }} snapshot={demoSnapshot}
+        forms={[{ ...form, unit: 'B室', contact: 'NO_ANSWER', note: '冇人應門' }, { ...form, unit: 'C室', contact: 'CONTACTED', note: '業主叫佢搬' }]} canCreate
+        edits={NO_EDITS} onEdit={() => undefined} onEditMany={() => undefined} onChangeColumn={() => undefined} onChangeForm={() => undefined} onRun={() => undefined} onBack={() => undefined} />);
+      expect(markup).toContain('文字：第 1／2 筆記錄');
+      expect(markup).toContain('文字：第 2／2 筆記錄');
+      expect(markup).toContain('冇人應門');
+      expect(markup).toContain('業主叫佢搬');
+      expect(markup.match(/確認並執行/g)).toHaveLength(1);
+    });
+
     it('will not let one press write only the half that was ready', () => {
       // The draft lost its worker, so neither footer may offer to run the pair.
       expect(view({ form: { ...form, worker: '' } })).toContain('文字部分還有必填內容未填妥');
@@ -221,7 +233,7 @@ describe('the plan screen', () => {
 
     it('keeps the file part when the text was only a heading for it', () => {
       const markup = renderToStaticMarkup(<PlanView
-        plan={{ source: 'file', file: plan }} snapshot={demoSnapshot} form={form} canCreate
+        plan={{ source: 'file', file: plan }} snapshot={demoSnapshot} forms={[form]} canCreate
         notice="這段文字沒有另外整理成一筆記錄，只用作這次讀表的補充說明（例如「在裕安樓」）。"
         edits={NO_EDITS} onEdit={() => undefined} onEditMany={() => undefined}
         onChangeColumn={() => undefined} onChangeForm={() => undefined} onRun={() => undefined} onBack={() => undefined} />);

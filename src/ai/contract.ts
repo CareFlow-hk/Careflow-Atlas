@@ -1,3 +1,4 @@
+import { validDraftReply } from '../../shared/aiDraftContract.mjs';
 /** The one shape an AI column-mapping answer may take, and the check it must pass.
  *
  * A suggestion is all-or-nothing: one stray field, one unknown column name, one index
@@ -222,6 +223,19 @@ export interface AiDraft {
 }
 
 export type DraftRead = { ok: true; value: AiDraft } | { ok: false; reason: string };
+
+export interface AiDrafts { status: 'DRAFT' | 'REFUSE'; drafts: AiDraft[] }
+export function readDrafts(raw: unknown, context: DraftContext): { ok: true; value: AiDrafts } | { ok: false; reason: string } {
+  if (!validDraftReply(raw)) return { ok: false, reason: 'AI 草稿清單格式不正確，已整份作廢，未寫入任何資料。' };
+  const envelope = raw as { status: 'DRAFT' | 'REFUSE'; drafts: Record<string, unknown>[] };
+  const drafts: AiDraft[] = [];
+  for (const item of envelope.drafts) {
+    const read = readDraft({ ...item, status: 'DRAFT' }, context);
+    if (!read.ok) return read;
+    drafts.push(read.value);
+  }
+  return { ok: true, value: { status: envelope.status, drafts } };
+}
 
 export interface DraftContext {
   /** The note as typed; every date and time in the reply must appear in it. */

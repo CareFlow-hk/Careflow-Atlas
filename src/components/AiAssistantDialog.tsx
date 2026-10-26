@@ -115,7 +115,7 @@ export interface PlanChat {
   onAsk: () => void;
 }
 
-interface TextPlan { aiAssist: AiAssistMarker; value: AiDraft }
+interface TextPlan { aiAssist: AiAssistMarker; drafts: AiDraft[] }
 
 /**
  * One screen, one confirmation. A file and a note can be put in together; each keeps its
@@ -208,7 +208,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
   const [text, setText] = useState('');
   const [dragging, setDragging] = useState(false);
   const [fileDraft, setFileDraft] = useState<FileDraft | null>(null);
-  const [form, setForm] = useState<DraftForm>(blankDraft);
+  const [forms, setForms] = useState<DraftForm[]>([]);
   /** Cells changed after the plan was shown — by hand or by the chat, one layer. */
   const [edits, setEdits] = useState<PlanEdits>(NO_EDITS);
   const [chat, setChat] = useState<PlanChatTurn[]>([]);
@@ -221,7 +221,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
   useEffect(() => {
     if (!open) {
       setStage({ kind: 'idle' }); setText(''); setDragging(false);
-      setFileDraft(null); setForm(blankDraft);
+      setFileDraft(null); setForms([]);
       setEdits(NO_EDITS); setChat([]); setAsk(''); setAsking(false); setFollowUp('');
     }
   }, [open]);
@@ -329,7 +329,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
   };
 
   /** Put the reviewed draft into the form; the person can still change every field. */
-  const applyDraft = (value: AiDraft) => setForm({
+  const applyDraft = (values: AiDraft[]) => setForms(values.map(value => ({
     ...blankDraft,
     buildingId: value.buildingId ?? '',
     floor: value.floorLabel ?? '',
@@ -345,7 +345,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
     action: value.followUp?.action ?? '',
     dueDate: value.followUp?.dueDate ?? '',
     assignee: value.followUp?.assignee ?? '',
-  });
+  })));
 
   /**
    * One button for one piece of work. The sheet is mapped with the typed note as context, the
@@ -388,10 +388,10 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
             // A sheet that read cleanly is not thrown away because the note beside it was not a record.
             if (!file) { setStage({ kind: 'error', message: SCOPE_REFUSAL }); return; }
             notice = TEXT_CONTEXT_ONLY;
-          } else if (file && !draftIsRecord(value)) {
+          } else if (file && !value.drafts.some(draftIsRecord)) {
             // It named a place but no visit: that is the file's heading, not a record.
             notice = TEXT_CONTEXT_ONLY;
-          } else { applyDraft(value); draft = { aiAssist, value }; }
+          } else { applyDraft(value.drafts); draft = { aiAssist, drafts: value.drafts }; }
         } catch (error) {
           if (!file) { fail(error); return; }
           notice = `文字部分沒有整理成功（${message(error)}），下面只有檔案的部分。`;
@@ -470,10 +470,13 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
       inputs.push(...chosen.map(row => ({ ...row.input!, aiAssist: file.aiAssist })));
     }
     if (draft) {
-      const record = draftRecord(draft, latest);
+      for (const form of forms) {
+      const record = draftRecord(draft, form, latest);
       if (!record) return;
       inputs.push(record.input);
       if (record.created) made.push(record.created);
+      latest = record.snapshot;
+      }
     }
     try {
       onWrite(inputs);
@@ -483,9 +486,9 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
   };
 
   /** Turn the reviewed form into one record, creating its floor/unit first if the workspace lacks it. */
-  const draftRecord = (draft: TextPlan, start: OutreachSnapshot): { input: SaveObservationInput; created?: string } | undefined => {
+  const draftRecord = (draft: TextPlan, form: DraftForm, start: OutreachSnapshot): { input: SaveObservationInput; created?: string; snapshot: OutreachSnapshot } | undefined => {
     if (!draftComplete(form)) {
-      setStage({ kind: 'error', message: '大廈、日期與工作員都必須由人填寫。覆蓋結果可以留空。' });
+      setStage({ kind: 'error', message: '請先填妥全部草稿的必填內容。' });
       return undefined;
     }
     let latest = start;
@@ -502,7 +505,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
       if ('error' in location) { setStage({ kind: 'error', message: location.error }); return undefined; }
     }
     return {
-      created,
+      created, snapshot: latest,
       input: {
         id: `ai:${crypto.randomUUID()}`, visitId: `ai-visit:${crypto.randomUUID()}`, buildingId: form.buildingId,
         floorId: location.floorId, unitId: location.unitId,
@@ -620,7 +623,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
 
         <details className="cf-ai__about">
           <summary>使用說明</summary>
-          {aiEnabled && <p>文字和檔案可以一起處理：文字整理成 1 筆記錄，檔案整理成逐行記錄，列在同一份「將執行的目標」裡，按一次確認全部寫入。對談內容<strong>只留在這部裝置</strong>，不上傳、不進匯出檔。</p>}
+          {aiEnabled && <p>文字和檔案可以一起處理：文字按每戶整理成多筆記錄，檔案整理成逐行記錄，列在同一份「將執行的目標」裡，按一次確認全部寫入。對談內容<strong>只留在這部裝置</strong>，不上傳、不進匯出檔。</p>}
           <p>問未完成跟進、或問「給我行動建議」，都在工作區本機計算，內容不會送交 AI；<strong>建議按記錄上的到期日排出先後</strong>，不會替任務補日期或分派負責人。員工帳號只會看到指派給自己的任務。</p>
           {aiEnabled && <>
             <p>貼上的文字會送交 AI；檔案會先顯示行數與欄數，姓名、電話等欄不會送出。放了檔案時，這段文字也是整份表的抬頭：寫「在裕安樓 5 樓 B 室」，沒有填大廈／樓層／單位的行就按它處理；行裡自己寫了位置就照行裡的。</p>
@@ -632,7 +635,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
       {stage.kind === 'busy' && <p className="cf-ai__busy" role="status"><Sparkles size={18} />{stage.label}</p>}
 
       {plan && <PlanView
-        plan={plan} snapshot={snapshot!} form={form} canCreate={!!onApplyProposal}
+        plan={plan} snapshot={snapshot!} forms={forms} canCreate={!!onApplyProposal}
         notice={stage.kind === 'plan' ? stage.notice : undefined}
         edits={edits}
         chat={plan.source === 'text' ? undefined : { turns: chat, value: ask, asking, onChange: setAsk, onAsk: () => void askPlan() }}
@@ -647,7 +650,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
           const base = baseOf(plan.file);
           showPlan(withResult({ ...base, parse: { ...base.parse, sheetYear: year } }, edits), plan.source === 'both' ? plan.text : undefined);
         }}
-        onChangeColumn={changeColumn} onChangeForm={(key, value) => setForm({ ...form, [key]: value })}
+        onChangeColumn={changeColumn} onChangeForm={(index, key, value) => setForms(forms.map((form, position) => position === index ? { ...form, [key]: value } : form))}
         onEdit={editCell} onEditMany={editCells}
         onRun={runPlan} onBack={() => { setStage({ kind: 'idle' }); setEdits(NO_EDITS); setChat([]); setAsk(''); }} />}
 
@@ -714,42 +717,35 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
  * writes it. Two sources stack with their own headings and their own rules, but they share
  * one footer — one press always means the whole list, never only the half that was ready.
  */
-export function PlanView({ plan, snapshot, form, canCreate, notice, edits, chat, onToggleStructure, onChangeYear, onChangeColumn, onChangeForm, onEdit, onEditMany, onRun, onBack }: {
-  plan: Plan; snapshot: OutreachSnapshot; form: DraftForm; canCreate: boolean; notice?: string;
+export function PlanView({ plan, snapshot, forms, canCreate, notice, edits, chat, onToggleStructure, onChangeYear, onChangeColumn, onChangeForm, onEdit, onEditMany, onRun, onBack }: {
+  plan: Plan; snapshot: OutreachSnapshot; forms: DraftForm[]; canCreate: boolean; notice?: string;
   edits: PlanEdits; chat?: PlanChat;
   onToggleStructure?: (key: string) => void;
   onChangeYear?: (year: number | undefined) => void;
   onChangeColumn: (key: CanonicalField, index: number | null) => void;
-  onChangeForm: (key: keyof DraftForm, value: string) => void;
+  onChangeForm: (index: number, key: keyof DraftForm, value: string) => void;
   onEdit: (key: string, value: string | null, source: EditSource) => void;
   onEditMany: (changes: readonly { key: string; value: string | null }[], source: EditSource) => void;
   onRun: () => void; onBack: () => void;
 }) {
   const file = plan.source === 'text' ? undefined : plan.file;
   const text = plan.source === 'file' ? undefined : plan.text;
-  const both = plan.source === 'both' ? plan : undefined;
-  // The combined footer holds both halves' conditions, so one press can never write only
-  // the part that happened to be ready.
-  const writable = both ? filePlanRows(both.file, canCreate).writable.length : 0;
-  const ready = !!both && writable > 0 && draftComplete(form);
-  const note = !both ? '' : !writable
-    ? '檔案部分沒有可以寫入的行（原因列在上面），請先修正欄位對應或取消。'
-    : !draftComplete(form) ? '文字部分還有必填內容未填妥。'
-    : '兩部分會在同一次寫入裡完成，以你的帳號署名，並標明「由 AI 協助」。';
+  const writable = file ? filePlanRows(file, canCreate).writable.length : 0;
+  const complete = !text || (forms.length === text.drafts.length && forms.length > 0 && forms.every(draftComplete));
+  const ready = (!file || writable > 0) && complete;
+  const note = file && !writable ? '檔案部分沒有可以寫入的行，請先修正。'
+    : !complete ? '文字部分還有必填內容未填妥。'
+    : '目標清單會在同一次寫入裡完成，以你的帳號署名，並標明「由 AI 協助」。';
   return <>
-    {file && <FilePlanPanel plan={file} canCreate={canCreate} label={both ? `檔案：${file.preview.fileName}` : undefined}
-      edits={edits} chat={chat} onToggleStructure={onToggleStructure} onChangeYear={onChangeYear} onChangeColumn={onChangeColumn} onEdit={onEdit} onEditMany={onEditMany} onRun={both ? undefined : onRun} onBack={onBack} />}
-    {text && <DraftPlanPanel snapshot={snapshot} value={text.value} form={form} canCreate={canCreate}
-      label={both ? '文字：由這段原話整理的 1 筆記錄' : undefined} onChange={onChangeForm}
-      onRun={both ? undefined : onRun} onBack={onBack} />}
+    {file && <FilePlanPanel plan={file} canCreate={canCreate} label={`檔案：${file.preview.fileName}`}
+      edits={edits} chat={chat} onToggleStructure={onToggleStructure} onChangeYear={onChangeYear} onChangeColumn={onChangeColumn} onEdit={onEdit} onEditMany={onEditMany} onBack={onBack} />}
+    {text && text.drafts.map((value, index) => <DraftPlanPanel key={index} snapshot={snapshot} value={value} form={forms[index] ?? blankDraft} canCreate={canCreate}
+      label={`文字：第 ${index + 1}／${text.drafts.length} 筆記錄`} onChange={(key, value) => onChangeForm(index, key, value)} onBack={onBack} />)}
     {notice && <p className="cf-ai__note" role="status">{notice}</p>}
-    {both && <footer className="cf-dialog__footer">
-      <span>{note}</span>
-      <div>
-        <button className="cf-button cf-button--ghost" onClick={onBack}>取消</button>
-        <button className="cf-button cf-button--primary" disabled={!ready} onClick={onRun}>確認並執行</button>
-      </div>
-    </footer>}
+    <footer className="cf-dialog__footer"><span>{note}</span><div>
+      <button className="cf-button cf-button--ghost" onClick={onBack}>取消</button>
+      <button className="cf-button cf-button--primary" disabled={!ready} onClick={onRun}>確認並執行</button>
+    </div></footer>
   </>;
 }
 

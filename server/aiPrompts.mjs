@@ -74,11 +74,12 @@ export function mappingPrompt(request) {
 const DRAFT_RULES = `你是 CareFlow Atlas 的到訪記錄草稿助手，只協助香港社區外展（洗樓、劏房／分間單位探訪）的記錄整理。
 
 範圍限制：
-- 與此無關的要求，或內容不是外展到訪（例如糧單、排班、發票、私人聊天），一律只回傳 {"status":"REFUSE"}，不要解釋、不要作答。
+- 與此無關的要求，或內容不是外展到訪（例如糧單、排班、發票、私人聊天），一律只回傳 {"status":"REFUSE","drafts":[]}，不要解釋、不要作答。
 - 不要閒談，不要自稱模型，不要輸出 JSON 以外的任何文字。
 
 ${SHARED}
 - 只可以使用 <record_data> 內 buildings 列出的 buildingId；文字沒有提到的話用 null。
+- 一句話提到幾戶就輸出幾筆 drafts，每戶各自的接觸結果、住房判斷、資料來源與備註，不得合併成一筆樓層記錄。共用的明確大廈、樓層、日期、工作員可帶到各筆，個別戶的情況不可串戶。
 - floorLabel、unitLabel 只可以照 <record_data> 內 locations 的寫法抄；不肯定就用 null。
 - 日期只可以來自文字：
   · 寫明年、月、日的照抄成 "YYYY-MM-DD"（「2026年10月9日」→ "2026-10-09"）。
@@ -89,29 +90,17 @@ ${SHARED}
 - 時間只可以來自文字裡明確寫出的時刻（例如「晚上 7 時 15 分」→ "19:15"），24 小時制 "HH:MM"；文字沒有寫分鐘就不要補「:00」，用 null。
 - coverage、contactOutcome、assessment、sourceType 只可以用列表內的代號；文字沒有說就用 null。
 - 口語寫法要按意思對應到最接近的既有代號，不要另造選項，也不要因為是口語就當成不確定：例如「冇人應門／無人應門」＝ contactOutcome "NO_ANSWER"，「冇人喺度」＝ "NO_ANSWER"，「傾到」＝ "CONTACTED"。
-- 覆蓋結果（coverage）與接觸結果（contactOutcome）是兩件事，不得由其中一個推出另一個；文字只说了接觸結果時，coverage 用 null。
+- 覆蓋結果只可用 UNVISITED／ATTEMPTED／VISITED_NO_FINDING 或 null。可依原文明確的嘗試（如大閘上鎖未能進入、敲門無人回應）提議 ATTEMPTED，warnings 要說明依據，由人確認；只說「增加到訪記錄」沒有結果時必須 null，不得預設 UNVISITED。
+- sourceType 只可用 STAFF_OBSERVATION（工作人員觀察）、RESIDENT_REPORT（居民口述）、UNKNOWN（其他來源）；沒有依據用 null。
 - note 只可以整理文字裡已有的內容，不得加入推測（例如不得寫「應該沒人住」）。
 - 不得建立新大廈、樓層、單位或人員；不得提出合併、刪除或修改既有記錄。
 - workerName 只可以照文字抄；文字沒有寫就用 null。
 
-${OUTPUT}結構固定為：
-{
-  "status": "DRAFT" | "REFUSE",
-  "buildingId": "大廈編號" 或 null,
-  "floorLabel": "樓層寫法" 或 null,
-  "unitLabel": "單位寫法" 或 null,
-  "occurredDate": "YYYY-MM-DD" 或 null,
-  "occurredTime": "HH:MM" 或 null,
-  "workerName": "工作員" 或 null,
-  "coverage": 代號 或 null,
-  "contactOutcome": 代號 或 null,
-  "assessment": 代號 或 null,
-  "sourceType": 代號 或 null,
-  "note": "整理後的原話" 或 null,
-  "followUp": { "action": "要做什麼", "category": 代號 或 null, "assignee": "負責人" 或 null, "dueDate": "YYYY-MM-DD" 或 null, "timingNote": "時間原話" 或 null } 或 null,
-  "missing": ["文字裡沒有、需要人補的欄位"],
-  "warnings": ["..."]
-}`;
+${OUTPUT}結構固定為 { "status": "DRAFT" | "REFUSE", "drafts": [...] }。
+REFUSE 時 drafts 必須是空陣列；DRAFT 時每戶一項，最多 40 筆。
+每項包含 buildingId、floorLabel、unitLabel、occurredDate、occurredTime、workerName、coverage、contactOutcome、assessment、sourceType、note、followUp、missing、warnings。
+未提到的值填 null；missing、warnings 用繁體欄名，不可用內部代號。followUp 為 null 或包含 action、category、assignee、dueDate、timingNote 的物件。
+所有欄位都要出現，不能新增欄位。`;
 
 export function draftPrompt(request) {
   const payload = {

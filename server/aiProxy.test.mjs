@@ -191,7 +191,7 @@ test('draft and patch are built by the server from their own prompts', async () 
   const prompts = [];
   const service = createAiService({ settings, fetchImpl: async (_url, options) => {
     prompts.push(JSON.parse(options.body).instructions);
-    return answer({ status: 'DRAFT' });
+    return answer({ status: 'REFUSE', drafts: [] });
   } });
   await service.assist(draftBody(), user);
   await service.assist(patchBody(), user);
@@ -226,5 +226,33 @@ test('coverage is a fixed server-owned three-choice range, including upstream re
     assert.throws(() => readAiRequest(draftBody({ coverage: [{ key: coverage, label: 'invalid' }] })), error => error.status === 400);
     const service = createAiService({ settings, fetchImpl: async () => answer({ status: 'DRAFT', coverage }) });
     await assert.rejects(service.assist(draftBody(), user), error => error.status === 502);
+  }
+});
+
+test('the server owns the draft-array schema and validates every household', async () => {
+  const { draftReplySchema } = await import('../shared/aiDraftContract.mjs');
+  const item = { buildingId: 'b1', floorLabel: '5樓', unitLabel: 'B室', occurredDate: null, occurredTime: null,
+    workerName: null, coverage: 'ATTEMPTED', contactOutcome: 'NO_ANSWER', assessment: null, sourceType: null,
+    note: '合成：冇人應門', followUp: null, missing: ['到訪日期'], warnings: [] };
+  const payload = { status: 'DRAFT', drafts: [item, { ...item, unitLabel: 'C室', note: '合成：業主叫佢搬', contactOutcome: 'CONTACTED' }] };
+  let sent;
+  const service = createAiService({ settings, fetchImpl: async (_url, options) => {
+    sent = JSON.parse(options.body);
+    return answer(payload);
+  } });
+  const result = await service.assist(draftBody(), user);
+  assert.deepEqual(result.proposal, payload);
+  assert.deepEqual(sent.text.format.schema, draftReplySchema);
+  assert.equal(sent.text.format.strict, true);
+  assert.match(sent.instructions, /每戶各自/);
+  for (const invalid of [
+    { status: 'DRAFT', ...item },
+    { status: 'DRAFT', drafts: [item, { ...item, invented: true }] },
+    { status: 'DRAFT', drafts: [item, { ...item, coverage: 'INACCESSIBLE' }] },
+    { status: 'DRAFT', drafts: [] },
+    { status: 'REFUSE', drafts: [item] },
+  ]) {
+    const bad = createAiService({ settings, fetchImpl: async () => answer(invalid) });
+    await assert.rejects(bad.assist(draftBody(), user), error => error.status === 502);
   }
 });
