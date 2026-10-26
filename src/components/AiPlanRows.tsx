@@ -1,3 +1,4 @@
+import { aiUiText } from '../ai/uiText';
 /**
  * One row of the plan, opened into the cells it was read from (`docs/AI_ASSISTANT.md` 6.2).
  *
@@ -153,7 +154,7 @@ function Cell({ item, onEdit }: { item: Item; onEdit: PlanRowFieldsProps['onEdit
 function skipReason(row: ParsedRow): string {
   if (row.suspectedDuplicateOf) return '疑似與現有記錄重複，未自動寫入；請先在記錄歷史核對。';
   if (row.suspectedDuplicateOfRow) return `疑似與檔內第 ${row.suspectedDuplicateOfRow} 行重複，未自動寫入；請先核對原表。`;
-  return row.issues.map(issue => issue.message).join(' ') || '缺少必要內容。';
+  return row.issues.map(issue => aiUiText(issue.message)).join(' ') || '缺少必要內容。';
 }
 
 /* ---------------------------------------------------------------------------------------

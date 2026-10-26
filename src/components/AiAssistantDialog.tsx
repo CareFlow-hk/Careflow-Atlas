@@ -1,3 +1,4 @@
+import { aiUiText } from '../ai/uiText';
 /**
  * The standalone assistant dialog (`docs/AI_ASSISTANT.md` 6.1).
  *
@@ -717,12 +718,12 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
       </>}
 
       {stage.kind === 'error' && <>
-        <p className="cf-error" role="alert"><AlertTriangle />{stage.message}</p>
+        <p className="cf-error" role="alert"><AlertTriangle />{aiUiText(stage.message)}</p>
         <footer className="cf-dialog__footer"><span>沒有寫入任何資料。</span><div><button className="cf-button cf-button--primary" onClick={() => setStage(lastPlan.current ?? { kind: 'idle' })}>返回</button></div></footer>
       </>}
 
       {stage.kind === 'done' && <>
-        <p className="cf-success" role="status"><CheckCircle2 />{stage.message}</p>
+        <p className="cf-success" role="status"><CheckCircle2 />{aiUiText(stage.message)}</p>
         <footer className="cf-dialog__footer"><span>可以在記錄歷史看到「由 AI 協助」，管理員的操作記錄也有這筆。</span><div><button className="cf-button cf-button--primary" onClick={() => { setStage({ kind: 'idle' }); onClose(); }}>完成</button></div></footer>
       </>}
     </div>
@@ -865,7 +866,7 @@ export function FilePlanPanel({ plan, canCreate, label, edits, chat, onConfirmRo
         </label>)}
       </section>}
       {totalChanged > 0 && <p className="cf-ai__note" role="status">已改 {totalChanged} 格（人手 {changed.person}、AI {changed.ai}）。每次改動都由系統重新核對整份表，不是只改畫面上的字。</p>}
-      {result.notes.map((note, index) => <p className="cf-error" key={index}><AlertTriangle />{note}</p>)}
+      {result.notes.map((note, index) => <p className="cf-error" key={index}><AlertTriangle />{aiUiText(note)}</p>)}
       {actions.length ? <ul className="cf-ai__actions">{actions.map(action => action.kind === 'place'
         ? <li key={action.key} className="is-place">
           <span className="cf-ai__rowmark">＋</span>
@@ -903,7 +904,7 @@ function PlanChatBox({ chat }: { chat: PlanChat }) {
     <p className="cf-ai__note">例如「第 3、4 行都是已嘗試接觸」、「這幾行日期改成 2026-10-11」。AI 只會改上面列出的行，改完系統會重新核對；寫入前仍要你按一次「確認並執行」。</p>
     {chat.turns.length > 0 && <ol className="cf-ai__turns">{chat.turns.map((turn, index) => <li key={index} className={turn.failed ? 'is-failed' : undefined}>
       <p className="cf-ai__ask">你：{turn.question}</p>
-      <p>AI：{turn.answer}{turn.changed > 0 ? `（改了 ${turn.changed} 格）` : ''}</p>
+      <p>AI：{aiUiText(turn.answer)}{turn.changed > 0 ? `（改了 ${turn.changed} 格）` : ''}</p>
     </li>)}</ol>}
     <form className="cf-ai__askform" onSubmit={event => { event.preventDefault(); chat.onAsk(); }}>
       <input aria-label="叫 AI 改這份表" value={chat.value} disabled={chat.asking} placeholder="用一句話說明要改什麼"
@@ -935,7 +936,7 @@ function MappingTable({ preview, suggestion, columns, onChange }: {
         {preview.headers.map((header, index) => <option key={index} value={index} disabled={used.has(index) && index !== value}>第 {index + 1} 欄 · {header || '（無表頭）'}</option>)}
         {preview.sensitiveColumns.map(index => <option key={`s${index}`} value={index} disabled>第 {index + 1} 欄（未送交 AI）</option>)}
       </select></td>
-      <td>{field?.reason ?? ''}</td>
+      <td>{aiUiText(field?.reason ?? '')}</td>
     </tr>;
   };
   return <section className="cf-ai__preview">
@@ -953,11 +954,11 @@ function MappingTable({ preview, suggestion, columns, onChange }: {
         <b>記在備註</b>
       </li>)}</ul>
     </section>}
-    {suggestion.warnings.length > 0 && <ul className="cf-ai__warnings">{suggestion.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>}
+    {suggestion.warnings.length > 0 && <ul className="cf-ai__warnings">{suggestion.warnings.map((warning, index) => <li key={index}>{aiUiText(warning)}</li>)}</ul>}
   </section>;
 }
 
-function DraftPlanPanel({ snapshot, value, form, canCreate, label, onChange, onRun, onBack }: {
+export function DraftPlanPanel({ snapshot, value, form, canCreate, label, onChange, onRun, onBack }: {
   snapshot: OutreachSnapshot; value: AiDraft; form: DraftForm; canCreate: boolean; label?: string;
   onChange: (key: keyof DraftForm, value: string) => void; onRun?: () => void; onBack: () => void;
 }) {
@@ -981,13 +982,13 @@ function DraftPlanPanel({ snapshot, value, form, canCreate, label, onChange, onR
         </li>}
         <li className="is-record"><span className="cf-ai__rowmark">＋</span><div>
           <strong>在「{where}」新增 1 筆到訪記錄</strong>
-          <small>{[form.date, form.worker.trim(), form.coverage ? coverageLabels[form.coverage] : '未更新覆蓋狀態'].filter(Boolean).join(' · ') || '尚未填寫'}</small>
+          <small>{[form.date, form.worker.trim(), form.coverage ? coverageLabels[form.coverage] : '未填覆蓋結果'].filter(Boolean).join(' · ') || '尚未填寫'}</small>
         </div></li>
       </ul>
       {proposal && !canCreate && <p className="cf-error"><AlertTriangle />結構編輯目前關閉，不能在這裡新增樓層或單位。請先在「編輯結構」新增，再回來執行。</p>}
       {target && 'error' in target && !proposal && <p className="cf-error"><AlertTriangle />{target.error}</p>}
-      {value.warnings.map((warning, index) => <p key={index} className="cf-ai__note">{warning}</p>)}
-      {value.missing.length > 0 && <p className="cf-ai__note">文字裡沒有提到：{value.missing.join('、')}。系統不會替你補。</p>}
+      {value.warnings.map((warning, index) => <p key={index} className="cf-ai__note">{aiUiText(warning)}</p>)}
+      {value.missing.length > 0 && <p className="cf-ai__note">文字裡沒有提到：{value.missing.map(aiUiText).join('、')}。系統不會替你補。</p>}
     </section>
     <details className="cf-ai__mapping-details" open>
       <summary>記錄內容（文字裡沒有的留空，可逐項核對）</summary>
