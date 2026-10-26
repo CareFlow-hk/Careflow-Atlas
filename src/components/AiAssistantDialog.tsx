@@ -29,6 +29,7 @@ import { AlertTriangle, CheckCircle2, FileSpreadsheet, ShieldCheck, Sparkles, Up
 import { assessmentLabels, contactLabels, coverageLabels, aiCoverageLabels, sourceLabels } from '../domain/presentation';
 import type { ReminderAdvice, ReminderBook, ReminderTask, ReminderViewer } from '../domain/reminders';
 import type { NamedBuilding } from '../domain/buildingMentions';
+import { parseFloorNumber } from '../domain/locationText';
 import { yearlessDate } from '../domain/sheetDate';
 import { mentionedPlace } from '../domain/locationMentions';
 import { findPaperLocation, proposeLocation, type LocationProposal } from '../domain/structure';
@@ -153,7 +154,7 @@ type ParseRun = Omit<GenericParseInput, 'snapshot' | 'now' | 'newId' | 'extraCol
 export interface DraftForm {
   buildingId: string; floor: string; unit: string; date: string; time: string; worker: string;
   coverage: CoverageStatus | ''; contact: ContactOutcome | ''; assessment: HousingAssessment | ''; sourceType: SourceType | ''; note: string;
-  action: string; dueDate: string; assignee: string;
+  action: string; dueDate: string; assignee: string; timingNote?: string;
 }
 
 const blankDraft: DraftForm = { buildingId: '', floor: '', unit: '', date: '', time: '', worker: '', coverage: '', contact: '', assessment: '', sourceType: '', note: '', action: '', dueDate: '', assignee: '' };
@@ -181,7 +182,11 @@ function draftLocation(snapshot: OutreachSnapshot, buildingId: string, floorText
   if (!floorText && !unitText) return {};
   if (floorText && !unitText) return { error: '只填了樓層，未填單位。整幢的記錄請兩格都留空。' };
   const floors = snapshot.floors.filter(floor => floor.buildingId === buildingId);
-  const floor = floorText ? floors.find(item => loose(item.label) === loose(floorText)) : undefined;
+  const candidates = floorText ? floors.filter(item => loose(item.label) === loose(floorText) || (parseFloorNumber(floorText) !== undefined && parseFloorNumber(item.label) === parseFloorNumber(floorText))) : [];
+  const floor = candidates.length === 1 ? candidates[0] : undefined;
+  if (candidates.length > 1) return { error: '樓層對應到多個位置，請核對。' };
+  const paper = floor && findPaperLocation(snapshot, buildingId, floor.label, unitText);
+  if (paper) return { floorId: floor.id, unitId: paper };
   if (floorText && !floor) return { error: `這幢大廈沒有「${floorText}」這一層。` };
   const pool = snapshot.units.filter(unit => unit.buildingId === buildingId && (!floor || unit.floorId === floor.id));
   const matches = pool.filter(unit => loose(unit.label) === loose(unitText) || loose(unit.label.slice((floor?.label ?? '').length)) === loose(unitText));
@@ -205,6 +210,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
   const dialogRef = useRef<HTMLDialogElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [stage, setStage] = useState<Stage>({ kind: 'idle' });
+  const lastPlan = useRef<Extract<Stage, { kind: 'plan' }> | null>(null);
   const [text, setText] = useState('');
   const [dragging, setDragging] = useState(false);
   const [fileDraft, setFileDraft] = useState<FileDraft | null>(null);
@@ -220,6 +226,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
   useEffect(() => { const dialog = dialogRef.current; if (!dialog) return; if (open && !dialog.open) dialog.showModal(); else if (!open && dialog.open) dialog.close(); }, [open]);
   useEffect(() => {
     if (!open) {
+      lastPlan.current = null;
       setStage({ kind: 'idle' }); setText(''); setDragging(false);
       setFileDraft(null); setForms([]);
       setEdits(NO_EDITS); setChat([]); setAsk(''); setAsking(false); setFollowUp('');
@@ -233,6 +240,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
   /** Reading is local: the person gets the row/column summary before anything is sent. */
   const readFile = async (file: File) => {
     if (!snapshot) { setStage({ kind: 'error', message: '尚未載入工作區資料，無法核對大廈與單位。' }); return; }
+    lastPlan.current = null;
     setStage({ kind: 'busy', label: '正在讀取檔案…' });
     try {
       const buffer = await file.arrayBuffer();
@@ -273,9 +281,9 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
 
   /** One stage for one confirmed piece of work, whichever inputs went into it. */
   const showPlan = (file: FilePlan | undefined, text: TextPlan | undefined, notice?: string) => {
-    if (file && text) setStage({ kind: 'plan', plan: { source: 'both', file, text }, notice });
-    else if (file) setStage({ kind: 'plan', plan: { source: 'file', file }, notice });
-    else if (text) setStage({ kind: 'plan', plan: { source: 'text', text } });
+    const plan: Plan | undefined = file && text ? { source: 'both', file, text }
+      : file ? { source: 'file', file } : text ? { source: 'text', text } : undefined;
+    if (plan) { lastPlan.current = { kind: 'plan', plan, notice }; setStage(lastPlan.current); }
   };
 
   /**
@@ -344,7 +352,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
     note: value.note ?? '',
     action: value.followUp?.action ?? '',
     dueDate: value.followUp?.dueDate ?? '',
-    assignee: value.followUp?.assignee ?? '',
+    assignee: value.followUp?.assignee ?? '', timingNote: value.followUp?.timingNote,
   })));
 
   /**
@@ -364,6 +372,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
     if (!aiEnabled) { setStage({ kind: 'error', message: 'AI 助手目前未開啟。這裡仍然可以問未完成的跟進；整理文字或表格要等管理員開啟 AI 助手。' }); return; }
     if (!orgId) { setStage({ kind: 'error', message: '未設定機構，無法使用 AI 助手。' }); return; }
     // No local keyword check otherwise: the assistant's own reply decides (`docs/AI_ASSISTANT.md` 7).
+    lastPlan.current = null;
     setStage({ kind: 'busy', label: fileDraft ? '正在讀取檔案…' : '正在整理草稿…' });
     try {
       // The note the person typed is how a sheet with no 大廈 column gets one, and how a
@@ -439,6 +448,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
    */
   const runPlanWith = (file: FilePlan | undefined, draft: TextPlan | undefined) => {
     if (!snapshot || (!file && !draft)) return;
+    if (draft && (forms.length !== draft.drafts.length || forms.some(form => !draftComplete(form, snapshot, !!onApplyProposal)))) { fail(new Error('請先填妥全部草稿的必填內容。')); return; }
     let latest = snapshot;
     const made: string[] = [];
     if (file) {
@@ -487,7 +497,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
 
   /** Turn the reviewed form into one record, creating its floor/unit first if the workspace lacks it. */
   const draftRecord = (draft: TextPlan, form: DraftForm, start: OutreachSnapshot): { input: SaveObservationInput; created?: string; snapshot: OutreachSnapshot } | undefined => {
-    if (!draftComplete(form)) {
+    if (!draftComplete(form, start, !!onApplyProposal)) {
       setStage({ kind: 'error', message: '請先填妥全部草稿的必填內容。' });
       return undefined;
     }
@@ -513,7 +523,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
         recordedAt: new Date().toISOString(), workerName: form.worker.trim(), coverage: form.coverage || undefined,
         contactOutcome: form.contact || undefined, assessment: form.assessment || undefined, sourceType: form.sourceType || undefined,
         note: form.note.trim() || undefined, evidence: [],
-        followUp: form.action.trim() ? { action: form.action.trim(), status: 'OPEN', assignee: form.assignee.trim() || undefined, dueDate: form.dueDate || undefined } : undefined,
+        followUp: form.action.trim() ? { action: form.action.trim(), status: 'OPEN', assignee: form.assignee.trim() || undefined, dueDate: form.dueDate || undefined, timingNote: form.timingNote } : undefined,
         aiAssist: draft.aiAssist,
       },
     };
@@ -701,7 +711,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
 
       {stage.kind === 'error' && <>
         <p className="cf-error" role="alert"><AlertTriangle />{stage.message}</p>
-        <footer className="cf-dialog__footer"><span>沒有寫入任何資料。</span><div><button className="cf-button cf-button--primary" onClick={() => setStage({ kind: 'idle' })}>返回</button></div></footer>
+        <footer className="cf-dialog__footer"><span>沒有寫入任何資料。</span><div><button className="cf-button cf-button--primary" onClick={() => setStage(lastPlan.current ?? { kind: 'idle' })}>返回</button></div></footer>
       </>}
 
       {stage.kind === 'done' && <>
@@ -731,10 +741,11 @@ export function PlanView({ plan, snapshot, forms, canCreate, notice, edits, chat
   const file = plan.source === 'text' ? undefined : plan.file;
   const text = plan.source === 'file' ? undefined : plan.text;
   const writable = file ? filePlanRows(file, canCreate).writable.length : 0;
-  const complete = !text || (forms.length === text.drafts.length && forms.length > 0 && forms.every(draftComplete));
+  const complete = !text || (forms.length === text.drafts.length && forms.length > 0 && forms.every(form => draftComplete(form, snapshot, canCreate)));
+  const missing = text ? forms.reduce((count, form) => count + draftProblems(form, snapshot, canCreate).length, 0) : 0;
   const ready = (!file || writable > 0) && complete;
   const note = file && !writable ? '檔案部分沒有可以寫入的行，請先修正。'
-    : !complete ? '文字部分還有必填內容未填妥。'
+    : !complete ? `文字部分還有 ${missing} 項未填妥，請補齊標紅欄位。`
     : '目標清單會在同一次寫入裡完成，以你的帳號署名，並標明「由 AI 協助」。';
   return <>
     {file && <FilePlanPanel plan={file} canCreate={canCreate} label={`檔案：${file.preview.fileName}`}
@@ -761,7 +772,28 @@ function filePlanRows(plan: FilePlan, canCreate: boolean) {
 }
 
 /** What a draft record needs from the person, whichever screen is asking. */
-export const draftComplete = (form: DraftForm) => !!form.buildingId && !!form.date && !!form.worker.trim() && !!form.coverage && !!form.assessment && !!form.sourceType;
+export function draftProblems(form: DraftForm, snapshot?: OutreachSnapshot, canCreate = true): (keyof DraftForm)[] {
+  const missing = new Set<keyof DraftForm>();
+  for (const field of ['buildingId', 'date', 'worker', 'coverage', 'assessment', 'sourceType'] as const) if (!form[field]?.trim()) missing.add(field);
+  const realDay = (day: string) => /^\d{4}-\d{2}-\d{2}$/.test(day) && Number.isFinite(Date.parse(day)) && new Date(`${day}T00:00:00Z`).toISOString().slice(0, 10) === day;
+  if (form.date && !realDay(form.date)) missing.add('date');
+  if (form.time && !/^([01]\d|2[0-3]):[0-5]\d$/.test(form.time)) missing.add('time');
+  if (form.dueDate && (!realDay(form.dueDate) || form.dueDate < form.date)) missing.add('dueDate');
+  if ((form.dueDate || form.assignee.trim()) && !form.action.trim()) missing.add('action');
+  if (form.coverage && !Object.hasOwn(aiCoverageLabels, form.coverage)) missing.add('coverage');
+  if (form.assessment && !Object.hasOwn(assessmentLabels, form.assessment)) missing.add('assessment');
+  if (form.sourceType && !Object.hasOwn(sourceLabels, form.sourceType)) missing.add('sourceType');
+  if (form.floor.trim() && !form.unit.trim()) missing.add('unit');
+  if (snapshot && form.buildingId) {
+    if (!snapshot.buildings.some(building => building.id === form.buildingId)) missing.add('buildingId');
+    const target = draftLocation(snapshot, form.buildingId, form.floor.trim(), form.unit.trim());
+    if ('error' in target && !(canCreate && proposeLocation(snapshot, form.buildingId, form.floor, form.unit))) {
+      missing.add(form.floor.trim() && !form.unit.trim() ? 'unit' : 'floor');
+    }
+  }
+  return [...missing];
+}
+export const draftComplete = (form: DraftForm, snapshot?: OutreachSnapshot, canCreate = true) => draftProblems(form, snapshot, canCreate).length === 0;
 
 /**
  * The list of things that will happen, one line each, and the details folded behind it.
@@ -902,7 +934,10 @@ function DraftPlanPanel({ snapshot, value, form, canCreate, label, onChange, onR
   snapshot: OutreachSnapshot; value: AiDraft; form: DraftForm; canCreate: boolean; label?: string;
   onChange: (key: keyof DraftForm, value: string) => void; onRun?: () => void; onBack: () => void;
 }) {
-  const complete = draftComplete(form);
+  const problems = draftProblems(form, snapshot, canCreate);
+  const complete = problems.length === 0;
+  const fieldLabels: Partial<Record<keyof DraftForm, string>> = { buildingId: '大廈', floor: '樓層', unit: '單位', date: '到訪日期', time: '到訪時間', worker: '工作員', coverage: '覆蓋結果', assessment: '住房判斷', sourceType: '資料來源', action: '跟進行動', dueDate: '跟進日期', assignee: '負責人' };
+  const invalid = (field: keyof DraftForm) => ({ 'aria-invalid': problems.includes(field) || undefined, 'aria-label': fieldLabels[field] });
   const building = snapshot.buildings.find(item => item.id === form.buildingId);
   const target = form.buildingId ? draftLocation(snapshot, form.buildingId, form.floor.trim(), form.unit.trim()) : undefined;
   const proposal = target && 'error' in target && form.floor.trim() && form.unit.trim()
@@ -930,20 +965,20 @@ function DraftPlanPanel({ snapshot, value, form, canCreate, label, onChange, onR
     <details className="cf-ai__mapping-details" open>
       <summary>記錄內容（文字裡沒有的留空，可逐項核對）</summary>
       <div className="cf-ai__form">
-        <label>大廈<select value={form.buildingId} onChange={event => onChange('buildingId', event.target.value)}><option value="">請選擇（AI 不會代為新增）</option>{snapshot.buildings.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-        <label>樓層<input value={form.floor} placeholder={building ? '例：3樓' : ''} onChange={event => onChange('floor', event.target.value)} /></label>
-        <label>單位<input value={form.unit} placeholder="例：A室" onChange={event => onChange('unit', event.target.value)} /></label>
-        <label>到訪日期<input type="date" value={form.date} onChange={event => onChange('date', event.target.value)} /></label>
-        <label>到訪時間<input type="time" value={form.time} onChange={event => onChange('time', event.target.value)} /></label>
-        <label>工作員<input value={form.worker} onChange={event => onChange('worker', event.target.value)} /></label>
-        <label>覆蓋結果<select value={form.coverage} onChange={event => onChange('coverage', event.target.value)}><option value="">未填</option>{Object.entries(aiCoverageLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
-        <label>接觸結果<select value={form.contact} onChange={event => onChange('contact', event.target.value)}><option value="">未填</option>{Object.entries(contactLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
-        <label>住房判斷<select value={form.assessment} onChange={event => onChange('assessment', event.target.value)}><option value="">未填</option>{Object.entries(assessmentLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
-        <label>資料來源<select value={form.sourceType} onChange={event => onChange('sourceType', event.target.value)}><option value="">未填</option>{Object.entries(sourceLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
-        <label className="is-wide">備註<textarea rows={3} value={form.note} onChange={event => onChange('note', event.target.value)} /></label>
-        <label className="is-wide">跟進行動<input value={form.action} placeholder="留空表示不需要跟進" onChange={event => onChange('action', event.target.value)} /></label>
-        <label>跟進日期<input type="date" value={form.dueDate} onChange={event => onChange('dueDate', event.target.value)} /></label>
-        <label>負責人<input value={form.assignee} onChange={event => onChange('assignee', event.target.value)} /></label>
+        <label>大廈<select {...invalid('buildingId')} value={form.buildingId} onChange={event => onChange('buildingId', event.target.value)}><option value="">請選擇（AI 不會代為新增）</option>{snapshot.buildings.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+        <label>樓層<input {...invalid('floor')} value={form.floor} placeholder={building ? '例：3樓' : ''} onChange={event => onChange('floor', event.target.value)} /></label>
+        <label>單位<input {...invalid('unit')} value={form.unit} placeholder="例：A室" onChange={event => onChange('unit', event.target.value)} /></label>
+        <label>到訪日期<input type="date" {...invalid('date')} value={form.date} onChange={event => onChange('date', event.target.value)} /></label>
+        <label>到訪時間<input type="time" {...invalid('time')} value={form.time} onChange={event => onChange('time', event.target.value)} /></label>
+        <label>工作員<input {...invalid('worker')} value={form.worker} onChange={event => onChange('worker', event.target.value)} /></label>
+        <label>覆蓋結果<select {...invalid('coverage')} value={form.coverage} onChange={event => onChange('coverage', event.target.value)}><option value="">未填</option>{Object.entries(aiCoverageLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+        <label>接觸結果<select aria-label="接觸結果" value={form.contact} onChange={event => onChange('contact', event.target.value)}><option value="">未填</option>{Object.entries(contactLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+        <label>住房判斷<select {...invalid('assessment')} value={form.assessment} onChange={event => onChange('assessment', event.target.value)}><option value="">未填</option>{Object.entries(assessmentLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+        <label>資料來源<select {...invalid('sourceType')} value={form.sourceType} onChange={event => onChange('sourceType', event.target.value)}><option value="">未填</option>{Object.entries(sourceLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+        <label className="is-wide">備註<textarea aria-label="備註" rows={3} value={form.note} onChange={event => onChange('note', event.target.value)} /></label>
+        <label className="is-wide">跟進行動<input {...invalid('action')} value={form.action} placeholder="留空表示不需要跟進" onChange={event => onChange('action', event.target.value)} /></label>
+        <label>跟進日期<input type="date" {...invalid('dueDate')} value={form.dueDate} onChange={event => onChange('dueDate', event.target.value)} /></label>
+        <label>負責人<input {...invalid('assignee')} value={form.assignee} onChange={event => onChange('assignee', event.target.value)} /></label>
       </div>
     </details>
     {onRun && <footer className="cf-dialog__footer">

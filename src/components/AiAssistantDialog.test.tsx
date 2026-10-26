@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { demoSnapshot } from '../data/demoFixture';
 import type { DraftForm, FilePlan } from './AiAssistantDialog';
-import { AiAssistantDialog, FilePlanPanel, PlanView, draftComplete } from './AiAssistantDialog';
+import { AiAssistantDialog, FilePlanPanel, PlanView, draftComplete, draftProblems } from './AiAssistantDialog';
 import { shownFields } from './aiMappingFields';
 import { NO_EDITS } from './planEdits';
 import { PlanRowEditor, SkippedRowsTable } from './AiPlanRows';
@@ -226,9 +226,22 @@ describe('the plan screen', () => {
       expect(markup.match(/確認並執行/g)).toHaveLength(1);
     });
 
+    it('marks missing choices and counts them before execution', () => {
+      const incomplete = { ...form, coverage: '' as const, sourceType: '' as const };
+      expect(draftProblems(incomplete)).toEqual(['coverage', 'sourceType']);
+      const markup = view({ form: incomplete });
+      expect(markup).toContain('文字部分還有 2 項未填妥');
+      expect(markup.match(/aria-invalid="true"/g)).toHaveLength(2);
+      expect(markup).toMatch(/disabled=""[^>]*>確認並執行/);
+    });
+    it('blocks a missing unit and an unreadable location before any write', () => {
+      expect(draftProblems({ ...form, unit: '' }, demoSnapshot)).toContain('unit');
+      expect(draftComplete({ ...form, floor: '後座' }, demoSnapshot)).toBe(false);
+    });
+
     it('will not let one press write only the half that was ready', () => {
       // The draft lost its worker, so neither footer may offer to run the pair.
-      expect(view({ form: { ...form, worker: '' } })).toContain('文字部分還有必填內容未填妥');
+      expect(view({ form: { ...form, worker: '' } })).toContain('文字部分還有 1 項未填妥');
     });
 
     it('keeps the file part when the text was only a heading for it', () => {

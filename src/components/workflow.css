@@ -316,3 +316,5 @@
 .cf-reminder__hidden{display:flex;gap:6px;margin:14px 0 0;padding:9px 10px;border-radius:8px;background:#fff6e8;color:#76501a;font-size:12px;line-height:1.6}
 .cf-reminder__hidden svg{flex:none;margin-top:2px}
 @media(max-width:650px){.cf-reminder__group ul{max-height:none}}
+
+.cf-ai__form [aria-invalid="true"]{border-color:#b34738;background:#fff8f7;outline-color:#b34738}
