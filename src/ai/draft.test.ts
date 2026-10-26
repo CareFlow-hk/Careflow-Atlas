@@ -92,3 +92,12 @@ describe('a note turned into one draft', () => {
     expect(read({ followUp: { action: '再上門', category: 'NOT_A_CATEGORY' } })).toMatchObject({ ok: false });
   });
 });
+
+describe('the three coverage results', () => {
+  it.each(['UNVISITED', 'ATTEMPTED', 'VISITED_NO_FINDING'])('accepts %s', coverage => {
+    expect(read({ coverage }).ok).toBe(true);
+  });
+  it.each(['UNKNOWN', 'PARTIAL', 'VISITED_WITH_FINDING', 'INACCESSIBLE'])('refuses legacy %s as a new AI choice', coverage => {
+    expect(read({ coverage }).ok).toBe(false);
+  });
+});

@@ -6,6 +6,10 @@
  */
 import { CONTACT_OUTCOMES, COVERAGE_STATUSES, HOUSING_ASSESSMENTS, SOURCE_TYPES, SUPPORT_CATEGORIES, type ClueLevel, type FollowUpEventAction, type ContactOutcome, type CoverageStatus, type HousingAssessment, type SourceType, type State, type StateBreakdown, type SupportCategory } from './types';
 
+/** Current entry choices; historical coverage values remain readable in saved records. */
+export const AI_COVERAGE_STATUSES = ['UNVISITED', 'ATTEMPTED', 'VISITED_NO_FINDING'] as const;
+export const aiCoverageLabels = { UNVISITED: '未到訪', ATTEMPTED: '未能完成探訪', VISITED_NO_FINDING: '已完成探訪' };
+
 /* ---------------------------------------------------------------- states --- */
 
 /** The legend and the four-state model read the same two tables. */

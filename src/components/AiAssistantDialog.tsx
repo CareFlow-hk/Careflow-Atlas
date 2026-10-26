@@ -26,7 +26,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { DragEvent } from 'react';
 import { AlertTriangle, CheckCircle2, FileSpreadsheet, ShieldCheck, Sparkles, Upload, X } from 'lucide-react';
-import { assessmentLabels, contactLabels, coverageLabels, sourceLabels } from '../domain/presentation';
+import { assessmentLabels, contactLabels, coverageLabels, aiCoverageLabels, sourceLabels } from '../domain/presentation';
 import type { ReminderAdvice, ReminderBook, ReminderTask, ReminderViewer } from '../domain/reminders';
 import type { NamedBuilding } from '../domain/buildingMentions';
 import { mentionedPlace } from '../domain/locationMentions';
@@ -902,7 +902,7 @@ function DraftPlanPanel({ snapshot, value, form, canCreate, label, onChange, onR
         <label>到訪日期<input type="date" value={form.date} onChange={event => onChange('date', event.target.value)} /></label>
         <label>到訪時間<input type="time" value={form.time} onChange={event => onChange('time', event.target.value)} /></label>
         <label>工作員<input value={form.worker} onChange={event => onChange('worker', event.target.value)} /></label>
-        <label>覆蓋結果<select value={form.coverage} onChange={event => onChange('coverage', event.target.value)}><option value="">請選擇</option>{Object.entries(coverageLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+        <label>覆蓋結果<select value={form.coverage} onChange={event => onChange('coverage', event.target.value)}><option value="">未填</option>{Object.entries(aiCoverageLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
         <label>接觸結果<select value={form.contact} onChange={event => onChange('contact', event.target.value)}><option value="">未填</option>{Object.entries(contactLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
         <label>住房判斷<select value={form.assessment} onChange={event => onChange('assessment', event.target.value)}><option value="">未填</option>{Object.entries(assessmentLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
         <label>資料來源<select value={form.sourceType} onChange={event => onChange('sourceType', event.target.value)}><option value="">未填</option>{Object.entries(sourceLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>

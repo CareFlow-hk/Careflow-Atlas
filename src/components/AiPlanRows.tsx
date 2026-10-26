@@ -13,7 +13,7 @@
 import { Fragment, useEffect, useState, type ReactNode } from 'react';
 import { IDENTITY_FIELDS, canonicalOptions } from '../ai/contract';
 import type { OutboundPreview } from '../ai/preview';
-import { acceptedAssessment, acceptedContact, acceptedCoverage, acceptedSource, assessmentLabels, contactLabels, coverageLabels, sourceLabels } from '../domain/presentation';
+import { acceptedAssessment, acceptedContact, acceptedCoverage, acceptedSource, assessmentLabels, contactLabels, aiCoverageLabels, sourceLabels } from '../domain/presentation';
 import { GENERIC_FIELDS, readOption, type ParsedRow } from '../imports/genericRows';
 import type { CanonicalField } from '../imports/profiles';
 import { cellKey, fieldEditKey, fieldKey, type EditSource, type PlanEdits } from './planEdits';
@@ -187,7 +187,7 @@ const optionField = (
 ): TableField => ({
   field, label, kind: 'select', required,
   options: Object.keys(labels).map(key => ({ key, label: labels[key] })),
-  parse: raw => readOption(raw, labels, accepted),
+  parse: raw => { const value = readOption(raw, labels, accepted); return value && !Object.hasOwn(labels, value) ? false : value; },
 });
 
 const TABLE_FIELDS: readonly TableField[] = [
@@ -197,7 +197,7 @@ const TABLE_FIELDS: readonly TableField[] = [
   { field: 'occurredAt', label: '到訪日期', kind: 'date', required: true },
   { field: 'occurredTime', label: '到訪時間', kind: 'time' },
   { field: 'worker', label: '工作員', kind: 'text', required: true },
-  optionField('coverage', '覆蓋結果', coverageLabels, acceptedCoverage, true),
+  optionField('coverage', '覆蓋結果', aiCoverageLabels, acceptedCoverage, true),
   optionField('contactOutcome', '接觸結果', contactLabels, acceptedContact),
   optionField('assessment', '住房判斷', assessmentLabels, acceptedAssessment, true),
   optionField('sourceType', '資料來源', sourceLabels, acceptedSource, true),
@@ -238,9 +238,9 @@ function SelectCell({ item, onEdit }: { item: CellState; onEdit: PlanRowFieldsPr
   const parse = field.parse!;
   const shown = parse(item.value);
   const originalKey = parse(item.original);
-  const value = shown === false ? item.value : shown ?? '';
+  const value = shown === false ? (field.field === 'coverage' ? '' : item.value) : shown ?? '';
   const changed = item.source ? `（${item.source === 'ai' ? 'AI 提議' : '人手改'}）` : '';
-  return <select className={item.missing ? 'is-missing' : undefined} value={value} title={`${field.label}${changed}`}
+  return <select className={item.missing ? 'is-missing' : undefined} value={value} title={`${field.label}${changed}${shown === false ? `（原值：${item.value}，請重選）` : ''}`}
     onChange={event => {
       const next = event.target.value;
       if (next === value) return;
@@ -249,7 +249,7 @@ function SelectCell({ item, onEdit }: { item: CellState; onEdit: PlanRowFieldsPr
       onEdit(item.key, next === back ? null : next, 'person');
     }}>
     <option value="">未填</option>
-    {shown === false && <option value={item.value}>{item.value}（看不懂，請重選）</option>}
+    {shown === false && field.field !== 'coverage' && <option value={item.value}>{item.value}（看不懂，請重選）</option>}
     {field.options!.map(option => <option key={option.key} value={option.key}>{option.label}</option>)}
   </select>;
 }

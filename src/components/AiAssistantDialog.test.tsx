@@ -189,6 +189,13 @@ describe('the plan screen', () => {
       expect(markup.match(/確認並執行/g)).toHaveLength(1);
     });
 
+    it('offers only the three coverage results and an empty choice', () => {
+      const markup = view();
+      const options = markup.match(/覆蓋結果<select[^>]*>(.*?)<\/select>/)?.[1] ?? '';
+      expect(options.match(/<option/g)).toHaveLength(4);
+      for (const label of ['未填', '未到訪', '未能完成探訪', '已完成探訪']) expect(options).toContain(label);
+    });
+
     it('will not let one press write only the half that was ready', () => {
       // The draft lost its worker, so neither footer may offer to run the pair.
       expect(view({ form: { ...form, worker: '' } })).toContain('文字部分還有必填內容未填妥');

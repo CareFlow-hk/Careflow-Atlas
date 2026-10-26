@@ -16,9 +16,9 @@
  * one of the two would be exactly the "take the columns that look right" that CLAUDE.md 3.1
  * forbids.
  */
-import { assessmentLabels, contactLabels, coverageLabels, supportCategoryLabels } from '../domain/presentation';
+import { assessmentLabels, contactLabels, coverageLabels, AI_COVERAGE_STATUSES, supportCategoryLabels } from '../domain/presentation';
 import { hkDay } from '../domain/reminders';
-import { CONTACT_OUTCOMES, COVERAGE_STATUSES, HOUSING_ASSESSMENTS, SUPPORT_CATEGORIES, type OutreachSnapshot } from '../domain/types';
+import { CONTACT_OUTCOMES, HOUSING_ASSESSMENTS, SUPPORT_CATEGORIES, type OutreachSnapshot } from '../domain/types';
 import { FORMAT_PROFILES, type CanonicalField } from '../imports/profiles';
 import { AiRequestError, callAi, type AiAssistMarker } from './client';
 import { canonicalOptions, readDraft, readPatchReply, readSuggestion, type AiDraft, type AiFieldSuggestion, type AiPatchSet, type AiSuggestion, type ReadContext } from './contract';
@@ -170,7 +170,7 @@ export async function suggestDraft({ text, snapshot, fetcher, today = hkDay() }:
     today,
     buildings: snapshot.buildings.map(building => ({ id: building.id, name: building.name })),
     locations,
-    coverage: COVERAGE_STATUSES.map(key => ({ key, label: coverageLabels[key] })),
+    coverage: AI_COVERAGE_STATUSES.map(key => ({ key, label: coverageLabels[key] })),
     contacts: CONTACT_OUTCOMES.map(key => ({ key, label: contactLabels[key] })),
     assessments: HOUSING_ASSESSMENTS.map(key => ({ key, label: assessmentLabels[key] })),
     categories: SUPPORT_CATEGORIES.map(key => ({ key, label: supportCategoryLabels[key] })),
@@ -232,7 +232,7 @@ export async function suggestPatches({
     columns: payloadColumns,
     rows: payloadRows,
     omitted: rows.length - chosen.length,
-    coverage: COVERAGE_STATUSES.map(key => ({ key, label: coverageLabels[key] })),
+    coverage: AI_COVERAGE_STATUSES.map(key => ({ key, label: coverageLabels[key] })),
     contacts: CONTACT_OUTCOMES.map(key => ({ key, label: contactLabels[key] })),
     assessments: HOUSING_ASSESSMENTS.map(key => ({ key, label: assessmentLabels[key] })),
     categories: SUPPORT_CATEGORIES.map(key => ({ key, label: supportCategoryLabels[key] })),

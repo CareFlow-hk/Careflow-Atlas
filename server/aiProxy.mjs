@@ -48,6 +48,17 @@ const SERVER_OWNED = [
   'timeout', 'timeoutMs', 'retry', 'apiKey', 'key', 'provider',
 ];
 
+export const AI_COVERAGE_STATUSES = Object.freeze(['UNVISITED', 'ATTEMPTED', 'VISITED_NO_FINDING']);
+const coverageOptions = value => {
+  const options = labelPairs(value, '覆蓋結果');
+  requireValue(options.every(item => AI_COVERAGE_STATUSES.includes(item.key)), 400, '覆蓋結果不在可選範圍內。');
+  return [
+    { key: 'UNVISITED', label: '未到訪' },
+    { key: 'ATTEMPTED', label: '未能完成探訪' },
+    { key: 'VISITED_NO_FINDING', label: '已完成探訪' },
+  ];
+};
+
 const isObject = value => typeof value === 'object' && value !== null && !Array.isArray(value);
 const says = name => `「${name}」格式不正確，請重新整理頁面後再試。`;
 
@@ -143,7 +154,7 @@ function draftRequest(body) {
     today: dayOf(body.today, 'today'),
     buildings: buildings.map(({ id, name }) => ({ id, name })),
     locations: locations.map(({ buildingId, floorLabel, unitLabel }) => ({ buildingId, floorLabel, unitLabel })),
-    coverage: labelPairs(body.coverage, 'coverage'),
+    coverage: coverageOptions(body.coverage),
     contacts: labelPairs(body.contacts, 'contacts'),
     assessments: labelPairs(body.assessments, 'assessments'),
     categories: labelPairs(body.categories, 'categories'),
@@ -173,7 +184,7 @@ function patchRequest(body) {
     columns: columns.map(({ columnIndex, header, field, label }) => ({ columnIndex, header, field, label })),
     rows: rows.map(({ row, values }) => ({ row, values })),
     omitted: integerOf(body.omitted ?? 0, 'omitted', 0, 100_000),
-    coverage: labelPairs(body.coverage, 'coverage'),
+    coverage: coverageOptions(body.coverage),
     contacts: labelPairs(body.contacts, 'contacts'),
     assessments: labelPairs(body.assessments, 'assessments'),
     categories: labelPairs(body.categories, 'categories'),
@@ -202,9 +213,10 @@ class UpstreamFailure extends Error {
 }
 class UnreadableAnswer extends Error {}
 
-function judge(answer) {
+function judge(answer, kind) {
   if (!isObject(answer)) throw new UnreadableAnswer();
   requireValue(typeof answer.status === 'string', 502, 'AI 回覆格式不完整，請重試或改用人手對應。');
+  if (kind === 'draft' && answer.coverage != null && !AI_COVERAGE_STATUSES.includes(answer.coverage)) throw new UnreadableAnswer();
   return answer;
 }
 
@@ -213,7 +225,7 @@ export function createAiService({ settings = azureSettings(), fetchImpl = fetch,
   const fallbackModel = settings.fallbackModel && settings.fallbackModel !== settings.model ? settings.fallbackModel : null;
   const status = () => ({ provider: AI_ASSIST_PROVIDER, configured: settings.configured, model: settings.model, fallbackModel });
 
-  async function ask(prompt, model, signal) {
+  async function ask(prompt, model, signal, kind) {
     signal.throwIfAborted();
     const response = await fetchImpl(`${settings.endpoint}/responses`, {
       method: 'POST',
@@ -257,7 +269,7 @@ export function createAiService({ settings = azureSettings(), fetchImpl = fetch,
     const raw = content.filter(item => item.type === 'output_text').map(item => item.text).join('');
     let answer;
     try { answer = JSON.parse(raw.replace(/^```(?:json)?\s*|\s*```$/g, '')); } catch { throw new UnreadableAnswer(); }
-    judge(answer);
+    judge(answer, kind);
     return {
       answer,
       // Azure's own id is the strongest trace there is; a generated one still lets the
@@ -286,7 +298,7 @@ export function createAiService({ settings = azureSettings(), fetchImpl = fetch,
       requireValue((active.get(orgId) ?? 0) < AI_MAX_CONCURRENT, 429, '這個機構已有 AI 請求正在處理，請稍後再試。');
       active.set(orgId, (active.get(orgId) ?? 0) + 1);
       const total = AbortSignal.any([AbortSignal.timeout(timeoutMs * 2), ...(signal ? [signal] : [])]);
-      const attempt = model => ask(buildPrompt(kind, request), model, AbortSignal.any([total, AbortSignal.timeout(timeoutMs)]));
+      const attempt = model => ask(buildPrompt(kind, request), model, AbortSignal.any([total, AbortSignal.timeout(timeoutMs)]), kind);
       const started = Date.now();
       try {
         let result;

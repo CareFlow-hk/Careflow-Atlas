@@ -6,9 +6,9 @@
  * what CLAUDE.md 3.1 forbids. Nothing here decides business facts: only "which of the
  * existing columns is which existing field".
  */
-import { acceptedAssessment, acceptedContact, acceptedCoverage, acceptedSource, assessmentLabels, contactLabels, coverageLabels, sourceLabels, supportCategoryLabels } from '../domain/presentation';
+import { acceptedAssessment, acceptedContact, acceptedCoverage, acceptedSource, assessmentLabels, contactLabels, coverageLabels, AI_COVERAGE_STATUSES, sourceLabels, supportCategoryLabels } from '../domain/presentation';
 import { resolveRelativeDay } from '../domain/relativeDay';
-import { CONTACT_OUTCOMES, COVERAGE_STATUSES, HOUSING_ASSESSMENTS, SOURCE_TYPES, SUPPORT_CATEGORIES, type ContactOutcome, type CoverageStatus, type HousingAssessment, type SourceType, type SupportCategory } from '../domain/types';
+import { CONTACT_OUTCOMES, HOUSING_ASSESSMENTS, SOURCE_TYPES, SUPPORT_CATEGORIES, type ContactOutcome, type CoverageStatus, type HousingAssessment, type SourceType, type SupportCategory } from '../domain/types';
 import { readOption } from '../imports/genericRows';
 import { FORMAT_PROFILES, type CanonicalField, type ProfileId } from '../imports/profiles';
 
@@ -310,7 +310,7 @@ export function readDraft(raw: unknown, context: DraftContext): DraftRead {
     if (value == null) return undefined;
     return typeof value === 'string' && (allowed as readonly string[]).includes(value) ? value as T : false;
   };
-  const coverage = pick(raw.coverage, COVERAGE_STATUSES);
+  const coverage = pick(raw.coverage, AI_COVERAGE_STATUSES);
   const contactOutcome = pick(raw.contactOutcome, CONTACT_OUTCOMES);
   const assessment = pick(raw.assessment, HOUSING_ASSESSMENTS);
   const sourceType = pick(raw.sourceType, SOURCE_TYPES);
@@ -498,6 +498,7 @@ export function readPatchReply(raw: unknown, context: PatchContext): PatchRead {
         : targetField === 'sourceType' ? readOption(value, sourceLabels, acceptedSource)
         : targetField === 'followUpCategory' ? readOption(value, supportCategoryLabels, {} as Record<string, SupportCategory>)
         : undefined;
+      if (targetField === 'coverage' && allowed && !(AI_COVERAGE_STATUSES as readonly string[]).includes(allowed)) return patchReject('覆蓋結果只可選未到訪、未能完成探訪或已完成探訪。');
       if (allowed === false) return patchReject(`第 ${row} 行的「${value}」不是可選的寫法。`);
     }
 

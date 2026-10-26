@@ -218,3 +218,13 @@ test('the record marker accepts the proxy’s own output and keeps historical pr
   assert.throws(() => assertAiAssist({ aiAssist: { at: '2026-10-25T08:00:00.000Z', provider: 'azure-openai', model: 'm', requestId: 'bad id with spaces' } }), error => error.status === 400);
   assert.throws(() => assertAiAssist({ aiAssist: { at: 'not a date', provider: 'azure-openai', model: 'm' } }), error => error.status === 400);
 });
+
+test('coverage is a fixed server-owned three-choice range, including upstream replies', async () => {
+  const allowed = ['UNVISITED', 'ATTEMPTED', 'VISITED_NO_FINDING'];
+  assert.deepEqual(readAiRequest(draftBody()).request.coverage.map(item => item.key), allowed);
+  for (const coverage of ['UNKNOWN', 'PARTIAL', 'VISITED_WITH_FINDING', 'INACCESSIBLE']) {
+    assert.throws(() => readAiRequest(draftBody({ coverage: [{ key: coverage, label: 'invalid' }] })), error => error.status === 400);
+    const service = createAiService({ settings, fetchImpl: async () => answer({ status: 'DRAFT', coverage }) });
+    await assert.rejects(service.assist(draftBody(), user), error => error.status === 502);
+  }
+});
