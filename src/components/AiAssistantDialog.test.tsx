@@ -164,6 +164,16 @@ describe('the plan screen', () => {
     expect(markup).toMatch(/aria-label="這份表是哪一年？"[^>]*value=""/);
   });
 
+  it('keeps literal structure suggestions unchecked until the person opts in', () => {
+    const structural = { ...plan, result: { ...plan.result, pending: [{ buildingId: 'bldg-yu-an', buildingName: '裕安樓', floorLabel: '3樓', unitLabel: 'A1室、A2室', newFloor: false, rowNumbers: [2], structureUnits: ['A1室', 'A2室'], description: 'A 單位分成 2 間' }] } };
+    const markup = renderToStaticMarkup(<FilePlanPanel plan={structural} canCreate edits={NO_EDITS} onEdit={() => undefined}
+      onEditMany={() => undefined} onChangeColumn={() => undefined} onBack={() => undefined} />);
+    expect(markup).toContain('建議建立的結構（預設不執行）');
+    expect(markup).toContain('A 單位分成 2 間');
+    const section = markup.match(/cf-ai__structures[^]*?<\/section>/)?.[0] ?? '';
+    expect(section).not.toContain('checked');
+  });
+
   it('never shows the key', () => {
     expect(html).not.toContain('sk-');
   });

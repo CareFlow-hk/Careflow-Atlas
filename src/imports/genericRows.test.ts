@@ -129,10 +129,11 @@ describe('rows that need a person', () => {
     expect(result.rows[0].issues[0].message).toContain('AI 不會代為建立');
   });
 
-  it('will not keep a floor without a unit', () => {
+  it('keeps an explicitly stated floor as a floor-level record', () => {
     const result = parse([row({ 3: '' })]);
-    expect(result.rows[0].status).toBe('INVALID');
-    expect(result.rows[0].issues.map(issue => issue.code)).toContain('LOCATION');
+    expect(result.rows[0].status).toBe('READY');
+    expect(result.rows[0].input?.floorId).toBe(floor.id);
+    expect(result.rows[0].input?.unitId).toBeUndefined();
   });
 
   it('offers a floor and unit the file names but the workspace does not have', () => {
@@ -141,7 +142,7 @@ describe('rows that need a person', () => {
     expect(result.rows[0].input).toBeUndefined();
     expect(result.rows[0].issues[0].message).toContain('系統還沒有');
     expect(result.pending).toEqual([
-      { buildingId: building.id, buildingName: building.name, floorLabel: '9F', newFloor: true, unitLabel: '9F A室', rowNumbers: [2] },
+      { buildingId: building.id, buildingName: building.name, floorLabel: '9樓', newFloor: true, unitLabel: 'A室', rowNumbers: [2] },
     ]);
   });
 
@@ -168,7 +169,7 @@ describe('rows that need a person', () => {
 
   it('still refuses wording the structure rules cannot read', () => {
     const result = parse([row({ 2: '頂樓', 3: '頂樓 A室' })]);
-    expect(result.rows[0].status).toBe('INVALID');
+    expect(result.rows[0].status).toBe('NEEDS_REVIEW');
     expect(result.pending).toEqual([]);
   });
 

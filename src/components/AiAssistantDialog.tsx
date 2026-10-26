@@ -31,7 +31,7 @@ import type { ReminderAdvice, ReminderBook, ReminderTask, ReminderViewer } from 
 import type { NamedBuilding } from '../domain/buildingMentions';
 import { yearlessDate } from '../domain/sheetDate';
 import { mentionedPlace } from '../domain/locationMentions';
-import { proposeLocation, type LocationProposal } from '../domain/structure';
+import { findPaperLocation, proposeLocation, type LocationProposal } from '../domain/structure';
 import type { ContactOutcome, CoverageStatus, HousingAssessment, OutreachSnapshot, SaveObservationInput, SourceType } from '../domain/types';
 import { detectWorkbook } from '../imports/detector';
 import { parseGenericRows, readSheetMatrix, type GenericParseInput, type GenericParseResult, type SheetMatrix } from '../imports/genericRows';
@@ -98,6 +98,7 @@ export interface FilePlan {
   /** The sheet, read once, so every edit re-parses without decoding the workbook again. */
   matrix: SheetMatrix;
   result: GenericParseResult;
+  selectedStructures?: readonly string[];
 }
 
 /** Everything a `FilePlan` is built from; the parse itself is always recomputed. */
@@ -267,7 +268,7 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
   /** A plan without the parse that is about to be recomputed. */
   const baseOf = (file: FilePlan): FilePlanBase => ({
     aiAssist: file.aiAssist, preview: file.preview, suggestion: file.suggestion,
-    columns: file.columns, parse: file.parse, matrix: file.matrix,
+    columns: file.columns, parse: file.parse, matrix: file.matrix, selectedStructures: file.selectedStructures,
   });
 
   /** One stage for one confirmed piece of work, whichever inputs went into it. */
@@ -299,6 +300,12 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
     const headerRow = suggestion.headerRow ?? draft.preview.headerRow;
     if (headerRow === null || headerRow === undefined) { setStage({ kind: 'error', message: 'AI 找不到表頭，無法確定哪一行才是資料。請在工作表加上表頭後再試。' }); return null; }
     const columns = Object.fromEntries(suggestion.fields.map(field => [field.key, field.columnIndex]));
+    // This closed combined-header convention is parsed locally, never split by the model.
+    const combined = draft.preview.headers.findIndex(header => /^樓層[／/]單位$/.test(header.trim()));
+    if (combined >= 0) {
+      for (const key of Object.keys(columns)) if (columns[key] === combined) columns[key] = null;
+      columns.floor = combined;
+    }
     const run: ParseRun = { buffer: draft.buffer, sheetName: draft.preview.sheetName, headerRow: headerRow + 1, mapping: toMapping(columns), fileName: draft.preview.fileName, defaultBuilding, defaultPlace };
     return withResult({ aiAssist, preview: draft.preview, suggestion, columns, parse: run, matrix: draft.matrix }, edits);
   };
@@ -435,18 +442,21 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
     let latest = snapshot;
     const made: string[] = [];
     if (file) {
-      const places = placesToCreate(file.result);
+      const places = filePlanRows(file, !!onApplyProposal).places;
       if (places.length && !onApplyProposal) {
         setStage({ kind: 'error', message: '結構編輯目前關閉，不能在這裡新增樓層或單位。請先在「編輯結構」新增，再回來執行。' });
         return;
       }
       for (const place of places) {
-        const proposal = proposeLocation(latest, place.buildingId, place.floorLabel, place.unitLabel);
+        for (const label of place.structureUnits ?? [place.unitLabel]) {
+        if (findPaperLocation(latest, place.buildingId, place.floorLabel, label)) continue;
+        const proposal = proposeLocation(latest, place.buildingId, place.floorLabel, label);
         if (!proposal) { setStage({ kind: 'error', message: `系統讀不出「${place.floorLabel} ${place.unitLabel}」該怎樣建（只認數字樓層＋字母單位）。請在「編輯結構」手動新增，再回來執行。` }); return; }
         const applied = onApplyProposal!(proposal);
         if ('error' in applied) { setStage({ kind: 'error', message: applied.error }); return; }
         latest = applied.snapshot;
-        made.push(`${place.floorLabel} ${place.unitLabel}`);
+        made.push(`${place.floorLabel} ${label}`);
+        }
       }
     }
     const inputs: SaveObservationInput[] = [];
@@ -626,6 +636,12 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
         notice={stage.kind === 'plan' ? stage.notice : undefined}
         edits={edits}
         chat={plan.source === 'text' ? undefined : { turns: chat, value: ask, asking, onChange: setAsk, onAsk: () => void askPlan() }}
+        onToggleStructure={key => {
+          if (plan.source === 'text') return;
+          const chosen = new Set(plan.file.selectedStructures ?? []);
+          if (chosen.has(key)) chosen.delete(key); else chosen.add(key);
+          showPlan({ ...plan.file, selectedStructures: [...chosen] }, plan.source === 'both' ? plan.text : undefined);
+        }}
         onChangeYear={year => {
           if (plan.source === 'text') return;
           const base = baseOf(plan.file);
@@ -698,9 +714,10 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
  * writes it. Two sources stack with their own headings and their own rules, but they share
  * one footer — one press always means the whole list, never only the half that was ready.
  */
-export function PlanView({ plan, snapshot, form, canCreate, notice, edits, chat, onChangeYear, onChangeColumn, onChangeForm, onEdit, onEditMany, onRun, onBack }: {
+export function PlanView({ plan, snapshot, form, canCreate, notice, edits, chat, onToggleStructure, onChangeYear, onChangeColumn, onChangeForm, onEdit, onEditMany, onRun, onBack }: {
   plan: Plan; snapshot: OutreachSnapshot; form: DraftForm; canCreate: boolean; notice?: string;
   edits: PlanEdits; chat?: PlanChat;
+  onToggleStructure?: (key: string) => void;
   onChangeYear?: (year: number | undefined) => void;
   onChangeColumn: (key: CanonicalField, index: number | null) => void;
   onChangeForm: (key: keyof DraftForm, value: string) => void;
@@ -721,7 +738,7 @@ export function PlanView({ plan, snapshot, form, canCreate, notice, edits, chat,
     : '兩部分會在同一次寫入裡完成，以你的帳號署名，並標明「由 AI 協助」。';
   return <>
     {file && <FilePlanPanel plan={file} canCreate={canCreate} label={both ? `檔案：${file.preview.fileName}` : undefined}
-      edits={edits} chat={chat} onChangeYear={onChangeYear} onChangeColumn={onChangeColumn} onEdit={onEdit} onEditMany={onEditMany} onRun={both ? undefined : onRun} onBack={onBack} />}
+      edits={edits} chat={chat} onToggleStructure={onToggleStructure} onChangeYear={onChangeYear} onChangeColumn={onChangeColumn} onEdit={onEdit} onEditMany={onEditMany} onRun={both ? undefined : onRun} onBack={onBack} />}
     {text && <DraftPlanPanel snapshot={snapshot} value={text.value} form={form} canCreate={canCreate}
       label={both ? '文字：由這段原話整理的 1 筆記錄' : undefined} onChange={onChangeForm}
       onRun={both ? undefined : onRun} onBack={onBack} />}
@@ -741,7 +758,9 @@ function filePlanRows(plan: FilePlan, canCreate: boolean) {
   // Without the structure edit nothing can be created, so the rows that wait for a new
   // floor/unit are not counted as writable — no footer may promise them. A place is only
   // created when it turns a row into something writable.
-  const places = canCreate ? placesToCreate(plan.result) : [];
+  const required = canCreate ? placesToCreate({ ...plan.result, pending: plan.result.pending.filter(place => !place.structureUnits) }) : [];
+  const optional = canCreate ? plan.result.pending.filter(place => place.structureUnits && plan.selectedStructures?.includes(placeKey(place))) : [];
+  const places = [...required, ...optional];
   return { places, writable: plannedRows(plan.result, new Set(places.map(placeKey))) };
 }
 
@@ -753,8 +772,9 @@ export const draftComplete = (form: DraftForm) => !!form.buildingId && !!form.da
  * Each record opens into the cells it came from: a value per header, the source of the
  * last change (人 or AI), and a way to supply a field the sheet never printed.
  */
-export function FilePlanPanel({ plan, canCreate, label, edits, chat, onChangeYear, onChangeColumn, onEdit, onEditMany, onRun, onBack }: {
+export function FilePlanPanel({ plan, canCreate, label, edits, chat, onToggleStructure, onChangeYear, onChangeColumn, onEdit, onEditMany, onRun, onBack }: {
   plan: FilePlan; canCreate: boolean; label?: string; edits: PlanEdits; chat?: PlanChat;
+  onToggleStructure?: (key: string) => void;
   onChangeYear?: (year: number | undefined) => void;
   onChangeColumn: (key: CanonicalField, index: number | null) => void;
   onEdit: (key: string, value: string | null, source: EditSource) => void;
@@ -784,6 +804,12 @@ export function FilePlanPanel({ plan, canCreate, label, edits, chat, onChangeYea
       {needsYear && <label className="cf-ai__year">這份表是哪一年？<input aria-label="這份表是哪一年？" type="number" min="1000" max="9999" step="1" placeholder="請填四位數年份" value={plan.parse.sheetYear ?? ''}
         onChange={event => onChangeYear?.(event.target.value ? Number(event.target.value) : undefined)} /><small>只套用原表沒有年份的日期，整份表會重新核對。</small></label>}
       <p className="cf-ai__note">{preview.fileName}：「{preview.sheetName}」共 {preview.totalRows} 行 → 寫入 {writable.length} 筆記錄{creating ? `，並新增 ${creating} 個樓層／單位` : ''}{skipped.length ? `；${skipped.length} 行不會寫入（原因在下面）` : ''}。</p>
+      {result.pending.some(place => place.structureUnits) && <section className="cf-ai__structures"><h4>建議建立的結構（預設不執行）</h4>
+        {result.pending.filter(place => place.structureUnits).map(place => <label key={placeKey(place)}>
+          <input type="checkbox" disabled={!canCreate} checked={plan.selectedStructures?.includes(placeKey(place)) ?? false} onChange={() => onToggleStructure?.(placeKey(place))} />
+          {place.buildingName} · {place.floorLabel}：{place.description}（第 {place.rowNumbers.join('、')} 行）
+        </label>)}
+      </section>}
       {totalChanged > 0 && <p className="cf-ai__note" role="status">已改 {totalChanged} 格（人手 {changed.person}、AI {changed.ai}）。每次改動都由系統重新核對整份表，不是只改畫面上的字。</p>}
       {result.notes.map((note, index) => <p className="cf-error" key={index}><AlertTriangle />{note}</p>)}
       {actions.length ? <ul className="cf-ai__actions">{actions.map(action => action.kind === 'place'

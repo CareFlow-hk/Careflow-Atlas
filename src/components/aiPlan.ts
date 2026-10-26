@@ -71,7 +71,7 @@ export function plannedRows(result: GenericParseResult, chosen: ReadonlySet<stri
     for (const rowNumber of place.rowNumbers) waiting.add(rowNumber);
   }
   return result.rows.filter(row => !row.suspectedDuplicateOf && !row.suspectedDuplicateOfRow && (
-    row.input || (waiting.has(row.rowNumber) && row.issues.length > 0 && row.issues.every(issue => issue.code === 'LOCATION'))
+    row.input || (waiting.has(row.rowNumber) && row.issues.length > 0 && row.issues.every(issue => issue.code === 'LOCATION' || issue.code === 'LOCATION_REVIEW'))
   ));
 }
 

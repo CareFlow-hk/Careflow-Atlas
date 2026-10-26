@@ -9,10 +9,11 @@
  * building makes a row `NEEDS_REVIEW` or `INVALID`, never a default.
  */
 import * as XLSX from 'xlsx';
+import { parseLocationText, parseFloorNumber, type StructureHint } from '../domain/locationText';
 import { yearlessDate, sheetDateWithYear } from '../domain/sheetDate';
 import { acceptedAssessment, acceptedContact, acceptedCoverage, acceptedSource, assessmentLabels, contactLabels, coverageLabels, sourceLabels, supportCategoryLabels } from '../domain/presentation';
 import { effectiveObservations, type Building, type ContactOutcome, type CoverageStatus, type HousingAssessment, type OutreachSnapshot, type SaveObservationInput, type SourceType, type SupportCategory } from '../domain/types';
-import { findPaperLocation, floorNumber, proposeLocation, readPaperFloor } from '../domain/structure';
+import { findPaperLocation, proposeLocation, readPaperFloor } from '../domain/structure';
 import type { CanonicalField } from './profiles';
 
 export type RowStatus = 'READY' | 'NEEDS_REVIEW' | 'INVALID';
@@ -38,6 +39,9 @@ export interface PendingPlace {
   unitLabel: string;
   /** 1-based worksheet rows naming this place. */
   rowNumbers: number[];
+  /** Structure read literally from a combined floor cell; opt-in, never auto-created. */
+  structureUnits?: string[];
+  description?: string;
 }
 
 export interface ParsedRow {
@@ -301,7 +305,7 @@ export function parseGenericRows(input: GenericParseInput): GenericParseResult {
     // label still wins; a number two floors share is ambiguous and is not guessed.
     const exact = floorText ? floors.filter(floor => floor.id === floorText || loose(floor.label) === loose(floorText)) : [];
     const number = readPaperFloor(floorText);
-    const byNumber = floorText && !exact.length && number !== undefined ? floors.filter(floor => floorNumber(floor.label) === number) : [];
+    const byNumber = floorText && !exact.length && number !== undefined ? floors.filter(floor => parseFloorNumber(floor.label) === number) : [];
     const matchFloor = exact.length ? exact : byNumber;
     if (floorText && matchFloor.length !== 1) {
       if (matchFloor.length) return { error: `樓層「${floorText}」對應到多層，請寫清楚。` } as const;
@@ -310,7 +314,7 @@ export function parseGenericRows(input: GenericParseInput): GenericParseResult {
       return { error: `在「${buildingName}」找不到樓層「${floorText}」。` } as const;
     }
     const floor = matchFloor[0];
-    if (floorText && !unitText) return { error: `只填了樓層「${floorText}」，未填單位。整幢的記錄請把樓層、單位都留空。` } as const;
+    if (floorText && !unitText) return { floorId: floor.id };
     const pool = floor ? units.filter(unit => unit.floorId === floor.id) : units;
     const unitLabel = unitText!;
     const matches = floor
@@ -399,13 +403,41 @@ export function parseGenericRows(input: GenericParseInput): GenericParseResult {
     const fallbackPlace = input.defaultPlace && buildingId === input.defaultPlace.buildingId && !ownFloor && !ownUnit
       ? input.defaultPlace : undefined;
     if (fallbackPlace) defaultPlaceRows++;
-    const floorText = ownFloor ?? fallbackPlace?.floorLabel, unitText = ownUnit ?? fallbackPlace?.unitLabel;
+    let floorText = ownFloor ?? fallbackPlace?.floorLabel, unitText = ownUnit ?? fallbackPlace?.unitLabel;
+    let structureHints: StructureHint[] = [];
+    const notation = floorText ? parseLocationText(floorText, 'floor') : undefined;
+    if (notation && !notation.ok) issues.push({ code: 'LOCATION_REVIEW', message: notation.reason });
+    if (notation?.ok) {
+      floorText = notation.floor;
+      if (!unitText) unitText = notation.unit;
+      structureHints = notation.structures;
+    }
+    if (unitText) {
+      const room = parseLocationText(unitText, 'unit', floorText);
+      if (!room.ok) issues.push({ code: 'LOCATION_REVIEW', message: room.reason });
+      else { floorText = room.floor; unitText = room.unit; }
+    }
+    if (buildingId && floorText && structureHints.length) {
+      const units = structureHints.flatMap(hint => hint.rooms
+        ? Array.from({ length: hint.rooms }, (_, index) => `${hint.unit}${index + 1}室`)
+        : [`${hint.unit}室`]);
+      const absent = units.filter(label => !findPaperLocation(input.snapshot, buildingId, floorText, label));
+      if (absent.length) {
+        const key = `${buildingId}|${floorText}|${units.join(',')}`;
+        const previous = pending.get(key);
+        if (previous) previous.rowNumbers.push(rowNumber);
+        else pending.set(key, { buildingId, buildingName: parsed.buildingName!, floorLabel: floorText,
+          newFloor: !input.snapshot.floors.some(floor => floor.buildingId === buildingId && parseFloorNumber(floor.label) === parseFloorNumber(floorText!)),
+          unitLabel: units.join('、'), structureUnits: absent,
+          description: structureHints.map(hint => hint.rooms ? `${hint.unit} 單位分成 ${hint.rooms} 間` : `${hint.unit} 單位`).join('；'), rowNumbers: [rowNumber] });
+      }
+    }
     let location: { floorId?: string; unitId?: string } | undefined;
     let waiting: Missing | undefined;
-    if (buildingId) {
+    if (buildingId && !issues.some(issue => issue.code === 'LOCATION_REVIEW')) {
       const resolved = resolveLocation(buildingId, floorText, unitText);
       if (resolved && 'error' in resolved) {
-        issues.push({ code: 'LOCATION', message: resolved.error });
+        issues.push({ code: structureHints.length || !unitText ? 'LOCATION_REVIEW' : 'LOCATION', message: resolved.error });
         waiting = resolved.missing;
         if (waiting) {
           const buildingName = parsed.buildingName ?? buildingId;
@@ -458,7 +490,7 @@ export function parseGenericRows(input: GenericParseInput): GenericParseResult {
       .map(entry => ({ header: entry.header, value: optional(values[entry.columnIndex]) }))
       .filter(entry => entry.value)
       .map(entry => `${entry.header ? `原表「${entry.header}」` : '原表未命名欄'}：${entry.value}`);
-    const note = [optional(at(values, 'note')), ...extras].filter(Boolean).join('；') || undefined;
+    const note = [optional(at(values, 'note')), ...(structureHints.length ? [`原表「樓層／單位」：${ownFloor}`] : []), ...extras].filter(Boolean).join('；') || undefined;
     const evidence = str(at(values, 'evidence')).split('\n').map(line => line.trim()).filter(Boolean);
     const visitId = optional(at(values, 'visitId')) ?? `ai-visit:${newId()}`;
     const occurredAt = parsed.occurredAt!;

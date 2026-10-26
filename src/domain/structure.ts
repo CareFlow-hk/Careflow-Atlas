@@ -1,3 +1,4 @@
+import { parseFloorNumber, parseLocationText } from './locationText';
 /**
  * Experimental: edit a building's floors and units in the UI instead of the Excel cell.
  * Pure functions; each returns a new snapshot or a refusal in staff wording. Nothing here
@@ -539,17 +540,13 @@ export function applyStructureChange(s: OutreachSnapshot, change: StructureChang
  * changed until `apply` is called.
  */
 export interface LocationProposal { label: string; steps: string[]; apply: (s: OutreachSnapshot) => { snapshot: OutreachSnapshot; unitId: string } | { error: string } }
-const plain = (value?: string | null) => (value ?? '').trim().toUpperCase().replace(/[\s·・]/g, '');
 export function readPaperFloor(text?: string | null): number | undefined {
-  const m = /^(\d{1,3})(?:\/?F|樓|層|字樓)?$/.exec(plain(text));
-  return m ? Number(m[1]) : undefined;
+  return text ? parseFloorNumber(text) : undefined;
 }
 export function readPaperUnit(text?: string | null, floorText?: string | null): { letter: string; room?: number } | undefined {
-  let value = plain(text);
-  const floor = plain(floorText);
-  if (floor && value.startsWith(floor)) value = value.slice(floor.length);
-  value = value.replace(/^(\d{1,3})(?:\/?F|樓|層)/, '').replace(/(室|房|號)$/, '');
-  const m = /^([A-Z])(\d{1,2})?$/.exec(value);
+  const parsed = parseLocationText(text ?? '', 'unit', floorText ?? undefined);
+  if (!parsed.ok || !parsed.unit) return undefined;
+  const m = /^([A-Z])(\d{1,2})?室$/.exec(parsed.unit);
   return m ? { letter: m[1], room: m[2] ? Number(m[2]) : undefined } : undefined;
 }
 
