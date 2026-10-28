@@ -26,7 +26,9 @@ export interface BuildingDetailProps { snapshot: OutreachSnapshot; selectedBuild
    * a member gets no delete control here, and the structure editor says why instead of
    * offering a button the server would refuse (2026-10-19).
    */
-  canDeleteStructure?: boolean; }
+  canDeleteStructure?: boolean;
+  overlapPeers?: readonly { id: string; name: string }[];
+  onSelectBuilding?: (id: string) => void; }
 
 const floorLabelOf = (snapshot: OutreachSnapshot, unit: Unit) => snapshot.floors.find(floor => floor.id === unit.floorId)?.label;
 const formatDay = (value: string) => new Intl.DateTimeFormat("zh-HK", { month: "short", day: "numeric" }).format(new Date(value.length === 10 ? `${value}T12:00:00` : value));
@@ -211,12 +213,19 @@ export function BuildingDetail(props: BuildingDetailProps) {
         {onBack && <button className="cf-icon-button" onClick={onBack} aria-label="返回地圖"><ArrowLeft /></button>}
         <div className="cf-plate__title">
           <span className="cf-caps">Plate {String(plate).padStart(2, "0")} · {building.address || "地址待補"}</span>
-          <h2>{building.name}</h2>
+          <h2>{building.name}{!!props.overlapPeers?.length && <> <small className="building-overlap-badge">可能重複</small></>}</h2>
           <p>{floors.length ? `${floors.length} 層 · ${drawnUnits.length} 個單位` : "樓層未知"} · <span className="cf-plate__state" style={{ "--cf-state": stateColors[state] } as CSSProperties}><i />整幢{stateLabels[state]}</span></p>
         </div>
         {features.nodeTags && <button className="cf-tag-button" aria-pressed={buildingTagged} onClick={() => onToggleTag({ buildingId: building.id }, buildingTagged ? undefined : "FOLLOW_UP")} title={buildingTagged ? "取消大廈的跟進標記" : "為全幢加上跟進標記"}><Flag size={15} />{buildingTagged ? "已標記" : "標記跟進"}</button>}
       </header>
       <div className="cf-building-content" key={building.id}>
+        {!!props.overlapPeers?.length && <section className="cf-plate__sec" aria-label="可能重複的大廈">
+          {props.overlapPeers.map(peer => <div key={peer.id}>
+            <p>這幢和『{peer.name}』的位置重疊，可能是同一幢。請管理員確認後保留一幢；有記錄的那幢先不要刪。</p>
+            <button type="button" className="cf-button" onClick={() => props.onSelectBuilding?.(peer.id)}>去『{peer.name}』</button>
+          </div>)}
+        </section>}
+
         <section className="cf-plate__figures" aria-label="覆蓋統計">
           <div><b>{summary.completed}</b><span>／{summary.total ?? "?"} 完成單位</span></div>
           <div className={summary.followUps ? "is-alert" : ""}><b>{summary.followUps}</b><span>待跟進</span></div>

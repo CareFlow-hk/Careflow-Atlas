@@ -1,3 +1,4 @@
+import { buildingOverlapGroups } from './buildingOverlaps';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Map as LibreMap, Marker, MercatorCoordinate, NavigationControl, ScaleControl, setWorkerUrl, type ExpressionSpecification, type GeoJSONSource, type MapMouseEvent } from 'maplibre-gl';
 import mapWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
@@ -8,7 +9,7 @@ import type { NewBuildingInput } from '../data/newBuilding';
 import { findOsmFootprint } from './osmFootprint';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { FeatureCollection, Polygon } from 'geojson';
-import { buildingFeatures, visibleBuildings, districtBounds, visibleDistrictLabels, DISTRICT_CAMERA, floorFeatures, floorBase, footprintOf, markerLabel, FLOOR_HEIGHT, type MapBuilding } from './mapModel';
+import { buildingFeatures, duplicateMarkerOffsets, visibleBuildings, districtBounds, visibleDistrictLabels, DISTRICT_CAMERA, floorFeatures, floorBase, footprintOf, markerLabel, FLOOR_HEIGHT, type MapBuilding } from './mapModel';
 import { easeInOutCubic, motionDuration, spatialMotion } from '../app/motion';
 import { contextPosition, cutawayEnabled, CutawayTransition, CUTAWAY_DURATION, focusCameraState, focusHeight, shouldLowerBuilding, sightBearing, cameraGroundPoint } from './focusContext';
 import { breakdownLabel, mapSceneColors, nodeTagLabel, stateColors, stateLabels, stateLegendNotes } from '../domain/presentation';
@@ -252,15 +253,17 @@ export default function MapScene(props: MapSceneProps) {
      * name and task tag would otherwise sit over the floor stack that focusing is meant
      * to show. The building's own state and count stay readable in the detail panel.
      */
+    const overlapPeers = buildingOverlapGroups(props.buildings).peers;
     markers.current = visibleBuildings(props.buildings, props.selectedBuildingId).map(building => {
       // The wording and the class names come from `markerLabel`, so what a marker says
       // can be asserted without a browser; only the assembly happens here.
-      const label = markerLabel(building, building.id === props.selectedBuildingId);
+      const label = markerLabel(building, building.id === props.selectedBuildingId, overlapPeers.has(building.id));
       const button = document.createElement('button');
       button.className = label.className;
       button.setAttribute('aria-label', label.ariaLabel);
       button.title = label.title;
       button.dataset.buildingId = building.id;
+      button.dataset.possibleDuplicate = String(label.possibleDuplicate);
       button.dataset.labelWidth = String(label.labelWidth);
       const dot = document.createElement('span'); dot.style.background = stateColors[building.state];
       const name = document.createElement('strong'); name.textContent = building.name;
@@ -274,6 +277,10 @@ export default function MapScene(props: MapSceneProps) {
         const task = document.createElement('em'); task.className = 'building-map-marker__task';
         task.textContent = label.task;
         button.append(task);
+      }
+      if (label.possibleDuplicate) {
+        const badge = document.createElement('em'); badge.className = 'building-overlap-badge';
+        badge.textContent = '可能重複'; button.append(badge);
       }
       button.addEventListener('click', e => { e.stopPropagation(); current.current.onSelectBuilding(building.id); });
       return new Marker({ element: button, anchor: 'bottom', offset: [0, -6] }).setLngLat([building.longitude, building.latitude]).addTo(map);
@@ -448,11 +455,15 @@ export default function MapScene(props: MapSceneProps) {
         const point = map.project(marker.getLngLat());
         return { id: element.dataset.buildingId!, x: point.x, y: point.y, width: Number(element.dataset.labelWidth) };
       });
+      const duplicates = new Set(markers.current.filter(marker => marker.getElement().dataset.possibleDuplicate === 'true').map(marker => marker.getElement().dataset.buildingId!));
+      const offsets = duplicateMarkerOffsets(labels, duplicates);
       const canvas = map.getCanvas();
-      const names = visibleDistrictLabels(labels, canvas.clientWidth, canvas.clientHeight);
+      const names = visibleDistrictLabels(labels.map(label => ({ ...label, y: label.y - (offsets.get(label.id) ?? 0) })), canvas.clientWidth, canvas.clientHeight);
       markers.current.forEach(marker => {
         const element = marker.getElement();
-        element.classList.toggle('is-compact', !names.has(element.dataset.buildingId!));
+        const id = element.dataset.buildingId!;
+        marker.setOffset([0, -6 - (offsets.get(id) ?? 0)]);
+        element.classList.toggle('is-compact', !duplicates.has(id) && !names.has(id));
       });
     };
     arrange();

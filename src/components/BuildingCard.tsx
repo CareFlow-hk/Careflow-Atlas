@@ -11,6 +11,7 @@ export interface BuildingCardProps {
   state: State;
   summary: CoverageSummary;
   selected: boolean;
+  possibleDuplicate?: boolean;
   onSelect: () => void;
 }
 
@@ -19,14 +20,14 @@ export interface BuildingCardProps {
  * leader — completed units and open tasks. A building with open tasks says so here,
  * because the index is where a whole district is compared at a glance.
  */
-export function BuildingCard({ name, address, floorCount, index, state, summary, selected, onSelect }: BuildingCardProps) {
+export function BuildingCard({ name, address, floorCount, index, state, summary, selected, onSelect, possibleDuplicate }: BuildingCardProps) {
   const tasks = summary.followUps;
   // An address may still be unknown for a building met in the field, which reads as no clause at all.
-  const described = `${name}${address ? ` · ${address}` : ""} · ${stateLabels[state]}${summary.total ? ` · ${summary.completed}/${summary.total} 個單位已查看` : ""}${floorCount ? ` · ${floorCount} 層` : ""}${tasks ? ` · ${tasks} 項待跟進` : ""}`;
+  const described = `${name}${possibleDuplicate ? " · 可能重複" : ""}${address ? ` · ${address}` : ""} · ${stateLabels[state]}${summary.total ? ` · ${summary.completed}/${summary.total} 個單位已查看` : ""}${floorCount ? ` · ${floorCount} 層` : ""}${tasks ? ` · ${tasks} 項待跟進` : ""}`;
   return (
     <button className={`building-row${selected ? " selected" : ""}${tasks ? " has-followup" : ""}`} onClick={onSelect} aria-pressed={selected} aria-label={described} title={described}>
       <span className="building-row__n">{String(index + 1).padStart(2, "0")}</span>
-      <span className="building-row__name"><i style={{ "--cf-state": stateColors[state] } as CSSProperties} aria-hidden="true" />{name}</span>
+      <span className="building-row__name"><i style={{ "--cf-state": stateColors[state] } as CSSProperties} aria-hidden="true" />{name}{possibleDuplicate && <small className="building-overlap-badge">可能重複</small>}</span>
       <span className="building-row__leader" aria-hidden="true" />
       <span className="building-row__v">
         <span>{summary.total ? <><b>{summary.completed}</b>/{summary.total}</> : "—"}</span>
