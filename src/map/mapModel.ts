@@ -85,7 +85,7 @@ export function defaultFootprintRing(point: { lng: number; lat: number }): numbe
 }
 
 /** Declared synthetic geometry only; not an indoor survey or inferred subdivision. */
-export function footprintOf(building: MapBuilding, paddingMetres = 0): number[][] {
+export function footprintOf(building: Pick<MapBuilding, 'longitude' | 'latitude' | 'footprint'>, paddingMetres = 0): number[][] {
   if (building.footprint && !paddingMetres) return building.footprint;
   const metresX = 111320 * Math.cos(building.latitude * Math.PI / 180);
   const ring = building.footprint ?? defaultFootprintRing({ lng: building.longitude, lat: building.latitude });

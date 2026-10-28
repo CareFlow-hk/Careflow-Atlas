@@ -1,3 +1,5 @@
+import { overlappingBuildings } from './buildingOverlaps';
+import { FootprintEditor } from './FootprintEditor';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { Map as LibreMap } from 'maplibre-gl';
@@ -85,12 +87,43 @@ describe('adding a building on the map', () => {
   });
 
   it('offers the right-click on the map in its instructions', () => {
-    const props = { map: {} as LibreMap, existingAt: () => undefined, onAdd: noop, onCancel: noop };
+    const props = { map: {} as LibreMap, buildings: [], onSelectBuilding: noop, onAdd: noop, onCancel: noop };
     const html = renderToStaticMarkup(<AddBuildingPanel {...props} />);
     expect(html).toContain('按右鍵');
     expect(html).toContain('地址可以留空');
     // The number is not asked for, and floors are the structure editor's job.
     expect(html).toContain('大廈編號會自動編');
     expect(html).not.toContain('樓層及單位');
+  });
+});
+
+// Final-shape checks cover both picking routes; the clicked point is deliberately outside.
+describe('final outline collision checks', () => {
+  const existing = { id: 'old', name: '合成舊樓', longitude: point.lng, latitude: point.lat, footprint: ring };
+  it('rejects an OSM outline covering an existing building even when the pick is outside it', () => {
+    const outside = { lng: 114.14015, lat: point.lat };
+    const larger = ring.map(([x, y]) => [x > 114.14 ? 114.1402 : x, y]);
+    const outline = seedRing({ point: outside, match: { ...matched, ring: larger } });
+    expect(overlappingBuildings(outline!, [existing]).map(b => b.id)).toEqual(['old']);
+  });
+  it('rejects a manually drawn right-click outline, including buildings without stored shapes', () => {
+    const input = buildingInput(form, { point, manual: true }, { ring, edited: true });
+    expect(overlappingBuildings(input.footprint!, [existing])).toHaveLength(1);
+    expect(overlappingBuildings(defaultFootprintRing(point), [{ ...existing, footprint: undefined }])).toHaveLength(1);
+  });
+  it('allows a shared wall and excludes only the building being edited', () => {
+    const adjacent = ring.map(([x, y]) => [x + .0001, y]);
+    expect(overlappingBuildings(adjacent, [existing])).toEqual([]);
+    expect(overlappingBuildings(ring, [existing], 'old')).toEqual([]);
+    expect(overlappingBuildings(ring, [existing, { ...existing, id: 'other' }], 'old').map(b => b.id)).toEqual(['other']);
+  });
+  it('lists every collision and disables saving an overlapping edit', () => {
+    const buildings = [existing, { ...existing, id: 'other', name: '合成第二樓' }];
+    const html = renderToStaticMarkup(<FootprintEditor map={{} as LibreMap} name="合成新樓" buildingId="new" buildings={buildings} onSelectBuilding={noop} origin={point} ring={ring} onSave={noop} onCancel={noop} onRestoreOsm={async () => undefined} />);
+    expect(html).toContain('去『合成舊樓』');
+    expect(html).toContain('去『合成第二樓』');
+    expect(html).toMatch(/disabled="">儲存形狀/);
+    const own = renderToStaticMarkup(<FootprintEditor map={{} as LibreMap} name="合成舊樓" buildingId="old" buildings={[existing]} onSelectBuilding={noop} origin={point} ring={ring} onSave={noop} onCancel={noop} onRestoreOsm={async () => undefined} />);
+    expect(own).not.toMatch(/disabled="">儲存形狀/);
   });
 });

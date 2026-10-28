@@ -504,10 +504,6 @@ export default function MapScene(props: MapSceneProps) {
   };
   // What a new building can be said to be near, as the add panel words its address suggestion.
   const neighbours = useMemo(() => props.buildings.map(b => ({ name: b.name, lng: b.longitude, lat: b.latitude })), [props.buildings]);
-  const existingAt = useMemo(() => (e: MapMouseEvent) => {
-    const id = mapRef.current?.queryRenderedFeatures(e.point, { layers: ['outreach-buildings'] })[0]?.properties.id;
-    return id === undefined ? undefined : current.current.buildings.find(b => b.id === String(id))?.name ?? String(id);
-  }, []);
   // Opening a building (from the list, say) ends adding without saving.
   useEffect(() => { if (adding && props.selectedBuildingId) stopAdding(false); }, [props.selectedBuildingId]); // eslint-disable-line react-hooks/exhaustive-deps
   // Leaving the building (or losing it) ends editing without saving.
@@ -557,12 +553,14 @@ export default function MapScene(props: MapSceneProps) {
     </div>}
     </div>
     {adding && mapRef.current && props.onAddBuilding && <div className="fp-editor-dock" style={{ left: (props.insets?.left ?? 0) + 16, right: (props.insets?.right ?? 0) + 16 }}>
-      <AddBuildingPanel map={mapRef.current} neighbours={neighbours} existingAt={existingAt}
+      <AddBuildingPanel map={mapRef.current} neighbours={neighbours} buildings={props.buildings}
+        onSelectBuilding={id => { stopAdding(false); props.onSelectBuilding(id); }}
         onCancel={() => stopAdding(true)}
         onAdd={input => props.onAddBuilding?.(input)} />
     </div>}
     {editing && active && editOrigin && mapRef.current && <div className="fp-editor-dock" style={{ left: (props.insets?.left ?? 0) + 16, right: (props.insets?.right ?? 0) + 16 }}>
-      <FootprintEditor key={active.id} map={mapRef.current} name={active.name} origin={editOrigin} ring={footprintOf(active)}
+      <FootprintEditor key={active.id} map={mapRef.current} name={active.name} buildingId={active.id} buildings={props.buildings}
+        onSelectBuilding={id => { stopEditing(); props.onSelectBuilding(id); }} origin={editOrigin} ring={footprintOf(active)}
         onCancel={stopEditing}
         onSave={ring => { props.onSaveFootprint?.(active.id, ring); stopEditing(); }}
         onRestoreOsm={async () => { const m = await findOsmFootprint({ lng: active.longitude, lat: active.latitude }); return m.kind === 'none' ? undefined : m.ring; }} />
