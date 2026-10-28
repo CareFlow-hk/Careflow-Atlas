@@ -21,6 +21,7 @@ COPY index.html vite.config.ts tsconfig.json ./
 COPY src ./src
 COPY public ./public
 COPY scripts ./scripts
+COPY shared ./shared
 
 # 底图样式地址在构建期烘进 bundle（VITE_ 变量会进浏览器，不要放密码）。
 # 留空则用代码内默认值 https://tiles.openfreemap.org/styles/positron
