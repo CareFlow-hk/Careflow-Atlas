@@ -31,3 +31,13 @@ test('AI proxy allows the server body and both upstream timeout windows', () => 
   }
   assert.ok(!conf.includes('https://api.deepseek.com'));
 });
+
+// 2026-10-28: #21 moved the AI draft contract into shared/, but neither image copied that folder,
+// so the web build failed on the VPS and the auth image would not have started. Local builds see
+// the whole checkout, so only the Dockerfiles show it.
+test('both images copy every top-level folder their code imports from', () => {
+  const web = readFileSync(new URL('../Dockerfile', import.meta.url), 'utf8');
+  const auth = readFileSync(new URL('./Dockerfile', import.meta.url), 'utf8');
+  for (const folder of ['src', 'public', 'scripts', 'shared']) assert.match(web, new RegExp(`^COPY ${folder} \\./${folder}$`, 'm'));
+  for (const folder of ['server', 'shared']) assert.match(auth, new RegExp(`^COPY --chown=node:node ${folder} \\./${folder}$`, 'm'));
+});
