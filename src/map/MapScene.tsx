@@ -1,8 +1,9 @@
+import { scheduleFlatPitchLock } from './flatPitchLock';
 import { buildingOverlapGroups } from './buildingOverlaps';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Map as LibreMap, Marker, MercatorCoordinate, NavigationControl, ScaleControl, setWorkerUrl, type ExpressionSpecification, type GeoJSONSource, type MapMouseEvent } from 'maplibre-gl';
 import mapWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
-import { Compass, Flag, Layers3, MapPinPlus, Minus, PenLine, Plus, Scan, WifiOff } from 'lucide-react';
+import { Compass, Flag, Layers3, MapPinPlus, Minus, PenLine, Plus, RotateCcw, Scan, WifiOff } from 'lucide-react';
 import { FootprintEditor } from './FootprintEditor';
 import { AddBuildingPanel } from './AddBuildingPanel';
 import type { NewBuildingInput } from '../data/newBuilding';
@@ -70,6 +71,7 @@ export default function MapScene(props: MapSceneProps) {
   const [adding, setAdding] = useState(false);
   const addingRef = useRef(false);
   addingRef.current = adding;
+  const cancelPitchLock = useRef<(() => void) | undefined>(undefined);
   const beforeEdit = useRef<{ center: [number, number]; zoom: number; pitch: number; bearing: number; maxPitch: number } | undefined>(undefined);
   const editOrigin = useMemo(() => active ? { lng: active.longitude, lat: active.latitude } : undefined, [active?.longitude, active?.latitude]); // eslint-disable-line react-hooks/exhaustive-deps
   // Observation edits should refresh colours without moving the user's camera.
@@ -228,6 +230,7 @@ export default function MapScene(props: MapSceneProps) {
       observer.observe(container.current);
       return () => {
         disposed = true; observer.disconnect(); window.clearTimeout(timeout);
+        cancelPitchLock.current?.(); cancelPitchLock.current = undefined;
         markers.current.forEach(m => m.remove()); markers.current = [];
         map.remove(); mapRef.current = null;
       };
@@ -362,12 +365,11 @@ export default function MapScene(props: MapSceneProps) {
     };
   }, [active, ready]);
 
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !ready) return;
-    map.resize();
-    setHover(undefined);
-    setNotice('');
+  const restoreDefaultView = (map: LibreMap) => {
+    // Recover from a stale edit lock as well as arbitrary pan/zoom/pitch/rotation.
+    cancelPitchLock.current?.(); cancelPitchLock.current = undefined;
+    map.stop();
+    map.setMaxPitch(85);
     if (active) {
       // Size the stack to the part of the map the floating cards leave visible, but only
       // gently: floors thinner than their labels would stack the labels on each other.
@@ -384,6 +386,15 @@ export default function MapScene(props: MapSceneProps) {
     } else {
       frameDistrict(map);
     }
+  };
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    map.resize();
+    setHover(undefined);
+    setNotice('');
+    restoreDefaultView(map);
   // Camera changes follow selection, not observation edits.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.selectedBuildingId, ready, compact, extentKey]);
@@ -480,11 +491,14 @@ export default function MapScene(props: MapSceneProps) {
     beforeEdit.current = { center: [c.lng, c.lat], zoom: map.getZoom(), pitch: map.getPitch(), bearing: map.getBearing(), maxPitch: map.getMaxPitch() };
     for (const id of SHAPE_HIDDEN) if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'none');
     setHover(undefined); setEditing(active.id);
+    cancelPitchLock.current?.();
+    cancelPitchLock.current = scheduleFlatPitchLock(map);
     // Flat and tilt-locked: dragging handles on a tilted map misplaces them.
     map.easeTo({ center: [active.longitude, active.latitude], zoom: Math.max(map.getZoom(), 18.6), pitch: 0, duration: motionDuration(spatialMotion.pitch), easing: easeInOutCubic });
-    map.once('moveend', () => { if (editingRef.current) map.setMaxPitch(0); });
+
   };
   const stopEditing = () => {
+    cancelPitchLock.current?.(); cancelPitchLock.current = undefined;
     const map = mapRef.current;
     setEditing(undefined);
     if (!map) return;
@@ -500,11 +514,14 @@ export default function MapScene(props: MapSceneProps) {
     const c = map.getCenter();
     beforeEdit.current = { center: [c.lng, c.lat], zoom: map.getZoom(), pitch: map.getPitch(), bearing: map.getBearing(), maxPitch: map.getMaxPitch() };
     setHover(undefined); setNotice(''); setAdding(true);
+    cancelPitchLock.current?.();
+    cancelPitchLock.current = scheduleFlatPitchLock(map);
     // Flat, so a click lands on the ground under the building rather than behind a tall one.
     map.easeTo({ zoom: Math.max(map.getZoom(), 17.6), pitch: 0, duration: motionDuration(spatialMotion.pitch), easing: easeInOutCubic });
-    map.once('moveend', () => { if (addingRef.current) map.setMaxPitch(0); });
+
   };
   const stopAdding = (restoreCamera: boolean) => {
+    cancelPitchLock.current?.(); cancelPitchLock.current = undefined;
     const map = mapRef.current;
     setAdding(false);
     if (!map) return;
@@ -549,6 +566,7 @@ export default function MapScene(props: MapSceneProps) {
     <div className="map-tools" role="group" aria-label="相機控制" title="右鍵拖曳可自由旋轉及調整傾角">
       {active && active.floors.length > 0 && <button className={`map-tool ${props.expanded ? 'is-active' : ''}`} aria-label={props.expanded ? '合攏樓層' : '展開樓層'} title={props.expanded ? '合攏樓層' : '展開樓層'} aria-pressed={props.expanded} onClick={props.onToggleExpanded} disabled={!ready}><Layers3 size={19} /></button>}
       <button className="map-tool" aria-label={active ? '返回街區總覽' : '框選全部大廈'} title={active ? '返回街區總覽' : '框選全部大廈'} disabled={!ready} onClick={() => { if (active) props.onOverview(); else if (mapRef.current) frameDistrict(mapRef.current); }}><Scan size={19} /></button>
+      <button className="map-tool" aria-label="恢復預設視角" title={editing || adding ? '請先儲存或取消形狀，再恢復預設視角' : '恢復預設視角：重設位置、縮放、方向與傾角'} disabled={!ready || !!editing || adding} onClick={() => { if (mapRef.current) restoreDefaultView(mapRef.current); }}><RotateCcw size={19} /></button>
       <button className="map-tool" onClick={toggle3D} aria-label={is3D ? '切換平面地圖' : '切換立體地圖'} disabled={!ready}>{is3D ? '2D' : '3D'}</button>
       <button className="map-tool" aria-label="放大地圖" onClick={() => mapRef.current?.zoomIn({ duration: motionDuration(300), easing: easeInOutCubic })} disabled={!ready}><Plus size={19} /></button>
       <button className="map-tool" aria-label="縮小地圖" onClick={() => mapRef.current?.zoomOut({ duration: motionDuration(300), easing: easeInOutCubic })} disabled={!ready}><Minus size={19} /></button>
