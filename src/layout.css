@@ -14,7 +14,7 @@
 
   /* Finder: a floating bar at the top left that opens into the building list. */
   .district-sidebar{position:absolute;top:14px;left:14px;z-index:8;width:340px;max-height:calc(100% - 96px);
-    display:flex;flex-direction:column;border:1px solid #dbe5e1;border-right:1px solid #dbe5e1;border-radius:12px;
+    display:flex;flex-direction:column;border:1px solid #dbe5e1;border-right:1px solid #dbe5e1;border-radius:var(--radius-md);
     background:#fffffff5;backdrop-filter:blur(10px);box-shadow:0 10px 32px #16352d24;overflow:hidden}
   .has-selection .district-sidebar{display:flex}
   .finder-bar{display:flex;align-items:center;gap:8px;width:100%;min-height:48px;padding:0 14px;border:0;background:transparent;
@@ -31,7 +31,7 @@
 
   /* Building panel: a floating card on the right, open while a building is selected. */
   .workspace>.cf-building-panel{position:absolute;top:14px;right:14px;bottom:14px;z-index:8;width:390px;height:auto;
-    border:1px solid #dbe5e1;border-radius:12px;box-shadow:0 10px 32px #16352d24;overflow:auto}
+    border:1px solid #dbe5e1;border-radius:var(--radius-md);box-shadow:0 10px 32px #16352d24;overflow:auto}
 
   /* Map chrome moves clear of the floating cards. */
   .workspace.has-selection .map-tools,.workspace.has-selection .map-toolstack{right:418px}.workspace.has-selection .map-toolstack>.map-tools{right:auto}
