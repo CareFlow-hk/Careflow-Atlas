@@ -1,5 +1,5 @@
 import { canonicalCoverageOf, coverageGroupOf } from '../domain/presentation';
-import { latestForUnit, type CoverageStatus, type HousingAssessment, type OutreachSnapshot, type Unit } from '../domain/types';
+import { latestCoverageForUnit, type CoverageStatus, type HousingAssessment, type OutreachSnapshot, type Unit } from '../domain/types';
 
 /**
  * The 覆蓋狀態 a 劏房 room's entry form opens with: the last record that speaks for the room,
@@ -33,5 +33,7 @@ export function inheritedCoverage(last: { coverage: CoverageStatus } | undefined
  */
 export function roomFormDefaults(snapshot: OutreachSnapshot, unit: Unit | undefined): { coverage?: CoverageStatus; assessment?: HousingAssessment } {
   if (!unit?.parentUnitId) return {};
-  return { coverage: inheritedCoverage(latestForUnit(snapshot, unit.id)), assessment: 'STAFF_VERIFIED' };
+  // The last record that actually stated a result: a later visit recorded without coverage
+  // did not change what the room stands at, so it is not what the form follows either.
+  return { coverage: inheritedCoverage(latestCoverageForUnit(snapshot, unit.id)), assessment: 'STAFF_VERIFIED' };
 }

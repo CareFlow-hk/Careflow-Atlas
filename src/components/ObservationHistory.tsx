@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { CalendarClock, CheckCircle2, CircleAlert, History, Info, PencilLine, Undo2, UserRound } from "lucide-react";
 import { compareObservationTime, followUpClosures, followUpEventsFor, followUpResolutions, getOpenFollowUps, supersededObservationIds, type Observation, type OutreachSnapshot } from "../domain/types";
-import { assessmentLabels, contactLabels, coverageLabels, followUpClosedLabels, sourceLabels, supportCategoryLabels } from "../domain/presentation";
+import { assessmentLabels, contactLabels, coverageLabels, coverageNotUpdatedLabel, followUpClosedLabels, sourceLabels, supportCategoryLabels } from "../domain/presentation";
 import { impliedByCoverage } from "../domain/optionPrefs";
 import { FollowUpActions, type FollowUpActionHandler } from "./FollowUpActions";
+import { providerLabel } from "../ai/providers";
 
 export interface ObservationHistoryProps {
   snapshot: OutreachSnapshot; subjectId: string; subjectType?: "UNIT" | "BUILDING"; emptyLabel?: string;
@@ -48,13 +49,16 @@ export function ObservationHistory({ snapshot, subjectId, subjectType = "UNIT", 
      * apart, such as 未能完成探訪 with 已接觸 — because hiding that would lose a real fact.
      */
     const showsContact = Boolean(observation.contactOutcome)
-      && observation.contactOutcome !== impliedByCoverage('contactOutcome', observation.coverage);
+      && observation.contactOutcome !== impliedByCoverage('contactOutcome', observation.coverage ?? '');
+    /* A record may state no coverage: the chip then says so, rather than borrowing a
+       colour from a blank. The place's earlier result still stands elsewhere. */
+    const coverageText = observation.optionNotes?.coverage ?? (observation.coverage ? coverageLabels[observation.coverage] : coverageNotUpdatedLabel);
     return <article className={`cf-event ${observation.id === currentId ? "is-latest" : ""} ${isSuperseded ? "is-superseded" : ""} ${isWithdrawn ? "is-withdrawn" : ""}`} key={observation.id}>
       <div className="cf-event__rail" aria-hidden="true"><span /></div>
       <div className="cf-event__content"><div className="cf-event__meta"><span>{label}</span><time dateTime={observation.recordedAt}>{formatDate(observation.recordedAt)}</time></div>
-        <h4>{observation.note || observation.evidence[0] || observation.optionNotes?.coverage || coverageLabels[observation.coverage]}</h4>
+        <h4>{observation.note || observation.evidence[0] || coverageText}</h4>
         {/* A self-defined wording, if one was typed, is shown instead of the enum's own. */}
-        <div className="cf-chips">{legacyFloor && <span className="cf-chip cf-chip--floor">{legacyFloor} 樓層記錄</span>}<span className="cf-chip"><UserRound size={14} />{observation.workerName}</span><span className="cf-chip">{observation.optionNotes?.coverage ?? coverageLabels[observation.coverage]}</span>{showsContact && <span className="cf-chip">{observation.optionNotes?.contactOutcome ?? contactLabels[observation.contactOutcome!]}</span>}{/* A record that updated no housing judgement gets no chip: the coverage chip already says what the visit was. */}{observation.assessment && observation.assessment !== "NOT_UPDATED" && <span className={`cf-chip ${["SUSPECTED", "UNKNOWN"].includes(observation.assessment) ? "cf-chip--uncertain" : ""}`}><CircleAlert size={14} />{observation.optionNotes?.assessment ?? assessmentLabels[observation.assessment]}</span>}
+        <div className="cf-chips">{legacyFloor && <span className="cf-chip cf-chip--floor">{legacyFloor} 樓層記錄</span>}<span className="cf-chip"><UserRound size={14} />{observation.workerName}</span><span className="cf-chip">{coverageText}</span>{showsContact && <span className="cf-chip">{observation.optionNotes?.contactOutcome ?? contactLabels[observation.contactOutcome!]}</span>}{/* A record that updated no housing judgement gets no chip: the coverage chip already says what the visit was. */}{observation.assessment && observation.assessment !== "NOT_UPDATED" && <span className={`cf-chip ${["SUSPECTED", "UNKNOWN"].includes(observation.assessment) ? "cf-chip--uncertain" : ""}`}><CircleAlert size={14} />{observation.optionNotes?.assessment ?? assessmentLabels[observation.assessment]}</span>}
           {/* No source recorded stays silent. "來源未明" is a different claim from "not recorded". */}
           {observation.sourceType && <span className="cf-chip cf-chip--source"><Info size={14} />{observation.optionNotes?.sourceType ?? sourceLabels[observation.sourceType]}</span>}</div>
         {observation.evidence.length > 0 && <p className="cf-event__note">依據：{observation.evidence.join("；")}</p>}
@@ -76,6 +80,8 @@ export function ObservationHistory({ snapshot, subjectId, subjectType = "UNIT", 
         {isSuperseded && <p className="cf-superseded-note"><History size={14} />此記錄已被 {correctedBy?.id ?? "後續更正"} 取代，不再計入覆蓋，保留作追溯。</p>}
         {/* The operator who saved the row is not the paper worker; both are named, never merged. */}
         {observation.createdBy && <p className="cf-event__recorded">由 {observation.createdBy.name} 儲存{observation.deleted ? ` · ${formatDate(observation.deleted.at)} 由 ${observation.deleted.by.name} 撤回` : ''}</p>}
+        {/* The tool is named beside, never instead of, the person who confirmed the row. */}
+        {observation.aiAssist && <p className="cf-event__recorded">由 AI 協助（{providerLabel(observation.aiAssist.provider)} · {observation.aiAssist.model} · {formatDate(observation.aiAssist.at)}）</p>}
         {isWithdrawn && <p className="cf-superseded-note"><Undo2 size={14} />此記錄已撤回，不再計入覆蓋與跟進，保留作追溯。</p>}
         {onWithdraw && canWithdraw?.(observation) && (asking === observation.id
           ? <div className="cf-withdraw-ask" role="group" aria-label="確認撤回記錄"><span>撤回後這筆記錄不再計入覆蓋與跟進，但仍留在歷史。確定撤回？</span><button type="button" className="cf-button cf-withdraw__confirm" onClick={() => { setAsking(undefined); onWithdraw(observation.id); }}>確定撤回</button><button type="button" className="cf-button cf-button--ghost" onClick={() => setAsking(undefined)}>取消</button></div>

@@ -421,6 +421,47 @@ test('a member may only withdraw their own records; an administrator may withdra
   assert.deepEqual(await stored(), { ...base, floors: [], units: [], observations: [withdrawn, adminWithdrew] });
 });
 
+test('an AI-assisted record carries a readable marker, and the administrator can audit it', async t => {
+  const f = await fixture(t);
+  const admin = await f.account('ADMIN', 'admin-ai@example.test');
+  const member = await f.account('MEMBER', 'member-ai@example.test');
+  f.openWorkspace();
+  const base = { schemaVersion: '0.1-demo', isSynthetic: true, notice: '', buildings: [], floors: [], units: [], observations: [], visits: [], followUpEvents: [] };
+  const marker = { at: '2026-10-23T14:05:00+08:00', provider: 'deepseek', model: 'deepseek-flash' };
+  const record = { id: 'obs-ai', createdBy: { accountId: member.id, name: 'member' }, note: sealed('ai helped'), aiAssist: marker };
+  // The first write has no earlier version to compare with, and is still checked.
+  const first = await f.request('/api/workspace', { method: 'PUT', ...member, body: { snapshot: { ...base, observations: [record] } } });
+  assert.equal(first.status, 200); let version = first.value.version;
+  // The marker stays readable and only a count reaches the audit table, never the record.
+  const aiAudit = f.auth.all("SELECT target FROM audit WHERE action='ai_assisted_write'");
+  assert.equal(aiAudit.length, 1);
+  assert.equal(aiAudit[0].target, '1 筆記錄');
+  const stored = () => f.request('/api/workspace', member).then(result => result.value.snapshot);
+  assert.deepEqual((await stored()).observations[0].aiAssist, marker);
+
+  // Historical deepseek records must not lock future whole-workspace saves.
+  const savedAgain = await f.request('/api/workspace', { method: 'PUT', ...member, body: {
+    snapshot: { ...base, observations: [record] }, baseVersion: version,
+  } });
+  assert.equal(savedAgain.status, 200);
+  version = savedAgain.value.version;
+  // The whitelist accepts history, not selectable providers.
+  const put = (snapshot, who = member) => f.request('/api/workspace', { method: 'PUT', ...who, body: { snapshot, baseVersion: version } });
+  assert.equal((await put({ ...base, observations: [{ ...record, aiAssist: { ...marker, provider: 'some-vendor' } }] })).status, 400);
+  // A sealed value would be unreadable to the administrator who has to see it.
+  assert.equal((await put({ ...base, observations: [{ ...record, aiAssist: { ...marker, provider: sealed('deepseek') } }] })).status, 400);
+  assert.equal((await put({ ...base, observations: [{ ...record, aiAssist: { ...marker, note: 'extra' } }] })).status, 400);
+  assert.equal((await put({ ...base, observations: [{ ...record, aiAssist: { ...marker, at: 'today' } }] })).status, 400);
+  // Changing how a row was produced after the fact would falsify the trace, for either role.
+  assert.equal((await put({ ...base, observations: [{ ...record, aiAssist: { ...marker, model: 'deepseek-v4-pro' } }] }, admin)).status, 403);
+  // A withdrawal keeps the marker: the record still says how it was produced.
+  const withdrawn = { ...record, deleted: { at: '2026-10-23T06:00:00.000Z', by: { accountId: member.id, name: 'member' } } };
+  assert.equal((await put({ ...base, observations: [withdrawn] })).status, 200);
+  assert.deepEqual((await stored()).observations[0].aiAssist, marker);
+  // Re-sending an unchanged record is not a new AI-assisted write.
+  assert.equal(f.auth.all("SELECT id FROM audit WHERE action='ai_assisted_write'").length, 1);
+});
+
 test('feature switches start off, only the platform administrator turns them, and photo intake obeys', async t => {
   let calls = 0;
   const photos = { status: () => ({ configured: true, model: 'gpt-6-luna' }), recognize: async () => { calls++; return { rows: [], warnings: [], model: 'gpt-6-luna' }; } };
@@ -430,7 +471,7 @@ test('feature switches start off, only the platform administrator turns them, an
   const orgAdmin = await f.account('ADMIN', 'org-admin@example.test');
   assert.equal((await f.request('/api/admin/features', { method: 'PUT', ...orgAdmin, body: { key: 'photoIntake', enabled: true } })).status, 403);
   assert.equal((await f.request('/api/features', orgAdmin)).value.features.photoIntake, false);
-  assert.deepEqual((await f.request('/api/features', member)).value, { features: { photoIntake: false, workspaceSync: false } });
+  assert.deepEqual((await f.request('/api/features', member)).value, { features: { photoIntake: false, workspaceSync: false, aiAssistant: false } });
   assert.equal((await f.request('/api/photos/status', member)).value.enabled, false);
   // Off: refused before the upload is read, so nothing reaches Azure.
   assert.equal((await f.request('/api/photos/recognize', { method: 'POST', ...member, body: { image: 'x' } })).status, 403);
@@ -440,7 +481,7 @@ test('feature switches start off, only the platform administrator turns them, an
   assert.equal((await f.request('/api/admin/features', { method: 'PUT', ...admin, body: { key: 'nope', enabled: true } })).status, 400);
   assert.equal((await f.request('/api/admin/features', { method: 'PUT', ...admin, body: { key: 'photoIntake', enabled: 'yes' } })).status, 400);
   const on = await f.request('/api/admin/features', { method: 'PUT', ...admin, body: { key: 'photoIntake', enabled: true } });
-  assert.deepEqual(on.value.features, { photoIntake: true, workspaceSync: false });
+  assert.deepEqual(on.value.features, { photoIntake: true, workspaceSync: false, aiAssistant: false });
   assert.equal((await f.request('/api/photos/recognize', { method: 'POST', ...member, body: { image: 'x' } })).status, 200);
   assert.equal(calls, 1);
   // Setting the same value again writes nothing new; each real change is audited with who did it.
@@ -651,4 +692,56 @@ test('institutions are created, renamed and joined from the command line, never 
   assert.equal((await f.request('/api/session', member)).status, 401);
   assert.deepEqual(listOrgs(f.auth).map(o => [o.id, o.name, o.admins, o.members]), [[DEFAULT_ORG_ID, '明愛西營盤社區客廳', 1, 0], ['org-careflow', 'CareFlow', 0, 1]]);
   assert.deepEqual(f.auth.all("SELECT action FROM audit WHERE action IN ('org_created','org_renamed','user_moved') ORDER BY id").map(r => r.action), ['org_created', 'org_renamed', 'user_moved']);
+});
+
+/*
+ * The AI assistant's door (server/aiProxy.mjs). The switch is the platform's from phase 5
+ * because the Azure key is the platform's; an institution's administrator can see the state
+ * and nothing more. The upstream call is a stub here: CI must never spend Azure quota.
+ */
+test('the AI assistant is switched by the platform and refused before any outbound call', async t => {
+  const calls = [];
+  const aiProxy = {
+    status: () => ({ provider: 'azure-openai', configured: true, model: 'deployment', fallbackModel: null }),
+    assist: async body => {
+      calls.push(body);
+      return { kind: body.kind, proposal: { status: 'MATCH' }, aiAssist: { at: new Date().toISOString(), provider: 'azure-openai', model: 'deployment', requestId: `req_test_${calls.length}` }, fallback: null, usage: { inputTokens: 3, outputTokens: 4 }, durationMs: 7, rows: 1, chunks: 1 };
+    },
+  };
+  const f = await fixture(t, { aiProxy });
+  const admin = await f.account('ADMIN', 'admin@example.test');
+  const member = await f.account('MEMBER', 'member@example.test');
+  const ask = who => f.request('/api/ai/assist', { method: 'POST', ...who, body: { kind: 'draft', text: 'x' } });
+
+  // Off by default: the request is refused here, and nothing was sent anywhere.
+  assert.equal((await ask(member)).status, 403);
+  assert.equal(calls.length, 0);
+  // The status still answers, because it holds no part of the key.
+  assert.deepEqual((await f.request('/api/ai/status', member)).value, { provider: 'azure-openai', configured: true, model: 'deployment', fallbackModel: null, enabled: false });
+
+  // An institution administrator used to turn this on; from phase 5 it is the platform's.
+  assert.equal((await f.request('/api/admin/features', { method: 'PUT', ...admin, body: { key: 'aiAssistant', enabled: true } })).status, 403);
+  const platform = await f.platform(admin);
+  const opened = await f.request('/api/admin/features', { method: 'PUT', ...platform, body: { key: 'aiAssistant', enabled: true } });
+  assert.equal(opened.status, 200);
+  assert.equal(opened.value.features.aiAssistant, true);
+
+  // A request naming another institution does not borrow its switch: the server uses the
+  // session's organisation and ignores the body's id.
+  const other = createOrg(f.auth, 'org-other', 'Other');
+  assert.equal((await f.request('/api/ai/assist', { method: 'POST', ...member, body: { kind: 'draft', text: 'x', orgId: other.id } })).status, 200);
+  assert.equal(f.auth.all("SELECT enabled FROM org_features WHERE org_id=? AND key='aiAssistant'", other.id).length, 0);
+
+  const answered = await ask(member);
+  assert.equal(answered.status, 200);
+  assert.equal(answered.value.proposal.status, 'MATCH');
+  assert.equal(calls.length, 2);
+  // The audit says who used it and which request it was — and nothing about the content.
+  const events = f.auth.all("SELECT actor, action, target FROM audit WHERE action='ai_assist'");
+  assert.deepEqual(events.map(event => [event.actor, event.target]), [[member.id, 'req_test_1'], [member.id, 'req_test_2']]);
+  // The issued ids are on record for the marker check that phase 5 PR5 adds.
+  assert.deepEqual(f.auth.all("SELECT request_id, org_id, kind, status, rows FROM ai_requests ORDER BY request_id").map(row => ({ ...row })), [
+    { request_id: 'req_test_1', org_id: DEFAULT_ORG_ID, kind: 'draft', status: 'MATCH', rows: 1 },
+    { request_id: 'req_test_2', org_id: DEFAULT_ORG_ID, kind: 'draft', status: 'MATCH', rows: 1 },
+  ]);
 });

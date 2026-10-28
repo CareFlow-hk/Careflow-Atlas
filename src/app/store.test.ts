@@ -7,7 +7,7 @@ import { blankSnapshot } from '../data/blankSnapshot';
 import { addFloors } from '../domain/structure';
 
 /** These tests are about syncing, not encryption; workspaceCipher.test.ts covers that. */
-const plain: WorkspaceCipher = { keyId: 'test', seal: async snapshot => snapshot, open: async value => value };
+const plain: WorkspaceCipher = { keyId: 'test', sealValue: async text => text, openValue: async text => text, seal: async snapshot => snapshot, open: async value => value };
 
 describe('building focus', () => {
   beforeEach(() => useWorkspace.setState({ snapshot: demoSnapshot, expanded: false, selectedBuildingId: undefined, selectedFloorId: undefined, selectedUnitId: undefined }));
@@ -484,6 +484,20 @@ describe('the workspace the account端 holds', () => {
     const changed = structuredClone(demoSnapshot); changed.people[0].phone = '12345678';
     useWorkspace.getState().importSnapshot(changed);
     await vi.waitFor(() => expect(useWorkspace.getState().storageError).toContain('未能同步到帳號端'));
+    expect(useWorkspace.getState().storageError).toContain('HTTP 500');
+    expect(server.record?.version).toBe(1);
+  });
+
+  /* 2026-10-21: the proxy's 8k limit refused every write once the workspace grew; the banner said "check your network". */
+  it('names a write refused for its size instead of blaming the network', async () => {
+    const server = serverStub();
+    server.record = { snapshot: demoSnapshot, version: 1 };
+    await start(server);
+    server.fail(413);
+    const changed = structuredClone(demoSnapshot); changed.people[0].phone = '12345678';
+    useWorkspace.getState().importSnapshot(changed);
+    await vi.waitFor(() => expect(useWorkspace.getState().storageError).toContain('HTTP 413'));
+    expect(useWorkspace.getState().storageError).not.toContain('檢查網絡');
     expect(server.record?.version).toBe(1);
   });
 

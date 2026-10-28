@@ -10,9 +10,10 @@ export const SESSION_IDLE_MS = 6 * 60 * 60_000;
 export class ApiError extends Error { constructor(public status: number, message: string) { super(message); } }
 let csrf: string | undefined;
 export function setCsrf(value?: string) { csrf = value; }
-export async function api<T>(path: string, method = 'GET', body?: unknown, options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<T> {
+export async function api<T>(path: string, method = 'GET', body?: unknown, options?: { signal?: AbortSignal; timeoutMs?: number; /** Test seam; production always uses the page's own fetch. */ fetcher?: typeof fetch }): Promise<T> {
   const requestCsrf = csrf;
-  const response = await fetch(`/api${path}`, {
+  const request = options?.fetcher ?? fetch;
+  const response = await request(`/api${path}`, {
     method, credentials: 'same-origin', cache: 'no-store',
     headers: method === 'GET' ? {} : { 'Content-Type': 'application/json', ...(csrf ? { 'X-CSRF-Token': csrf } : {}) },
     body: method === 'GET' ? undefined : JSON.stringify(body ?? {}), signal: AbortSignal.any([AbortSignal.timeout(options?.timeoutMs ?? 15000), ...(options?.signal ? [options.signal] : [])]),

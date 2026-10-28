@@ -11,6 +11,8 @@ playwright-report/
 .DS_Store
 .private/
 outputs/
+# Excel 开启档案时留下的锁档，常带本机使用者名称，且会在测试时混进 samples/
+~$*
 
 *.sqlite
 *.sqlite-wal

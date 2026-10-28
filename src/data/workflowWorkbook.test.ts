@@ -50,6 +50,25 @@ describe('paper and Excel workflow', () => {
     expect(result.issues).toEqual([]);
     expect(result.snapshot?.observations.find(item => item.id === target.id)).toMatchObject({ createdBy: author, deleted: { at: '2026-10-19T09:00:00.000Z', by: author } });
   });
+  it('exports how AI helped and keeps the stored marker through a round trip', () => {
+    const snapshot = structuredClone(workflowDemo);
+    const marker = { at: '2026-10-23T14:05:00+08:00', provider: 'deepseek', model: 'deepseek-flash' };
+    const target = snapshot.observations[0];
+    snapshot.observations[0] = { ...target, aiAssist: marker };
+    const sheet = workflowSheetsOf(snapshot).find(entry => entry.name === '紙本回錄')!;
+    const column = sheet.headers.indexOf('AI 協助');
+    const row = sheet.rows.find(entry => entry[0] === target.id)!;
+    expect(row[column]).toBe('DeepSeek · deepseek-flash · 2026-10-23 14:05:00');
+    // Re-importing reads the marker from the record, never from the cell wording.
+    expect(parse(workbook(snapshot)).snapshot?.observations.find(item => item.id === target.id)?.aiAssist).toEqual(marker);
+  });
+  it('ignores an AI cell somebody typed and says so', () => {
+    const wb = workbook();
+    newRow(wb, { 'AI 協助': 'DeepSeek' });
+    const result = parse(wb);
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: 'SYSTEM_FILLED', field: 'AI 協助', severity: 'warning' }));
+    expect(result.snapshot?.observations.at(-1)?.aiAssist).toBeUndefined();
+  });
   it('imports the styled downloadable mock with no issues', () => {
     const bytes = readFileSync('public/demo/careflow-paper-excel-mock.xlsx');
     const result = parseWorkflowWorkbook(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), 'mock.xlsx');
@@ -92,11 +111,24 @@ describe('paper and Excel workflow', () => {
     expect(parse(wb).snapshot).toEqual(workflowDemo);
   });
   it.each([
-    ['blank coverage', { '覆蓋結果': '' }], ['invalid date', { '到訪日期': '2026-02-31' }], ['ambiguous location', { '單位': '不存在' }], ['missing action', { '時間原話／待確認': '明天' }],
+    ['invalid date', { '到訪日期': '2026-02-31' }], ['ambiguous location', { '單位': '不存在' }], ['missing action', { '時間原話／待確認': '明天' }],
   ])('blocks %s without returning a partially importable snapshot', (_, values) => {
     const wb = workbook(); newRow(wb, values);
     expect(parse(wb).snapshot).toBeUndefined();
     expect(parse(wb).issues.some(i => i.severity === 'error' && i.sheet === '紙本回錄' && i.row)).toBe(true);
+  });
+  it('imports a row with no coverage without inventing one or repainting the place', () => {
+    const wb = workbook();
+    newRow(wb, { '紙本編號': 'QA-02', '紙本行號': '2' });
+    newRow(wb, { '紙本編號': 'QA-03', '紙本行號': '3', '覆蓋結果': '' });
+    const result = parse(wb);
+    expect(result.issues).toEqual([]);
+    const blank = result.snapshot!.observations.at(-1)!;
+    // Absent — not UNKNOWN, which is a stated result and would repaint the place grey.
+    expect(blank.coverage).toBeUndefined();
+    expect(getCoverageStatus(result.snapshot!, blank.buildingId, blank.unitId)).toBe('ATTEMPTED');
+    // Exporting and reading back must not turn the blank into 暫無可靠記錄.
+    expect(parse(workbook(result.snapshot!)).snapshot).toEqual(result.snapshot);
   });
   it('blocks changes to old observations, formulas, extra columns and numeric phones', () => {
     for (const modify of [

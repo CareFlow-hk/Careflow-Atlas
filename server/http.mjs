@@ -1,12 +1,14 @@
 import { createServer } from 'node:http';
 import { createPhotoService, PHOTO_BODY_LIMIT } from './photos.mjs';
-import { createFeatureStore } from './features.mjs';
+import { createFeatureStore, FEATURES } from './features.mjs';
 import { listOrgs } from './orgs.mjs';
 import { createWorkspaceStore, WORKSPACE_BODY_LIMIT } from './workspace.mjs';
 import { createWorkspaceKeyStore } from './workspaceKey.mjs';
+import { createAiService, AI_BODY_LIMIT } from './aiProxy.mjs';
+import { createAiRequestStore } from './aiRequests.mjs';
 import { HttpError, requireValue, publicUser, SESSION_IDLE_MS } from './auth.mjs';
 
-export function createAuthServer(auth, { origin, secure = true, trustProxy = false, photos = createPhotoService(), features = createFeatureStore(auth), workspace = createWorkspaceStore(auth), keys = createWorkspaceKeyStore(auth) }) {
+export function createAuthServer(auth, { origin, secure = true, trustProxy = false, photos = createPhotoService(), features = createFeatureStore(auth), workspace = createWorkspaceStore(auth), keys = createWorkspaceKeyStore(auth), aiProxy = createAiService(), aiRequests = createAiRequestStore(auth) }) {
   requireValue(new URL(origin).origin === origin, 500, 'APP_ORIGIN 必須是完整 origin，不帶路徑或末尾斜線。');
   requireValue(!secure || origin.startsWith('https://'), 500, '安全 Cookie 需要 HTTPS APP_ORIGIN。');
   const cookieName = secure ? '__Host-atlas_session' : 'atlas_session';
@@ -30,8 +32,9 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
       requireValue(!req.headers['sec-fetch-site'] || ['same-origin', 'none'].includes(req.headers['sec-fetch-site']), 403, '不允許跨站請求。');
       const photoRequest = req.method === 'POST' && path === '/api/photos/recognize';
       const workspaceRequest = req.method === 'PUT' && path === '/api/workspace';
+      const aiRequest = req.method === 'POST' && path === '/api/ai/assist';
       // Authorize before allocating the larger upload buffer.
-      if (photoRequest || workspaceRequest) {
+      if (photoRequest || workspaceRequest || aiRequest) {
         const token = req.headers.cookie?.split(';').map(v => v.trim()).find(v => v.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1);
         const session = auth.session(token);
         requireValue(session, 401, '請登入後繼續。');
@@ -46,8 +49,14 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
           requireValue(features.enabled('workspaceSync', user.org_id), 403, '跨裝置同步未開啟，資料只存在這部裝置。');
           auth.limit(`workspace:${user.id}`, 1200);
         }
+        if (aiRequest) {
+          // Off unless the platform administrator turned it on for this institution: with the
+          // switch off, nothing reaches Azure and the request is refused here (doc 5.2 step 2).
+          requireValue(features.enabled('aiAssistant', user.org_id), 403, 'AI 助手未開啟，請聯絡平台管理員。');
+          auth.limit(`ai:${user.id}`, 30);
+        }
       }
-      const bodyLimit = workspaceRequest ? WORKSPACE_BODY_LIMIT : photoRequest ? PHOTO_BODY_LIMIT : 8192;
+      const bodyLimit = aiRequest ? AI_BODY_LIMIT : workspaceRequest ? WORKSPACE_BODY_LIMIT : photoRequest ? PHOTO_BODY_LIMIT : 8192;
       let body = {};
       if (mutation) {
         requireValue(!req.headers['content-length'] || Number(req.headers['content-length']) <= bodyLimit, 413, '請求過大。');
@@ -74,6 +83,25 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
       const user = auth.assertSession(row);
       if (req.method === 'GET' && path === '/api/features') return send(res, 200, { features: features.all(user.org_id) });
       if (req.method === 'GET' && path === '/api/photos/status') return send(res, 200, { ...photos.status(), enabled: features.enabled('photoIntake') });
+      /*
+       * The AI assistant's only door out (server/aiProxy.mjs). The browser says what it wants
+       * read; the server decides the endpoint, the deployment, `store:false` and the prompt,
+       * so a modified page cannot widen what is sent. The status carries no part of the key,
+       * which is why it stays visible even while the switch is off.
+       */
+      if (req.method === 'GET' && path === '/api/ai/status') return send(res, 200, { ...aiProxy.status(), enabled: features.enabled('aiAssistant', user.org_id) });
+      if (aiRequest) {
+        const controller = new AbortController();
+        const abort = () => { if (!res.writableEnded) controller.abort(); };
+        res.on('close', abort);
+        try {
+          const result = await aiProxy.assist(body, user, controller.signal);
+          aiRequests.record(result, user, result.kind);
+          // Metadata only: who, which model, when. Never the prompt or the answer.
+          auth.audit(user.id, 'ai_assist', result.aiAssist.requestId);
+          return send(res, 200, result);
+        } finally { res.off('close', abort); }
+      }
       if (photoRequest) {
         const controller = new AbortController();
         const abort = () => { if (!res.writableEnded) controller.abort(); };
@@ -119,6 +147,13 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
           return send(res, 200, workspace.remove(user));
         }
       }
+      /*
+       * Retired in phase 5 (docs/AI_ASSISTANT.md 5.3): the key now lives only in the server's
+       * .env and the browser never holds one, so there is nothing left to hand out or store
+       * here. Answering 410 — not 404 — tells an out-of-date page why, and no code path keeps
+       * reading `org_ai_settings`; the table itself is left for PR6 to clean up.
+       */
+      if (path === '/api/org/ai' || path === '/api/org/ai/key') throw new HttpError(410, 'AI 助手已改由伺服器代為呼叫，請更新頁面。');
       if (req.method === 'POST' && path === '/api/logout') {
         auth.transaction(() => { auth.run('DELETE FROM sessions WHERE hash=?', row.hash); auth.audit(user.id, 'logout'); });
         res.setHeader('Set-Cookie', cookie('', 0)); return send(res, 200, { ok: true });
@@ -137,12 +172,17 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
         if (req.method === 'GET' && path === '/api/admin/users') return send(res, 200, { users: auth.all('SELECT * FROM users WHERE org_id=? ORDER BY created_at,id', user.org_id).map(publicUser) });
         if (req.method === 'PUT' && path === '/api/admin/features') {
           // Where data goes is decided by whoever runs the site, so an institution's
-          // administrator sees the switches but does not turn them. A per-institution switch
-          // names its institution; without one it is the administrator's own.
-          auth.assertSession(row, 'platform');
+          // administrator sees those switches but does not turn them. Its own AI assistant is
+          // the exception (2026-10-23): that one is the institution's call, for its own
+          // institution only. Naming another institution is refused, never silently rewritten.
+          // A per-institution switch names its institution; without one it is the caller's own.
+          requireValue(Object.hasOwn(FEATURES, body.key), 400, '沒有這個功能開關。');
           auth.limit(`admin:${user.id}`, 30);
           const orgId = body.orgId === undefined ? user.org_id : body.orgId;
-          return send(res, 200, { features: features.set(body.key, body.enabled, user.id, orgId), orgs: features.byOrg() });
+          if (FEATURES[body.key].who === 'platform') auth.assertSession(row, 'platform');
+          else requireValue(orgId === user.org_id || user.platform_admin === 1, 403, '機構管理員只可以切換本機構的功能開關。');
+          // The list of every institution is the platform administrator's view only.
+          return send(res, 200, { features: features.set(body.key, body.enabled, user.id, orgId), orgs: user.platform_admin ? features.byOrg() : [] });
         }
         // Every institution with its people counted and its own switches, for the platform administrator only.
         if (req.method === 'GET' && path === '/api/admin/orgs') {

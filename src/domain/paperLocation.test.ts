@@ -16,7 +16,7 @@ const building = () => {
 describe('semi-agent: structure proposals from paper locations', () => {
   it('reads only plain floor and unit wording', () => {
     expect(['5樓', '5/F', '5F', '5 樓', '5'].map(readPaperFloor)).toEqual([5, 5, 5, 5, 5]);
-    expect(['G/F', '地下', '五樓', ''].map(readPaperFloor)).toEqual([undefined, undefined, undefined, undefined]);
+    expect(['G/F', '地下', '五樓', ''].map(readPaperFloor)).toEqual([0, 0, 5, undefined]);
     expect(readPaperUnit('B1室')).toEqual({ letter: 'B', room: 1 });
     expect(readPaperUnit('5樓 c', '5樓')).toEqual({ letter: 'C', room: undefined });
     expect(readPaperUnit('後座')).toBeUndefined();

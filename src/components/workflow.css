@@ -144,3 +144,181 @@
 .cf-recognition__detail>summary{cursor:pointer;font-size:13px;font-weight:600;color:#315049;margin:6px 0}
 .cf-issue-list{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:8px;max-height:min(46vh,420px);overflow:auto}.cf-issue{border:1px solid #e3e8e4;border-left:4px solid #a34f43;border-radius:8px;padding:10px 12px;background:#fff}.cf-issue.is-warning{border-left-color:#c58726;background:#fffdf7}.cf-issue__where{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:12px;color:#5f716d}.cf-issue__badge{display:inline-flex;align-items:center;gap:4px;font-weight:700;color:#8b3e32}.cf-issue.is-warning .cf-issue__badge{color:#85520c}.cf-issue__message{margin:6px 0 4px;font-size:14px;line-height:1.7;color:#203b36}.cf-issue__tech summary{cursor:pointer;font-size:11px;color:#7a8a85;width:max-content}.cf-issue__tech dl{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;margin:6px 0 0;font-size:11px;color:#4f625d}.cf-issue__tech dt{color:#7a8a85}.cf-issue__tech dd{margin:0;min-width:0;overflow-wrap:anywhere}.cf-issue__tech pre{margin:0;white-space:pre-wrap;font:11px/1.5 ui-monospace,Menlo,monospace}.cf-issues h3 span{font-size:12px;font-weight:500;color:#8b3e32;margin-left:6px}
 .excel-record-preview article.needs-check{border-left:3px solid #c58726;padding-left:10px}
+
+/* The standalone assistant dialog (`docs/AI_ASSISTANT.md` 6.1). */
+.cf-dialog--ai{width:min(860px,calc(100vw - 28px))}
+.cf-ai{padding:22px}
+.cf-ai h3{display:flex;align-items:center;gap:6px;margin:0 0 8px;font-size:15px;font-weight:550}
+.cf-ai__send{display:flex;justify-content:flex-end;margin:8px 0 14px}
+.cf-ai__note{margin:8px 0;font-size:12px;line-height:1.7;color:#5e6d63}
+.cf-ai__busy{display:flex;align-items:center;gap:8px;padding:26px 4px;font-size:14px;color:#315049}
+.cf-ai__preview{margin-top:14px}
+.cf-ai__preview>p{margin:6px 0;font-size:13px;line-height:1.7}
+.cf-ai__preview pre{white-space:pre-wrap;background:#f4f8f6;border-radius:9px;padding:12px;font:13px/1.7 ui-monospace,Menlo,monospace;max-height:220px;overflow:auto}
+.cf-ai__file{margin-top:14px;border:1px solid #dde6e3;border-radius:10px;padding:12px;background:#fbfdfc}
+.cf-ai__extras{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:4px}
+.cf-ai__extras li{display:flex;align-items:center;gap:8px;font-size:12px}
+.cf-ai__extras b{font-size:10px;font-weight:550;background:#fff2da;color:#85520c;border-radius:999px;padding:1px 6px}
+.cf-ai__extras b:last-child{margin-left:auto;background:#eaf2ee;color:#126455}
+.cf-ai__mapping{width:100%;border-collapse:collapse;font-size:12px}
+.cf-ai__mapping th,.cf-ai__mapping td{padding:5px 6px;border-bottom:1px solid #e6ece9;text-align:left;vertical-align:top}
+.cf-ai__mapping thead th{font-size:11px;color:#6d7b72;font-weight:550}
+.cf-ai__mapping tbody th{font-weight:550}
+.cf-ai__mapping tr.is-mapped{background:#f4fbf7}
+.cf-ai__mapping select{max-width:100%;border:1px solid #cad8d4;border-radius:7px;padding:6px;font:inherit;font-size:12px;background:#fff}
+.cf-ai__required{margin-left:6px;font-size:10px;font-weight:550;background:#eaf2ee;color:#126455;border-radius:999px;padding:1px 6px}
+.cf-ai__folded td{padding:8px 0 0;border-bottom:0}
+.cf-ai__folded summary{cursor:pointer;font-size:12px;color:#126455}
+.cf-ai__folded table{margin-top:8px}
+.cf-ai__unmapped{margin-top:14px;border-top:1px solid #e1e9e6;padding-top:12px}
+.cf-ai__warnings{margin:10px 0 0;padding-left:20px;font-size:12px;color:#7d5310}
+.cf-ai__actions{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:6px;max-height:min(46vh,430px);overflow:auto}
+.cf-ai__actions li{display:grid;grid-template-columns:20px 1fr;gap:8px;border:1px solid #e3e8e4;border-left:4px solid #c58726;border-radius:8px;padding:8px 10px;background:#fff;font-size:12px}
+.cf-ai__actions li.is-record{border-left-color:#126455}
+.cf-ai__actions strong{display:block;font-size:13px;font-weight:550}
+.cf-ai__actions small{color:#637570}
+.cf-ai__skipped{margin-top:12px;border-top:1px solid #e1e9e6;padding-top:10px}
+.cf-ai__skipped summary{cursor:pointer;font-size:12px;color:#8b3e32}
+/* The rows that will not be written: one line each, one column per field written. */
+.cf-ai__batch{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:10px 0;padding:8px 10px;border:1px solid #e3e8e4;border-radius:8px;background:#fbfdfc;font-size:12px}
+.cf-ai__batch select,.cf-ai__batch input{min-height:32px;border:1px solid #cad8d4;border-radius:7px;padding:4px 6px;font:inherit;font-size:12px;background:#fff}
+.cf-ai__tablewrap{max-height:min(48vh,460px);overflow:auto;border:1px solid #e3e8e4;border-radius:8px}
+.cf-ai__table{width:100%;min-width:820px;border-collapse:collapse;font-size:12px}
+.cf-ai__table thead th{position:sticky;top:0;z-index:1;background:#f4f8f6;text-align:left;font-size:11px;font-weight:550;color:#52665f;padding:6px;border-bottom:1px solid #dde6e3;white-space:nowrap}
+.cf-ai__table td{padding:4px 6px;border-bottom:1px solid #eef2f0;vertical-align:middle}
+.cf-ai__table tr.is-selected td{background:#f4fbf7}
+.cf-ai__table input:not([type=checkbox]),.cf-ai__table select{width:100%;min-width:64px;box-sizing:border-box;min-height:30px;border:1px solid #cad8d4;border-radius:6px;padding:3px 5px;font:inherit;font-size:12px;background:#fff}
+.cf-ai__table td.is-missing input,.cf-ai__table td.is-missing select{border-color:#c58a80;background:#fff8f7}
+.cf-ai__table td.is-edited input,.cf-ai__table td.is-edited select{border-color:#126455;box-shadow:inset 0 0 0 1px #126455}
+.cf-ai__table .cf-ai__pick{width:28px;text-align:center}
+.cf-ai__table .cf-ai__pick input{width:auto;min-width:0}
+.cf-ai__rownum{white-space:nowrap;color:#637570}
+.cf-ai__why{max-width:220px;color:#8b3e32;line-height:1.5}
+.cf-ai__link{border:0;background:none;padding:2px;color:#126455;font:inherit;font-size:12px;cursor:pointer;text-decoration:underline}
+.cf-ai__detailrow>td{background:#fbfdfc}
+.cf-ai__detailrow .cf-ai__form{grid-template-columns:1fr 1fr 1fr}
+@media(max-width:760px){.cf-ai__detailrow .cf-ai__form{grid-template-columns:1fr}}
+
+.cf-ai__mapping-details{margin-top:12px;border-top:1px solid #e1e9e6;padding-top:10px}
+.cf-ai__mapping-details>summary{cursor:pointer;font-size:12px;color:#126455}
+.cf-ai__rowmark{display:grid;place-items:center;width:18px;height:18px;border-radius:50%;background:#fff0ed;color:#8b3e32;font-size:11px}
+.cf-ai__form{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.cf-ai__form label{display:flex;flex-direction:column;gap:5px;font-size:12px;font-weight:550}
+.cf-ai__form .is-wide{grid-column:1/-1}
+.cf-ai__form input,.cf-ai__form select,.cf-ai__form textarea{min-height:40px;border:1px solid #cad8d4;border-radius:8px;padding:8px;font:inherit;font-size:13px;box-sizing:border-box}
+@media(max-width:760px){.cf-ai__form{grid-template-columns:1fr}.cf-ai__form .is-wide{grid-column:auto}}
+
+/* One row opened into its cells, and the chat that changes the same cells (`docs/AI_ASSISTANT.md` 6.2). */
+.cf-ai__rowedit summary{cursor:pointer;display:block}
+.cf-ai__rowedit[open] summary{margin-bottom:10px}
+.cf-ai__fieldlabel{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.cf-ai__source{font-size:10px;font-weight:550;border-radius:999px;padding:1px 6px;background:#eef1f6;color:#3c5266}
+.cf-ai__source.is-ai{background:#f0ecfa;color:#5a3f86}
+.cf-ai__fieldhint{font-weight:400;color:#637570;font-size:11px;line-height:1.4}
+.cf-ai__addfield{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px;padding-top:10px;border-top:1px dashed #dbe5e1;font-size:12px}
+.cf-ai__addfield select,.cf-ai__addfield input{min-height:36px;border:1px solid #cad8d4;border-radius:8px;padding:6px 8px;font:inherit;font-size:12px;background:#fff}
+.cf-ai__chat{margin-top:14px;border-top:1px solid #e1e9e6;padding-top:12px}
+.cf-ai__turns{list-style:none;margin:8px 0;padding:0;display:grid;gap:8px;max-height:180px;overflow:auto}
+.cf-ai__turns li{border-left:3px solid #cfdcd7;padding-left:8px;font-size:12px;color:#315049}
+.cf-ai__turns li.is-failed{border-left-color:#8b3e32;color:#8b3e32}
+.cf-ai__turns p{margin:2px 0}
+.cf-ai__ask{font-weight:550;color:#203b36}
+.cf-ai__askform{display:flex;gap:8px;align-items:center}
+.cf-ai__askform input{flex:1;min-height:40px;border:1px solid #cad8d4;border-radius:8px;padding:8px;font:inherit;font-size:13px}
+@media(max-width:760px){.cf-ai__askform{flex-direction:column;align-items:stretch}}
+
+/* Task reminders (`docs/AI_ASSISTANT.md` 8): computed on this device, never sent away. */
+.reminder-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#8b3e32;color:#fff;font-size:11px;font-weight:550}
+/* The idle screen: one box to fill, one line of examples, one button. Everything
+   that used to sit in front of the box now lives under 「使用說明」. */
+.cf-ai__compose{margin:20px 0 0}
+.cf-ai__text{width:100%;box-sizing:border-box;min-height:138px;border:1px solid #ddd6c6;border-radius:3px;background:#fffdf8;padding:15px 16px;font:inherit;font-size:15px;line-height:1.9;color:#1d2622;resize:vertical;transition:border-color .15s,box-shadow .15s}
+.cf-ai__text::placeholder{color:#a9a294}
+.cf-ai__text:focus{outline:0;border-color:#1d2622;box-shadow:0 0 0 3px #1d262210}
+/* Examples, not a menu: grey text you can click, not a row of buttons to choose between. */
+.cf-ai__hints{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;margin:12px 0 0;font-size:12px;color:#a39b88}
+.cf-ai__hints>span{letter-spacing:.08em}
+.cf-ai__hint{border:0;background:none;padding:0;font:inherit;font-size:12px;color:#7a766b;text-decoration:underline;text-underline-offset:3px;text-decoration-color:#d8d1c1;cursor:pointer}
+.cf-ai__hint:hover{color:#7d3b27;text-decoration-color:#7d3b27}
+/* A file is the other way in, so it reads as a quiet row rather than a second form. */
+.cf-ai__drop{display:flex;align-items:center;gap:10px;width:100%;box-sizing:border-box;margin-top:16px;padding:12px 14px;border:1px dashed #d8d1c1;border-radius:3px;background:transparent;color:#8f8877;cursor:pointer;text-align:left;transition:border-color .15s,background .15s,color .15s}
+.cf-ai__drop:hover,.cf-ai__drop.is-dragging{border-color:#7d3b27;background:#faf3e6;color:#1d2622}
+.cf-ai__drop>svg{flex:none;color:#7d3b27}
+.cf-ai__drop strong{font-size:13px;font-weight:500;color:#1d2622;white-space:nowrap}
+.cf-ai__drop span{font-size:11px;line-height:1.5;margin-left:auto;text-align:right}
+.cf-ai__submit{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin:20px 0 0}
+.cf-ai__promise{display:flex;gap:8px;margin:0;font-size:12px;line-height:1.8;color:#7a766b}
+.cf-ai__promise svg{flex:none;margin-top:3px;color:#7d3b27}
+.cf-ai__promise strong{font-weight:600;color:#1d2622}
+.cf-ai__submit>.cf-button{flex:none}
+/* The long version, folded: still there for whoever wants it, out of the way otherwise. */
+.cf-ai__about{margin:22px 0 0;border-top:1px solid #ece5d6;padding-top:12px}
+.cf-ai__about>summary{cursor:pointer;font-size:12px;letter-spacing:.04em;color:#8f8877}
+.cf-ai__about>summary:hover{color:#1d2622}
+.cf-ai__about p{margin:10px 0 0;font-size:12px;line-height:1.85;color:#6f6a5e}
+.cf-ai__about strong{font-weight:600;color:#3c3830}
+@media(max-width:760px){
+  .cf-ai__submit{flex-direction:column;align-items:stretch}
+  .cf-ai__submit>.cf-button{width:100%}
+  .cf-ai__drop{flex-wrap:wrap}
+  .cf-ai__drop strong{white-space:normal}
+  .cf-ai__drop span{margin-left:28px;text-align:left}
+}
+/* The overview comes first, so the groups below it can stay folded. */
+.cf-reminder__headline{margin:12px 0 8px;font-size:14px;line-height:1.7;color:#203b36}
+.cf-reminder__headline strong{font-weight:600}
+.cf-reminder__stats{list-style:none;display:flex;flex-wrap:wrap;gap:8px;margin:0 0 10px;padding:0}
+.cf-reminder__stats li{display:flex;align-items:baseline;gap:6px;padding:6px 12px;border-radius:10px;background:#f4f7f5;border-left:3px solid #c58726}
+.cf-reminder__stats li strong{font-size:18px;font-weight:600;color:#203b36;line-height:1.2}
+.cf-reminder__stats li span{font-size:11px;color:#5f716d}
+.cf-reminder__stats li.is-overdue{border-left-color:#8b3e32;background:#faf1ef}
+.cf-reminder__stats li.is-today{border-left-color:#c58726;background:#fdf6ea}
+.cf-reminder__stats li.is-unscheduled{border-left-color:#7a8a85;background:#f2f5f4}
+.cf-reminder__note{margin:0 0 6px;font-size:12px;color:#5e6d63}
+/* One folded group: a single row until the person opens it. */
+.cf-reminder__group{margin:8px 0 0;border:1px solid #e3e8e4;border-radius:10px;background:#fff}
+.cf-reminder__group>summary{display:flex;align-items:center;gap:8px;padding:9px 12px;cursor:pointer;font-size:13px;color:#203b36;list-style:none}
+.cf-reminder__group>summary::-webkit-details-marker{display:none}
+.cf-reminder__group>summary::before{content:'▸';color:#8a9791;font-size:11px;transition:transform .15s}
+.cf-reminder__group[open]>summary::before{content:'▾'}
+.cf-reminder__group>summary:hover{background:#f7faf9;border-radius:10px}
+.cf-reminder__group-name{font-weight:550}
+.cf-reminder__group-hint{font-size:11px;color:#8a7350}
+.cf-reminder__group>summary b{margin-left:auto;background:#fff2da;color:#85520c;border-radius:999px;padding:0 7px;font-size:11px;font-weight:550}
+.cf-reminder__group.is-unassigned>summary b,.cf-reminder__group[open] .cf-reminder__group-hint{background:#f1ece4;color:#6b5d48}
+.cf-reminder__group>summary b,.cf-reminder__group-hint{border-radius:999px}
+.cf-reminder__group-hint{padding:0 6px}
+.cf-reminder__step h5{display:flex;align-items:center;gap:6px;margin:10px 0 5px;font-size:11px;font-weight:550;color:#85520c}
+.cf-reminder__step h5 span{background:#f6efe2;color:#85520c;border-radius:999px;padding:0 6px;font-size:10px;font-weight:550}
+.cf-reminder__group>ul,.cf-reminder__step ul{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.cf-reminder__group[open]{padding-bottom:10px}
+.cf-reminder__group[open]>ul,.cf-reminder__group[open] .cf-reminder__step{padding:0 12px}
+.cf-reminder__group[open]>p{padding:0 12px}
+/* Asking again: the box is the way in, the examples beside it are only suggestions. */
+.cf-reminder__ask{display:flex;gap:8px;align-items:center;margin:14px 0 4px}
+.cf-reminder__askinput{flex:1;min-height:40px;border:1px solid #cad8d4;border-radius:8px;padding:8px 10px;font:inherit;font-size:13px}
+.cf-reminder__hints{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;margin:0 0 8px;font-size:12px;color:#8a9791}
+.cf-reminder__hint{border:0;background:none;padding:0;font:inherit;font-size:12px;color:#7c8b86;text-decoration:underline;text-underline-offset:2px;text-decoration-color:#cfd8d4;cursor:pointer}
+.cf-reminder__hint:hover{color:#126455;text-decoration-color:#126455}
+.cf-reminder__softlink{border:0;background:none;padding:2px 4px;font:inherit;font-size:12px;color:#84938e;text-decoration:underline;text-underline-offset:2px;text-decoration-color:#d5dcda;cursor:pointer}
+.cf-reminder__softlink:hover{color:#126455}
+@media(max-width:760px){.cf-reminder__ask{flex-direction:column;align-items:stretch}}
+.cf-reminder__task{border:1px solid #e3e8e4;border-left:4px solid #c58726;border-radius:8px;padding:9px 11px;background:#fff}
+.cf-reminder__task.is-overdue{border-left-color:#8b3e32}
+.cf-reminder__task.is-unscheduled{border-left-color:#7a8a85}
+.cf-reminder__where strong{display:block;font-size:13px;font-weight:550}
+.cf-reminder__where p{margin:3px 0 0;font-size:13px;line-height:1.7;color:#203b36}
+.cf-reminder__meta{display:flex;flex-wrap:wrap;align-items:center;gap:5px 10px;margin-top:6px;font-size:11px;color:#5f716d}
+.cf-reminder__who{background:#edf3f1;border-radius:999px;padding:1px 7px}
+.cf-reminder__who.is-none{background:#fff2da;color:#85520c}
+.cf-reminder__open{display:inline-flex;align-items:center;gap:2px;margin-left:auto;border:0;background:none;padding:2px;color:#126455;font:inherit;font-size:11px}
+.cf-reminder__spoken{display:block;margin-top:5px;font-size:11px;line-height:1.6;color:#8a7350}
+.cf-reminder__hidden{display:flex;gap:6px;margin:14px 0 0;padding:9px 10px;border-radius:8px;background:#fff6e8;color:#76501a;font-size:12px;line-height:1.6}
+.cf-reminder__hidden svg{flex:none;margin-top:2px}
+@media(max-width:650px){.cf-reminder__group ul{max-height:none}}
+
+.cf-ai__form [aria-invalid="true"]{border-color:#b34738;background:#fff8f7;outline-color:#b34738}
+
+/* Each optional structure is a separate, readable decision in the target list. */
+.cf-ai__structures label { display: flex; align-items: flex-start; gap: .45rem; margin: .5rem 0; }
+.cf-ai__structures input { flex: 0 0 auto; margin-top: .2rem; }

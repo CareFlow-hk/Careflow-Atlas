@@ -121,7 +121,19 @@ export async function rememberKeys(orgId: string, keys: WorkspaceKeys) {
 /** The keys this device unlocked for the institution, if they are still its current key. */
 export async function recalledKeys(orgId: string, keyId: string): Promise<WorkspaceKeys | undefined> {
   const keys = memory.get(orgId) ?? await withStore<WorkspaceKeys>('readonly', store => store.get(orgId));
-  return keys?.keyId === keyId ? keys : undefined;
+  if (keys?.keyId !== keyId) return undefined;
+  // Hold on to what came back from IndexedDB: the page needs it again to seal the
+  // institution's AI credential, and reading it once is enough.
+  memory.set(orgId, keys);
+  return keys;
+}
+/**
+ * The institution keys this page has already unlocked, if any. Synchronous because callers
+ * only seal small values (the AI credential) and must not wait on a settings click; signing
+ * out clears it, and a page that never unlocked the passphrase gets nothing.
+ */
+export function unlockedKeys(orgId: string): WorkspaceKeys | undefined {
+  return memory.get(orgId);
 }
 export async function forgetKeys() {
   memory.clear();

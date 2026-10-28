@@ -2,22 +2,27 @@ import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from
 import { api, type Account, type Session } from './api';
 import type { FeatureSwitches } from './accountContext';
 import { WorkspaceKeyPanel } from './WorkspaceKeyPanel';
+import { AiSettingsPanel } from './AiSettingsPanel';
 
 interface Device { id: string; created_at: number; seen_at: number; current: boolean; }
 /** An institution as the platform administrator sees it: who is in it and its own switches. */
 interface Org { id: string; name: string; admins: number; members: number; accounts: number; features: FeatureSwitches; }
 interface AuditEvent { id: number; time: number; action: string; actor_email?: string; target_email?: string; target?: string; }
-const actions: Record<string, string> = { login: '登入', login_failed: '登入失敗', logout: '登出', user_created: '建立帳號', user_updated: '修改帳號', password_link_created: '生成設定密碼連結', password_set: '設定密碼', password_changed: '修改密碼', other_sessions_revoked: '撤銷其他登入', operator_recovery: '運維恢復管理員', platform_admin_granted: '設為平台管理員', org_created: '建立機構', org_renamed: '機構改名', user_moved: '移到另一機構', platform_admin_revoked: '取消平台管理員', feature_enabled: '開啟功能', feature_disabled: '關閉功能', workspace_saved: '同步工作區', workspace_cleared: '清空工作區', workspace_key_created: '設定機構密語', workspace_key_rewrapped: '更改機構密語', workspace_key_replaced: '更換機構密鑰' };
+const actions: Record<string, string> = { login: '登入', login_failed: '登入失敗', logout: '登出', user_created: '建立帳號', user_updated: '修改帳號', password_link_created: '生成設定密碼連結', password_set: '設定密碼', password_changed: '修改密碼', other_sessions_revoked: '撤銷其他登入', operator_recovery: '運維恢復管理員', platform_admin_granted: '設為平台管理員', org_created: '建立機構', org_renamed: '機構改名', user_moved: '移到另一機構', platform_admin_revoked: '取消平台管理員', feature_enabled: '開啟功能', feature_disabled: '關閉功能', workspace_saved: '同步工作區', workspace_cleared: '清空工作區', ai_assisted_write: 'AI 協助寫入', ai_assist: '使用 AI 助手', workspace_key_created: '設定機構密語', workspace_key_rewrapped: '更改機構密語', workspace_key_replaced: '更換機構密鑰', ai_key_set: '設定 AI 密鑰', ai_key_changed: '更換 AI 密鑰', ai_key_removed: '移除 AI 密鑰' };
+/** Provider ids as they appear in an audit target, `azure-openai@org-id`. Mirrors server/orgAi.mjs. */
+const providerText: Record<string, string> = { 'azure-openai': 'Azure OpenAI', openai: 'OpenAI', anthropic: 'Anthropic', deepseek: 'DeepSeek' };
 /** What each site-wide switch does, in staff wording. Keys match server/features.mjs. */
 const featureText: Record<keyof FeatureSwitches, { label: string; detail: string }> = {
   photoIntake: { label: '照片回錄（Azure 辨識）', detail: '開啟後，同事可以上傳紙本照片，照片會傳送到 Azure 辨識。關閉時頂欄不顯示入口，伺服器也拒絕轉送照片。' },
   workspaceSync: { label: '跨裝置同步（加密後存到伺服器）', detail: '開啟後，同一機構的同事在不同裝置看到同一份資料。住戶姓名、電話、備註和記錄文字先在瀏覽器用機構密語加密，伺服器只存加密後的內容。關閉時資料只留在各自的裝置，伺服器拒絕讀寫。需要先在下面設定機構密語。' },
+  aiAssistant: { label: 'AI 助手', detail: '開啟後，同事在頁首的「AI 助手」對話框裡可以貼上文字或上傳表格，請 AI 整理成待確認的記錄，或建議欄位對應；AI 只提建議，下一步會列出「將執行的目標」，由登入的同事確認後署名寫入。AI 由伺服器代理 Azure，密鑰只由平台管理員在伺服器設定，因此這個開關也由平台管理員決定；關閉時伺服器不會把任何內容送到 Azure。' },
 };
 export function AccountPanel({ session, features = {}, onFeaturesChanged, onKeyChanged, onClose, onSignedOut, advanced }: { session: Session; /** Site-wide switches; only an administrator sees and changes them. */ features?: FeatureSwitches; onFeaturesChanged?: (features: FeatureSwitches) => void; /** The institution key on this device changed. */ onKeyChanged?: () => void; onClose: () => void; onSignedOut: () => void; /** Workspace settings, folded under 高級設定. */ advanced?: ReactNode }) {
   const [users, setUsers] = useState<Account[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
   const [changing, setChanging] = useState(false);
   const [events, setEvents] = useState<AuditEvent[]>([]);
+  const [auditFilter, setAuditFilter] = useState<'all' | 'ai'>('all');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [link, setLink] = useState('');
@@ -68,18 +73,27 @@ export function AccountPanel({ session, features = {}, onFeaturesChanged, onKeyC
       const result = await api<{ features: FeatureSwitches }>('/admin/features', 'PUT', { key, enabled, ...(org ? { orgId: org.id } : {}) });
       if (!org || org.id === session.user.orgId) onFeaturesChanged?.(result.features);
       await reload();
-      const where = key === 'workspaceSync' ? `「${org?.name ?? '本機構'}」的` : '全站的';
+      const where = key === 'photoIntake' ? '全站的' : `「${org?.name ?? '本機構'}」的`;
       setMessage(`已${enabled ? '開啟' : '關閉'}${where}「${featureText[key].label}」，立即生效。`);
     });
   }
-  /** Audit targets for a per-institution switch read `workspaceSync@org-id`. */
+  /** Audit targets read `workspaceSync@org-id`, or `azure-openai@org-id` for the AI key. */
   const targetLabel = (target: string) => {
     const [key, orgId] = target.split('@');
-    if (!(key in featureText)) return undefined;
-    const label = featureText[key as keyof FeatureSwitches].label;
+    const label = key in featureText ? featureText[key as keyof FeatureSwitches].label : providerText[key] ? `AI 密鑰 · ${providerText[key]}` : undefined;
+    if (!label) return undefined;
     if (!orgId) return label;
     return `${label} · ${orgId === session.user.orgId ? '本機構' : orgs.find(o => o.id === orgId)?.name ?? orgId}`;
   };
+  /** The AI-assisted rows are a disclosure of how a record was produced, not an accusation. */
+  const aiEvents = auditFilter === 'ai' ? events.filter(event => event.action === 'ai_assisted_write') : events;
+  /**
+   * Every switch here sends data off this deployment, and the AI key is now the platform's
+   * (server `.env`), so none of them is an institution administrator's call
+   * (`docs/AI_ASSISTANT.md` 2.2 decision 18). An institution's administrator still sees the
+   * state; the server refuses the change either way.
+   */
+  const mayTurn = () => platform;
   return <section className="account-page" aria-label="設定">
     <header><div><h1>設定</h1><p>{session.user.name} · {session.user.email}</p></div><button onClick={onClose}>返回工作台</button></header>
     {error && <p role="alert" className="account-error">{error}</p>}
@@ -100,12 +114,14 @@ export function AccountPanel({ session, features = {}, onFeaturesChanged, onKeyC
         <button disabled={busy} onClick={() => void perform(async () => { await api('/sessions/revoke-others', 'POST'); await reload(); setMessage('其他裝置已登出。'); })}>登出其他裝置</button>
       </section>
     </div>
+    {/* Every member sees whether the assistant is set up; since phase 5 nobody sets a key here. */}
+    <AiSettingsPanel />
     {admin && <>
       <section className="account-features"><h2>功能開關</h2><p>{platform
-        ? '照片回錄影響全站；跨裝置同步按機構分開，這裡是本機構的，其他機構在下面「機構」裡開關。預設全部關閉，每次開關都記在操作記錄裡。'
-        : '這些開關由平台管理員（CareFlow 團隊）設定；如需開啟或關閉，請聯絡平台管理員。'}</p>
+        ? '照片回錄影響全站；跨裝置同步和 AI 助手按機構分開，這裡是本機構的，其他機構的開關在下面「機構」裡。三項都由平台管理員決定，預設全部關閉，每次開關都記在操作記錄裡。'
+        : '這三項都由平台管理員（CareFlow 團隊）設定，你在這裡看到的是本機構目前的狀態；需要開啟請聯絡平台管理員。'}</p>
         <ul>{(Object.keys(featureText) as (keyof FeatureSwitches)[]).map(key => <li key={key}>
-          <label><input type="checkbox" checked={features[key] === true} disabled={busy || !platform} onChange={e => toggle(key, e.target.checked)} /><strong>{featureText[key].label}</strong>{!platform && <span className="account-features__state">{features[key] ? '已開啟' : '已關閉'}</span>}</label>
+          <label><input type="checkbox" checked={features[key] === true} disabled={busy || !mayTurn()} onChange={e => toggle(key, e.target.checked)} /><strong>{featureText[key].label}</strong>{!mayTurn() && <span className="account-features__state">{features[key] ? '已開啟' : '已關閉'}</span>}</label>
           <p>{featureText[key].detail}</p>
           {key === 'photoIntake' && azureReady === false && <p className="account-features__warn">伺服器未設定 Azure 金鑰：即使開啟，照片也無法辨識。</p>}
         </li>)}</ul>
@@ -130,7 +146,7 @@ export function AccountPanel({ session, features = {}, onFeaturesChanged, onKeyC
         <td><select aria-label={`${user.email}角色`} disabled={busy || user.id === session.user.id || (user.platformAdmin && !platform)} value={user.role} onChange={e => update(user, { role: e.target.value as Account['role'] })}><option value="MEMBER">成員</option><option value="ADMIN">機構管理員</option></select></td>
         <td>{user.id === session.user.id ? <small>（你自己；請用上面的「修改密碼」）</small> : user.platformAdmin && !platform ? <small>（平台管理員的帳號只可由平台管理員修改）</small> : <><button disabled={busy} onClick={() => update(user, { disabled: !user.disabled })}>{user.disabled ? '啟用' : '停用'}</button> <button disabled={busy || user.disabled} onClick={() => void perform(async () => { const result = await api<{ link: string }>(`/admin/users/${user.id}/reset`, 'POST'); setLink(result.link); await reload(); })}>{user.pending ? '重新邀請' : '重設密碼'}</button></>}</td>
       </tr>)}</tbody></table></div></section>
-      <section><h2>最近 100 條帳號操作記錄</h2><div className="account-table"><table><thead><tr><th>時間</th><th>操作者</th><th>操作</th><th>對象</th></tr></thead><tbody>{events.map(event => <tr key={event.id}><td>{new Date(event.time).toLocaleString('zh-HK')}</td><td>{event.actor_email ?? '系統／未登入'}</td><td>{actions[event.action] ?? event.action}</td><td>{event.target_email ?? ((event.target && targetLabel(event.target)) ?? (event.target === session.user.orgId ? '本機構' : '—'))}</td></tr>)}</tbody></table></div></section>
+      <section><h2>最近 100 條帳號操作記錄 <select aria-label="篩選操作記錄" value={auditFilter} onChange={e => setAuditFilter(e.target.value as 'all' | 'ai')}><option value="all">全部</option><option value="ai">只看 AI 協助寫入</option></select></h2><div className="account-table"><table><thead><tr><th>時間</th><th>操作者</th><th>操作</th><th>對象</th></tr></thead><tbody>{aiEvents.map(event => <tr key={event.id}><td>{new Date(event.time).toLocaleString('zh-HK')}</td><td>{event.actor_email ?? '系統／未登入'}</td><td>{actions[event.action] ?? event.action}</td><td>{event.target_email ?? ((event.target && targetLabel(event.target)) ?? (event.target === session.user.orgId ? '本機構' : '—'))}</td></tr>)}</tbody></table>{aiEvents.length === 0 && <p className="account-note">這段期間沒有符合的記錄。</p>}</div></section>
     </>}
     {advanced && <details className="account-advanced"><summary>高級設定</summary>{advanced}</details>}
   </section>;

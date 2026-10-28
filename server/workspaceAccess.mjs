@@ -1,4 +1,5 @@
 import { requireValue } from './auth.mjs';
+import { assertAiAssist } from './aiAssist.mjs';
 
 /**
  * Who may change what inside the institution's shared snapshot.
@@ -98,8 +99,12 @@ function assertSigned(user, change) {
       if (next.createdBy !== undefined || user.role !== 'ADMIN') {
         requireValue(actsAs(next.createdBy, user), 403, '新增的記錄必須以登入的帳號名義儲存，不能用其他人的名字。');
       }
-    } else if (kind === 'changed' && next.deleted && canonical(next.deleted) !== canonical(previous.deleted)) {
-      requireValue(ownMarker(next.deleted, user), 403, '撤回記錄必須以登入的帳號名義進行。');
+    } else if (kind === 'changed') {
+      // How the row was produced is history: rewriting it later would falsify the trace.
+      requireValue(canonical(next.aiAssist) === canonical(previous.aiAssist), 403, 'AI 協助標記寫入後不能修改；如需更正，請新增一筆更正記錄。');
+      if (next.deleted && canonical(next.deleted) !== canonical(previous.deleted)) {
+        requireValue(ownMarker(next.deleted, user), 403, '撤回記錄必須以登入的帳號名義進行。');
+      }
     }
   }
   if (collection === 'followUpEvents' && kind === 'added') {
@@ -113,6 +118,9 @@ function assertSigned(user, change) {
  * unchanged costs nothing.
  */
 export function assertWorkspaceWrite(user, previous, next) {
+  // Checked on every write, including the first one: a marker that never passed the
+  // whitelist would otherwise sit in the store with nothing able to correct it.
+  for (const row of rowsOf(next, 'observations')) assertAiAssist(row);
   if (!previous) return;
   const seeding = user.role === 'ADMIN' && !hasRecords(previous);
   for (const change of diffSnapshots(previous, next)) {

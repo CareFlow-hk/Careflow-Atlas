@@ -92,4 +92,16 @@ describe("snapshotSchema", () => {
     // A withdrawn resolution no longer claims the task, so a later live one is not a duplicate.
     expect(snapshotSchema.safeParse(snapshot).success).toBe(true);
   });
+
+  it("keeps the AI disclosure as plain text with a real time", () => {
+    const snapshot = copy();
+    snapshot.observations[0].aiAssist = { at: "2026-10-23T14:05:00+08:00", provider: "deepseek", model: "deepseek-flash" };
+    expect(snapshotSchema.safeParse(snapshot).success).toBe(true);
+
+    // A marker that is not a moment in time cannot be read back honestly.
+    const vague = copy();
+    vague.observations[0].aiAssist = { at: "今天下午", provider: "deepseek", model: "deepseek-flash" };
+    expect(snapshotSchema.safeParse(vague).success).toBe(false);
+    // The provider whitelist is the server's check (no browser code may widen it).
+  });
 });

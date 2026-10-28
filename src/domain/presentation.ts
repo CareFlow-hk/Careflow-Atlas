@@ -6,6 +6,10 @@
  */
 import { CONTACT_OUTCOMES, COVERAGE_STATUSES, HOUSING_ASSESSMENTS, SOURCE_TYPES, SUPPORT_CATEGORIES, type ClueLevel, type FollowUpEventAction, type ContactOutcome, type CoverageStatus, type HousingAssessment, type SourceType, type State, type StateBreakdown, type SupportCategory } from './types';
 
+/** Current entry choices; historical coverage values remain readable in saved records. */
+export { AI_COVERAGE_STATUSES } from '../../shared/aiDraftContract.mjs';
+export const aiCoverageLabels = { UNVISITED: '未到訪', ATTEMPTED: '未能完成探訪', VISITED_NO_FINDING: '已完成探訪' };
+
 /* ---------------------------------------------------------------- states --- */
 
 /** The legend and the four-state model read the same two tables. */
@@ -96,6 +100,14 @@ export const coverageLabels: Record<CoverageStatus, string> = {
   PARTIAL: '部分完成', VISITED_NO_FINDING: '已完成探訪',
   VISITED_WITH_FINDING: '已訪，有記錄', INACCESSIBLE: '未能進入',
 };
+
+/**
+ * What a record says when the visit stated no coverage. It is not a coverage value:
+ * nothing is stored, and the place's earlier result keeps standing (CLAUDE.md §4,
+ * "缺失就是缺失"). The entry form offers it as the blank choice; history and detail
+ * views show it in place of a coverage label so the row never reads as a colour.
+ */
+export const coverageNotUpdatedLabel = '未更新覆蓋狀態';
 
 export const contactLabels: Record<ContactOutcome, string> = {
   NOT_ATTEMPTED: '未嘗試接觸', NO_ANSWER: '無人應門', DECLINED: '住戶婉拒',

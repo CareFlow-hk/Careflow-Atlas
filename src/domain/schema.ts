@@ -20,7 +20,9 @@ export const photoFallbackSchema = z.object({
 });
 export const observationSchema = z.object({
   ...base, visitId: id, buildingId: id, floorId: id.optional(), unitId: id.optional(),
-  occurredAt: occurrenceSchema, recordedAt: instantSchema, workerName: id, coverage: z.enum(COVERAGE_STATUSES),
+  // Absent coverage is a record that states no result for this visit; the place's earlier
+  // coverage keeps standing. It is not UNKNOWN, which is itself a stated result.
+  occurredAt: occurrenceSchema, recordedAt: instantSchema, workerName: id, coverage: z.enum(COVERAGE_STATUSES).optional(),
   assessment: z.enum(HOUSING_ASSESSMENTS).optional(), contactOutcome: z.enum(CONTACT_OUTCOMES).optional(),
   sourceType: z.enum(['STAFF_OBSERVATION', 'RESIDENT_REPORT', 'UNKNOWN']).optional(), evidence: z.array(text).max(100), note: text.optional(),
   // A self-defined wording kept beside the stored enum; the pipeline never reads it.
@@ -30,6 +32,9 @@ export const observationSchema = z.object({
   correctsObservationId: id.optional(), correctionReason: text.optional(),
   // Who saved this row. Absent on rows recorded before accounts existed; never invented.
   createdBy: z.object({ accountId: id, name: id }).optional(),
+  // The AI disclosure stays plain text so it can be read back; the provider whitelist is
+  // enforced on the server, which is the only side that can refuse a whole write.
+  aiAssist: z.object({ at: instantSchema, provider: id, model: id }).optional(),
   // A withdrawal appends this marker and keeps the row; it is not a removal.
   deleted: z.object({ at: instantSchema, by: z.object({ accountId: id, name: id }) }).optional(),
   photoSource: z.object({ hash: id, file: id, line: text, model: id, fallback: photoFallbackSchema.optional(), reviewedBy: z.object({ accountId: id, name: id }), reviewedAt: instantSchema, sample: z.boolean() }).optional(),

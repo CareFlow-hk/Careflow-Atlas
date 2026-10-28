@@ -1,7 +1,7 @@
 import { AlertCircle, CalendarDays, Save, X } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { previewState, type CoverageStatus, type HousingAssessment, type OptionField, type OptionNotes, type Observation } from "../domain/types";
-import { assessmentLabels, stateColors, supportCategoryLabels } from "../domain/presentation";
+import { stateColors, supportCategoryLabels } from "../domain/presentation";
 import { applyCoverageChange, markTouched, menuChoices, customOptionFor, type CustomOptions, type DependentFields } from "../domain/optionPrefs";
 
 /**
@@ -43,10 +43,11 @@ function ChoiceRow({ legend, note, name, choices, value, onChange, dotFor, requi
 export interface ObservationDraft {
   /** The place being recorded. Absent when a whole selection is recorded at once. */
   subjectId?: string;
+  /** A date alone is a complete answer: time is not required and is never invented. */
   occurredAt: string;
   coverage: CoverageStatus;
-  assessment?: HousingAssessment;
-  sourceType?: "STAFF_OBSERVATION" | "RESIDENT_REPORT" | "UNKNOWN";
+  assessment: HousingAssessment;
+  sourceType: "STAFF_OBSERVATION" | "RESIDENT_REPORT" | "UNKNOWN";
   optionNotes?: OptionNotes;
   note: string;
   evidence: string[];
@@ -93,6 +94,13 @@ const nowLocal = () => {
   const date = new Date(Date.now() - new Date().getTimezoneOffset() * 60_000);
   return date.toISOString().slice(0, 16);
 };
+/** The date the form opens on. A date is required; the time is not prefilled, because nobody stated it. */
+const todayLocal = () => nowLocal().slice(0, 10);
+/**
+ * The stored occurrence string. A time, when given, makes a full instant; without one the
+ * date stays a date — the record keeps date precision rather than inventing 00:00 (CLAUDE.md §4).
+ */
+const occurredAtValue = (date: string, time: string): string => (time ? new Date(`${date}T${time}`).toISOString() : date);
 
 /*
  * The fields a form opens with, from the two defaults. A default is marked touched:
@@ -109,8 +117,8 @@ const seedFields = (defaultCoverage?: CoverageStatus, defaultAssessment?: Housin
 });
 
 /*
- * v1 entry form. Nothing is pre-chosen for coverage: saving without picking one would
- * record a visit outcome nobody stated. Everything optional sits behind 「更多」.
+ * Coverage, housing and source must each be answered. Nothing is pre-chosen for
+ * coverage on an ordinary unit. Optional follow-up details sit behind 更多.
  * Tasks are closed from the task itself (標記完成), not from this form.
  *
  * A 劏房 room is the one subject that opens with a field already answered, and the two
@@ -173,20 +181,22 @@ export function ObservationEditor({ open, targetLabel, subjectId, batch, optionP
     const value = (key: string) => String(data.get(key) ?? "").trim();
     setSaving(true); setError("");
     try {
-      if (!value("coverageStatus")) throw new Error("請選擇覆蓋狀態。");
+      const occurredDate = value("occurredDate");
+      if (!occurredDate) throw new Error("請選擇發生日期。");
       if (!value("followUpReason") && ["assignee", "timingNote", "followUpDueAt"].some(key => value(key)) || !value("followUpReason") && category) throw new Error("已填跟進資料，請寫明跟進行動。");
       const coverage = resolve("coverage", value("coverageStatus"));
       const assessment = resolve("assessment", fields.assessment?.value ?? "");
       const sourceType = resolve("sourceType", fields.sourceType?.value ?? "");
+      if (!coverage.value || !assessment.value || !sourceType.value) throw new Error("請填妥覆蓋狀態、住房判斷及資料來源。");
       // 接觸結果 is not asked, so it is not stored: a value nobody confirmed is not a fact.
       const optionNotes: OptionNotes = { coverage: coverage.note, assessment: assessment.note, sourceType: sourceType.note };
       await onSubmit({
         subjectId,
         coverage: coverage.value as CoverageStatus,
-        assessment: assessment.value as HousingAssessment | undefined,
+        assessment: assessment.value as HousingAssessment,
         sourceType: sourceType.value as ObservationDraft["sourceType"],
         optionNotes: Object.values(optionNotes).some(Boolean) ? optionNotes : undefined,
-        occurredAt: new Date(String(data.get("occurredAt"))).toISOString(),
+        occurredAt: occurredAtValue(occurredDate, value("occurredTime")),
         note: value("note"),
         evidence: value("evidence").split(/\n|；/).map((item) => item.trim()).filter(Boolean),
         followUp: value("followUpReason") ? { action: value("followUpReason"), dueDate: value("followUpDueAt") || undefined, status: "OPEN", category: (category || undefined) as NonNullable<Observation['followUp']>['category'], assignee: value("assignee") || undefined, timingNote: value("timingNote") || undefined } : undefined,
@@ -216,20 +226,21 @@ export function ObservationEditor({ open, targetLabel, subjectId, batch, optionP
             choices={menuChoices("coverage", optionPrefs)}
             value={fields.coverage?.value ?? ""}
             onChange={next => setFields({ ...applyCoverageChange(fields, resolved("coverage", next)), coverage: { value: next, touched: true } })}
-            dotFor={choice => stateColors[previewState(resolved("coverage", choice) as CoverageStatus, undefined, false)]} />
-          {/* The blank choice stores nothing, so the unit's last judgement stands. Its
-              wording comes from the one table the elevation key and the ledger read. */}
-          <ChoiceRow legend="住房判斷" name="housingAssessment"
-            choices={[{ value: "", label: assessmentLabels.NOT_UPDATED }, ...menuChoices("assessment", optionPrefs)]}
+            dotFor={choice => choice ? stateColors[previewState(resolved("coverage", choice) as CoverageStatus, undefined, false)] : undefined} />
+          <ChoiceRow legend="住房判斷" name="housingAssessment" required
+            choices={menuChoices("assessment", optionPrefs)}
             value={fields.assessment?.value ?? ""}
             onChange={next => setFields(markTouched(fields, "assessment", next))} />
-          <ChoiceRow legend="資料來源" name="sourceType"
+          <ChoiceRow legend="資料來源" name="sourceType" required
             choices={menuChoices("sourceType", optionPrefs)}
             value={fields.sourceType?.value ?? ""}
             onChange={next => setFields(markTouched(fields, "sourceType", next))} />
         </div>
         <div className="cf-form-grid">
-          <label className="cf-field--wide"><span>發生時間</span><input type="datetime-local" name="occurredAt" defaultValue={nowLocal()} required /></label>
+          {/* Required, and only the date: leaving the time empty keeps the record at date
+              precision instead of inventing an hour from the entry moment. */}
+          <label><span>發生日期</span><input type="date" name="occurredDate" defaultValue={todayLocal()} required /></label>
+          <label><span>發生時間（可選）</span><input type="time" name="occurredTime" /></label>
           <label className="cf-field--wide"><span>記錄內容{batch ? "（會寫進每個單位）" : ""}</span><textarea name="note" rows={3} placeholder="看到、聽到或獲告知的內容，以及原話；不確定的地方照實寫。" /></label>
         </div>
         <details className="cf-more"><summary>更多</summary>

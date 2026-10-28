@@ -5,7 +5,7 @@
  * reason rather than guessed at. This module has no browser or DOM dependency
  * so it can be moved into a server directory unchanged.
  */
-import { recognitionAssessmentValues, recognitionCategoryValues, recognitionContactValues, recognitionCoverageValues, recognitionSourceValues } from '../domain/presentation';
+import {recognitionAssessmentValues, recognitionCategoryValues, recognitionContactValues, recognitionCoverageValues, recognitionSourceValues } from '../domain/presentation';
 
 export const DETECTOR_VERSION = 'careflow-detector-v2';
 
@@ -218,3 +218,10 @@ export const FORMAT_PROFILES: FormatProfile[] = [
 export function profileById(id: ProfileId): FormatProfile | undefined {
   return FORMAT_PROFILES.find((profile) => profile.id === id);
 }
+
+/**
+ * Columns the export writes but never reads back. They describe how a row was produced
+ * rather than what the paper said, so they are not business fields and are not offered
+ * for mapping — the stored record already holds them and the archive carries them.
+ */
+export const SYSTEM_COLUMNS = ['AI 協助'];

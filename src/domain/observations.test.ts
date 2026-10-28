@@ -84,7 +84,7 @@ describe('a batch stores what a single record stores', () => {
 describe('a batch is validated before anything is written', () => {
   const cases: [string, Partial<SaveObservationInput>][] = [
     ['no time', { occurredAt: '' }],
-    ['no coverage', { coverage: undefined as never }],
+    ['an unknown coverage', { coverage: 'NOT_A_COVERAGE' as never }],
     ['no building', { buildingId: '' }],
   ];
   for (const [name, override] of cases) {
@@ -93,6 +93,14 @@ describe('a batch is validated before anything is written', () => {
       expect(result).toHaveProperty('error');
     });
   }
+
+  // Coverage is no longer required (2026-10-25): a record that states none is stored
+  // without the field, not with UNKNOWN, so the place's earlier result keeps standing.
+  it('stores a record that states no coverage without inventing one', () => {
+    const next = read(appendObservations(demoSnapshot, [input({ id: 'o1', coverage: undefined })]));
+    // Absent — not UNKNOWN, which is itself a stated result and would repaint the place.
+    expect(next.observations.at(-1)!.coverage).toBeUndefined();
+  });
 
   it('names the problem in staff wording rather than passing the parser through', () => {
     const result = appendObservations(demoSnapshot, [input({ id: 'o1', occurredAt: '' })]);
