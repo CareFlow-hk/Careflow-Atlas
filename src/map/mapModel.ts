@@ -1,3 +1,4 @@
+import { footprintsOverlap } from './footprintsOverlap';
 import type { FeatureCollection, Polygon } from 'geojson';
 import { nodeTagLabel, stateColors, stateLabels, stateSelectedColors } from '../domain/presentation';
 import type { State, StateBreakdown } from '../domain/types';
@@ -117,8 +118,16 @@ export function floorFeatures(building: MapBuilding | undefined, separation: num
   };
 }
 
+/** The focused floor stack owns its ground. Overview keeps every business record. */
+export function visibleBuildings(buildings: MapBuilding[], selectedId?: string): MapBuilding[] {
+  const selected = buildings.find(building => building.id === selectedId);
+  if (!selected) return buildings;
+  const ring = footprintOf(selected);
+  return buildings.filter(building => building.id === selectedId || !footprintsOverlap(ring, footprintOf(building)));
+}
+
 export function buildingFeatures(buildings: MapBuilding[], selectedId?: string): FeatureCollection<Polygon> {
-  return { type: 'FeatureCollection', features: buildings.filter(b => b.id !== selectedId).map(b => ({
+  return { type: 'FeatureCollection', features: visibleBuildings(buildings, selectedId).filter(b => b.id !== selectedId).map(b => ({
     type: 'Feature', id: b.id, properties: { id: b.id, color: stateColors[b.state], height: Math.max(8, b.floors.length * FLOOR_HEIGHT) },
     geometry: { type: 'Polygon', coordinates: [footprintOf(b)] },
   })) };

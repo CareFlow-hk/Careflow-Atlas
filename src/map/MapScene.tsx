@@ -8,7 +8,7 @@ import type { NewBuildingInput } from '../data/newBuilding';
 import { findOsmFootprint } from './osmFootprint';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { FeatureCollection, Polygon } from 'geojson';
-import { buildingFeatures, districtBounds, visibleDistrictLabels, DISTRICT_CAMERA, floorFeatures, floorBase, footprintOf, markerLabel, FLOOR_HEIGHT, type MapBuilding } from './mapModel';
+import { buildingFeatures, visibleBuildings, districtBounds, visibleDistrictLabels, DISTRICT_CAMERA, floorFeatures, floorBase, footprintOf, markerLabel, FLOOR_HEIGHT, type MapBuilding } from './mapModel';
 import { easeInOutCubic, motionDuration, spatialMotion } from '../app/motion';
 import { contextPosition, cutawayEnabled, CutawayTransition, CUTAWAY_DURATION, focusCameraState, focusHeight, shouldLowerBuilding, sightBearing, cameraGroundPoint } from './focusContext';
 import { breakdownLabel, mapSceneColors, nodeTagLabel, stateColors, stateLabels, stateLegendNotes } from '../domain/presentation';
@@ -136,7 +136,7 @@ export default function MapScene(props: MapSceneProps) {
           try { map.setPaintProperty(layer.id, layer.type === 'background' ? 'background-color' : 'fill-color', tone); } catch { /* a style without that property keeps its own */ }
         }
         // Preserve string IDs through vector tiling for per-building animation state.
-        map.addSource('outreach-buildings', { type: 'geojson', promoteId: 'id', data: buildingFeatures(current.current.buildings) });
+        map.addSource('outreach-buildings', { type: 'geojson', promoteId: 'id', data: buildingFeatures(current.current.buildings, current.current.selectedBuildingId) });
         map.addSource('focused-city', { type: 'geojson', promoteId: 'id', data: { type: 'FeatureCollection', features: [] } });
         map.addLayer({ id: 'focused-city', source: 'focused-city', type: 'fill-extrusion', paint: {
           'fill-extrusion-color': mapSceneColors.contextBuilding, 'fill-extrusion-height': overviewContextHeight,
@@ -252,7 +252,7 @@ export default function MapScene(props: MapSceneProps) {
      * name and task tag would otherwise sit over the floor stack that focusing is meant
      * to show. The building's own state and count stay readable in the detail panel.
      */
-    markers.current = props.buildings.map(building => {
+    markers.current = visibleBuildings(props.buildings, props.selectedBuildingId).map(building => {
       // The wording and the class names come from `markerLabel`, so what a marker says
       // can be asserted without a browser; only the assembly happens here.
       const label = markerLabel(building, building.id === props.selectedBuildingId);
