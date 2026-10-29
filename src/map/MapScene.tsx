@@ -1,5 +1,5 @@
 import { scheduleFlatPitchLock } from './flatPitchLock';
-import { buildingOverlapGroups } from './buildingOverlaps';
+import { buildingOverlapGroups, overlapGroupOf } from './buildingOverlaps';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Map as LibreMap, Marker, MercatorCoordinate, NavigationControl, ScaleControl, setWorkerUrl, type ExpressionSpecification, type GeoJSONSource, type MapMouseEvent } from 'maplibre-gl';
 import mapWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
@@ -460,21 +460,29 @@ export default function MapScene(props: MapSceneProps) {
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
+    const groupOf = overlapGroupOf(props.buildings);
     const arrange = () => {
       const labels = markers.current.map(marker => {
         const element = marker.getElement();
         const point = map.project(marker.getLngLat());
         return { id: element.dataset.buildingId!, x: point.x, y: point.y, width: Number(element.dataset.labelWidth) };
       });
-      const duplicates = new Set(markers.current.filter(marker => marker.getElement().dataset.possibleDuplicate === 'true').map(marker => marker.getElement().dataset.buildingId!));
-      const offsets = duplicateMarkerOffsets(labels, duplicates);
+      const offsets = duplicateMarkerOffsets(labels, groupOf);
       const canvas = map.getCanvas();
-      const names = visibleDistrictLabels(labels.map(label => ({ ...label, y: label.y - (offsets.get(label.id) ?? 0) })), canvas.clientWidth, canvas.clientHeight);
+      // A stacked group competes for room through its bottom label, then shows or folds as one.
+      const lift = new Map<string, number>();
+      for (const label of labels) {
+        const group = groupOf.get(label.id);
+        if (group !== undefined) lift.set(group, Math.max(lift.get(group) ?? 0, offsets.get(label.id) ?? 0));
+      }
+      const names = visibleDistrictLabels(labels.filter(label => !offsets.get(label.id)).map(label => ({ ...label, lift: lift.get(groupOf.get(label.id) ?? '') })), canvas.clientWidth, canvas.clientHeight);
+      const shownGroups = new Set([...names].map(id => groupOf.get(id)).filter(Boolean));
       markers.current.forEach(marker => {
         const element = marker.getElement();
         const id = element.dataset.buildingId!;
-        marker.setOffset([0, -6 - (offsets.get(id) ?? 0)]);
-        element.classList.toggle('is-compact', !duplicates.has(id) && !names.has(id));
+        const shown = names.has(id) || (!!offsets.get(id) && shownGroups.has(groupOf.get(id)));
+        marker.setOffset([0, -6 - (shown ? offsets.get(id) ?? 0 : 0)]);
+        element.classList.toggle('is-compact', !shown);
       });
     };
     arrange();
@@ -568,8 +576,8 @@ export default function MapScene(props: MapSceneProps) {
       <button className="map-tool" aria-label={active ? '返回街區總覽' : '框選全部大廈'} title={active ? '返回街區總覽' : '框選全部大廈'} disabled={!ready} onClick={() => { if (active) props.onOverview(); else if (mapRef.current) frameDistrict(mapRef.current); }}><Scan size={19} /></button>
       <button className="map-tool" aria-label="恢復預設視角" title={editing || adding ? '請先儲存或取消形狀，再恢復預設視角' : '恢復預設視角：重設位置、縮放、方向與傾角'} disabled={!ready || !!editing || adding} onClick={() => { if (mapRef.current) restoreDefaultView(mapRef.current); }}><RotateCcw size={19} /></button>
       <button className="map-tool" onClick={toggle3D} aria-label={is3D ? '切換平面地圖' : '切換立體地圖'} disabled={!ready}>{is3D ? '2D' : '3D'}</button>
-      <button className="map-tool" aria-label="放大地圖" onClick={() => mapRef.current?.zoomIn({ duration: motionDuration(300), easing: easeInOutCubic })} disabled={!ready}><Plus size={19} /></button>
-      <button className="map-tool" aria-label="縮小地圖" onClick={() => mapRef.current?.zoomOut({ duration: motionDuration(300), easing: easeInOutCubic })} disabled={!ready}><Minus size={19} /></button>
+      <button className="map-tool map-tool--zoom" aria-label="放大地圖" onClick={() => mapRef.current?.zoomIn({ duration: motionDuration(300), easing: easeInOutCubic })} disabled={!ready}><Plus size={19} /></button>
+      <button className="map-tool map-tool--zoom" aria-label="縮小地圖" onClick={() => mapRef.current?.zoomOut({ duration: motionDuration(300), easing: easeInOutCubic })} disabled={!ready}><Minus size={19} /></button>
       {/* Rotation is a drag (right-drag with a mouse); the compass puts north back. */}
       <button className="map-tool compass" aria-label="地圖朝北" title="回正北方" onClick={() => rotateCamera(0)} disabled={!ready}><Compass size={20} style={{ transform: `rotate(${-bearing}deg)` }} /><span>N</span></button>
       <output className="camera-bearing" aria-label="相機方位角">{(bearing + 360) % 360}°</output>

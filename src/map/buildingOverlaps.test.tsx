@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { buildingOverlapGroups, type SpatialBuilding } from './buildingOverlaps';
+import { buildingOverlapGroups, overlapGroupOf, type SpatialBuilding } from './buildingOverlaps';
 import { toLngLat } from './footprintGeometry';
 import { blankSnapshot } from '../data/blankSnapshot';
 import { demoBuildings } from '../data/demoFixture';
@@ -8,7 +8,7 @@ import { mergeSync } from '../data/syncMerge';
 import { BuildingCard } from '../components/BuildingCard';
 import { BuildingDetail } from '../components/BuildingDetail';
 import { getCoverageSummary } from '../domain/types';
-import { duplicateMarkerOffsets, markerLabel, type MapBuilding } from './mapModel';
+import { duplicateMarkerOffsets, markerLabel, visibleDistrictLabels, type MapBuilding } from './mapModel';
 const at = (id: string, x: number): SpatialBuilding => ({id, name: `合成${id}樓`, longitude:114.14, latitude:22.28, footprint:toLngLat([[x,0],[x+10,0],[x+10,10],[x,10]], {lng:114.14,lat:22.28})});
 const noop = () => {};
 describe('workspace overlap review groups', () => {
@@ -59,7 +59,30 @@ describe('workspace overlap review groups', () => {
 
 it('keeps duplicate marker names readable at the same point without moving ordinary neighbours', () => {
   const labels=[{id:'A',x:100,y:200,width:160},{id:'B',x:100,y:200,width:160},{id:'C',x:100,y:200,width:160},{id:'far',x:500,y:200,width:160},{id:'ordinary',x:100,y:200,width:160}];
-  const offsets=duplicateMarkerOffsets(labels,new Set(['A','B','C','far']));
+  const offsets=duplicateMarkerOffsets(labels,new Map([['A','A'],['B','A'],['C','A'],['far','far']]));
   expect([...offsets]).toEqual([['A',0],['B',44],['C',88],['far',0]]);
   expect(labels.every(label=>label.y===200)).toBe(true);
+});
+
+it('lifts a duplicate only clear of its own group, so crowded groups do not climb off the map', () => {
+  // Twenty pairs packed into one column: comparing across groups used to stack them 44px apiece.
+  const labels=Array.from({length:20},(_,i)=>[{id:`real-${i}`,x:300,y:400+i*10,width:160},{id:`copy-${i}`,x:300,y:400+i*10,width:160}]).flat();
+  const groupOf=new Map(Array.from({length:20},(_,i)=>[[`real-${i}`,`g${i}`],[`copy-${i}`,`g${i}`]] as [string,string][]).flat());
+  const offsets=duplicateMarkerOffsets(labels,groupOf);
+  expect(Math.max(...offsets.values())).toBe(44);
+  expect(offsets.get('real-7')).toBe(0);
+  expect(offsets.get('copy-7')).toBe(44);
+});
+
+it('groups buildings by overlap and leaves lone buildings out', () => {
+  const square=(id:string,lng:number)=>({id,name:id,longitude:lng,latitude:22.286,footprint:[[lng-.0001,22.2859],[lng+.0001,22.2859],[lng+.0001,22.2861],[lng-.0001,22.2861],[lng-.0001,22.2859]]});
+  const groups=overlapGroupOf([square('a',114.14),square('b',114.14),square('lone',114.15)]);
+  expect(groups.get('a')).toBe(groups.get('b'));
+  expect(groups.has('lone')).toBe(false);
+});
+
+it('reserves the room a stack needs, so a lifted name never covers a neighbour', () => {
+  const below={id:'pair',x:400,y:400,width:160,lift:44}, above={id:'neighbour',x:400,y:340,width:160};
+  expect([...visibleDistrictLabels([below,above],1200,900)]).toEqual(['pair']);
+  expect([...visibleDistrictLabels([{...below,lift:0},above],1200,900)]).toEqual(['pair','neighbour']);
 });

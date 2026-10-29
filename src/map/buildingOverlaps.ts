@@ -34,3 +34,8 @@ export function buildingOverlapGroups(buildings: readonly SpatialBuilding[]) {
   }
   return { groups, peers };
 }
+
+/** Each overlapping building's group, keyed by building id; buildings that overlap nothing are absent. */
+export function overlapGroupOf(buildings: readonly SpatialBuilding[]): Map<string, string> {
+  return new Map(buildingOverlapGroups(buildings).groups.flatMap(group => group.map(id => [id, group[0]] as const)));
+}
