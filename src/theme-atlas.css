@@ -5,7 +5,6 @@
  * editing them. State hues never appear here: they come from presentation.ts through
  * --cf-state.
  */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Serif+TC:wght@500;600;700&display=swap');
 
 :root{
   --radius-sm:4px; --radius-md:8px;
