@@ -576,8 +576,8 @@ export default function MapScene(props: MapSceneProps) {
       <button className="map-tool" aria-label={active ? '返回街區總覽' : '框選全部大廈'} title={active ? '返回街區總覽' : '框選全部大廈'} disabled={!ready} onClick={() => { if (active) props.onOverview(); else if (mapRef.current) frameDistrict(mapRef.current); }}><Scan size={19} /></button>
       <button className="map-tool" aria-label="恢復預設視角" title={editing || adding ? '請先儲存或取消形狀，再恢復預設視角' : '恢復預設視角：重設位置、縮放、方向與傾角'} disabled={!ready || !!editing || adding} onClick={() => { if (mapRef.current) restoreDefaultView(mapRef.current); }}><RotateCcw size={19} /></button>
       <button className="map-tool" onClick={toggle3D} aria-label={is3D ? '切換平面地圖' : '切換立體地圖'} disabled={!ready}>{is3D ? '2D' : '3D'}</button>
-      <button className="map-tool" aria-label="放大地圖" onClick={() => mapRef.current?.zoomIn({ duration: motionDuration(300), easing: easeInOutCubic })} disabled={!ready}><Plus size={19} /></button>
-      <button className="map-tool" aria-label="縮小地圖" onClick={() => mapRef.current?.zoomOut({ duration: motionDuration(300), easing: easeInOutCubic })} disabled={!ready}><Minus size={19} /></button>
+      <button className="map-tool map-tool--zoom" aria-label="放大地圖" onClick={() => mapRef.current?.zoomIn({ duration: motionDuration(300), easing: easeInOutCubic })} disabled={!ready}><Plus size={19} /></button>
+      <button className="map-tool map-tool--zoom" aria-label="縮小地圖" onClick={() => mapRef.current?.zoomOut({ duration: motionDuration(300), easing: easeInOutCubic })} disabled={!ready}><Minus size={19} /></button>
       {/* Rotation is a drag (right-drag with a mouse); the compass puts north back. */}
       <button className="map-tool compass" aria-label="地圖朝北" title="回正北方" onClick={() => rotateCamera(0)} disabled={!ready}><Compass size={20} style={{ transform: `rotate(${-bearing}deg)` }} /><span>N</span></button>
       <output className="camera-bearing" aria-label="相機方位角">{(bearing + 360) % 360}°</output>
