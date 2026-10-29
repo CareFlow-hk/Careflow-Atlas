@@ -226,10 +226,21 @@ export function supersededObservationIds(observations: Observation[]): Set<strin
   return superseded;
 }
 
+/*
+ * Every unit, floor and building asks for this set, several times per map render, so it is
+ * worked out once per observations array. Snapshots are replaced, never edited in place; the
+ * length check still refuses a cached answer for an array that has been pushed to since.
+ */
+const effectiveCache = new WeakMap<Observation[], { length: number; effective: Observation[] }>();
+
 /** The candidate set for coverage, summaries and follow-ups: the effective version of each event. */
 export function effectiveObservations(snapshot: OutreachSnapshot): Observation[] {
+  const cached = effectiveCache.get(snapshot.observations);
+  if (cached && cached.length === snapshot.observations.length) return cached.effective;
   const superseded = supersededObservationIds(snapshot.observations);
-  return snapshot.observations.filter((item) => !item.deleted && !superseded.has(item.id));
+  const effective = snapshot.observations.filter((item) => !item.deleted && !superseded.has(item.id));
+  effectiveCache.set(snapshot.observations, { length: snapshot.observations.length, effective });
+  return effective;
 }
 
 /** Withdrawing appends a marker; repeating it keeps the first one, so re-syncing is stable. */
@@ -267,7 +278,18 @@ export interface OpenFollowUp {
   category?: SupportCategory; assignee?: string; timingNote?: string;
 }
 /** Stable event identity across correction chains; cycle-safe for unvalidated input. */
+const rootCache = new WeakMap<Observation[], { length: number; roots: Map<string, string> }>();
+
+/** Cached like `effectiveObservations`: each follow-up check per unit would otherwise rewalk every chain. */
 export function observationRootIds(observations: Observation[]): Map<string, string> {
+  const cached = rootCache.get(observations);
+  if (cached && cached.length === observations.length) return cached.roots;
+  const roots = rootIds(observations);
+  rootCache.set(observations, { length: observations.length, roots });
+  return roots;
+}
+
+function rootIds(observations: Observation[]): Map<string, string> {
   const byId = new Map(observations.map(item => [item.id, item]));
   const roots = new Map<string, string>();
   for (const item of observations) {
@@ -339,7 +361,19 @@ export function recordFollowUpEvent(snapshot: OutreachSnapshot, input: { id: str
   return { ...snapshot, followUpEvents: [...snapshot.followUpEvents ?? [], event] };
 }
 
+const openCache = new WeakMap<OutreachSnapshot, { observations: Observation[]; events: unknown; count: number; open: OpenFollowUp[] }>();
+
+/** Asked once per unit, floor and building on every render, so worked out once per snapshot. */
 export function getOpenFollowUps(snapshot: OutreachSnapshot): OpenFollowUp[] {
+  const cached = openCache.get(snapshot);
+  const count = snapshot.observations.length + (snapshot.followUpEvents?.length ?? 0);
+  if (cached && cached.observations === snapshot.observations && cached.events === snapshot.followUpEvents && cached.count === count) return cached.open;
+  const open = openFollowUps(snapshot);
+  openCache.set(snapshot, { observations: snapshot.observations, events: snapshot.followUpEvents, count, open });
+  return open;
+}
+
+function openFollowUps(snapshot: OutreachSnapshot): OpenFollowUp[] {
   const resolved = followUpResolutions(snapshot);
   const closed = followUpClosures(snapshot);
   return effectiveObservations(snapshot).filter(item => item.followUp?.status === "OPEN" && !resolved.has(item.id) && !closed.has(item.id))
@@ -444,8 +478,21 @@ export function getCoverageSummary(snapshot: OutreachSnapshot, buildingId: strin
  * The units whose records speak for this one: itself, and — for a 劏房 room — the
  * unit it was split from. Nothing else, and nothing transitive: a room has no rooms.
  */
+const unitIndexCache = new WeakMap<object, { length: number; byId: Map<string, OutreachSnapshot['units'][number]> }>();
+function unitById(snapshot: OutreachSnapshot, unitId: string) {
+  let cached = unitIndexCache.get(snapshot.units);
+  if (!cached || cached.length !== snapshot.units.length) {
+    // The first unit with an id wins, as `find` did.
+    const byId = new Map<string, OutreachSnapshot['units'][number]>();
+    for (const unit of snapshot.units) if (!byId.has(unit.id)) byId.set(unit.id, unit);
+    cached = { length: snapshot.units.length, byId };
+    unitIndexCache.set(snapshot.units, cached);
+  }
+  return cached.byId.get(unitId);
+}
+
 export function subjectUnitIds(snapshot: OutreachSnapshot, unitId: string): string[] {
-  const parent = snapshot.units.find(unit => unit.id === unitId)?.parentUnitId;
+  const parent = unitById(snapshot, unitId)?.parentUnitId;
   return parent ? [unitId, parent] : [unitId];
 }
 
@@ -463,9 +510,19 @@ function latestOfSubjects<T extends Observation>(unitId: string, records: T[]): 
 }
 
 /** The records that speak for this unit: its own, plus the ones it inherits. */
+const byUnitCache = new WeakMap<Observation[], Map<string, number[]>>();
 function recordsForUnit(snapshot: OutreachSnapshot, unitId: string): Observation[] {
-  const ids = new Set(subjectUnitIds(snapshot, unitId));
-  return effectiveObservations(snapshot).filter(item => item.unitId !== undefined && ids.has(item.unitId));
+  const effective = effectiveObservations(snapshot);
+  let byUnit = byUnitCache.get(effective);
+  if (!byUnit) {
+    byUnit = new Map();
+    effective.forEach((item, index) => { if (item.unitId !== undefined) { const list = byUnit!.get(item.unitId); if (list) list.push(index); else byUnit!.set(item.unitId, [index]); } });
+    byUnitCache.set(effective, byUnit);
+  }
+  // Same records in the same order as filtering the whole list: ties still go to the earlier entry.
+  const indices = [...new Set(subjectUnitIds(snapshot, unitId))].flatMap(id => byUnit!.get(id) ?? []);
+  if (indices.length > 1) indices.sort((a, b) => a - b);
+  return indices.map(index => effective[index]);
 }
 
 /** The latest effective event that speaks for this unit. Undefined means "nothing recorded here". */
