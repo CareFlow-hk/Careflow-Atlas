@@ -8,6 +8,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Serif+TC:wght@500;600;700&display=swap');
 
 :root{
+  --radius-sm:4px; --radius-md:8px;
   --atlas-paper:#f7f4ec; --atlas-card:#fffdf8; --atlas-ink:#1d2622; --atlas-mute:#7a766b; --atlas-rule:#ddd6c6;
   --atlas-soft:#efe8da; --atlas-acc:#7d3b27; --atlas-task:#9a6420; --atlas-task-bg:#fbf3e3;
   --atlas-serif:'Noto Serif TC',serif; --atlas-sans:'Inter','Noto Sans TC',-apple-system,sans-serif;
@@ -22,21 +23,21 @@ body{background:var(--atlas-paper)}
 .app-shell .app-header{height:52px;background:var(--atlas-paper);border-bottom:1px solid var(--atlas-rule);gap:18px;padding:0 20px}
 .app-shell .brand strong{font-family:var(--atlas-serif);font-size:18px;font-weight:600;color:var(--atlas-ink);letter-spacing:0}
 .app-shell .brand strong span{color:var(--atlas-acc);font-style:normal;margin-left:4px;font-weight:600}
-.app-shell .brand-symbol{background:var(--atlas-ink);color:var(--atlas-paper);border-radius:3px}
+.app-shell .brand-symbol{background:var(--atlas-ink);color:var(--atlas-paper);border-radius:var(--radius-sm)}
 .app-shell .app-header__place{white-space:nowrap}
 .app-shell .demo-badge{background:transparent;border:0;padding:0;font-family:'Inter',sans-serif;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--atlas-acc)}
 .app-shell .demo-badge>span{background:var(--atlas-acc)}
-.app-shell .icon-button{color:var(--atlas-mute);border-radius:3px}
+.app-shell .icon-button{color:var(--atlas-mute);border-radius:var(--radius-sm)}
 .app-shell .icon-button:hover,.app-shell .account-menu>summary:hover,.app-shell .account-menu[open]>summary{background:var(--atlas-soft)}
-.app-shell .account-menu>summary{border-radius:3px;color:var(--atlas-ink)}
-.app-shell .account-menu__avatar{border-radius:3px;background:var(--atlas-ink);color:var(--atlas-paper);font-family:var(--atlas-serif)}
-.app-shell .account-menu__list{background:var(--atlas-card);border-color:var(--atlas-rule);border-radius:3px;box-shadow:0 14px 36px #3a2e1a24}
+.app-shell .account-menu>summary{border-radius:var(--radius-sm);color:var(--atlas-ink)}
+.app-shell .account-menu__avatar{border-radius:var(--radius-sm);background:var(--atlas-ink);color:var(--atlas-paper);font-family:var(--atlas-serif)}
+.app-shell .account-menu__list{background:var(--atlas-card);border-color:var(--atlas-rule);border-radius:var(--radius-md);box-shadow:0 14px 36px #3a2e1a24}
 .app-shell .account-menu__list button:hover{background:var(--atlas-soft)}
-.app-shell .help-popover{background:var(--atlas-card);border:1px solid var(--atlas-rule);border-radius:3px;box-shadow:0 14px 36px #3a2e1a24}
+.app-shell .help-popover{background:var(--atlas-card);border:1px solid var(--atlas-rule);border-radius:var(--radius-md);box-shadow:0 14px 36px #3a2e1a24}
 .app-shell .help-popover strong{font-family:var(--atlas-serif);font-weight:600;color:var(--atlas-ink)}
 .app-shell .help-popover p,.app-shell .help-popover li{color:var(--atlas-mute)}
-.app-shell .help-popover button{background:var(--atlas-ink);color:var(--atlas-paper);border-radius:3px}
-.app-shell .help-legend i{border-radius:1px}
+.app-shell .help-popover button{background:var(--atlas-ink);color:var(--atlas-paper);border-radius:var(--radius-sm)}
+.app-shell .help-legend i{border-radius:50%}
 
 /* ------------------------------------------------------------------ finder / index */
 .app-shell .district-sidebar{background:var(--atlas-card)}
@@ -48,7 +49,7 @@ body{background:var(--atlas-paper)}
 .app-shell .workspace-tabs button.active{color:var(--atlas-ink);font-weight:500}
 .app-shell .workspace-tabs button.active:after{left:0;right:0;height:1.5px;background:var(--atlas-acc)}
 .app-shell .workspace-tabs button>span{background:transparent;padding:0;font-size:11px;color:inherit;font-variant-numeric:tabular-nums}
-.app-shell .building-search{margin:10px 16px 4px;border:0;border-bottom:1px solid var(--atlas-rule);border-radius:0;background:transparent;padding:0}
+.app-shell .building-search{margin:10px 16px 4px;border:0;border-bottom:1px solid var(--atlas-rule);border-radius:var(--radius-sm);background:transparent;padding:0}
 .app-shell .building-search input{background:transparent;font-size:13px}
 .app-shell .list-heading{padding:8px 16px 4px;color:var(--atlas-mute);font-size:11px}
 .app-shell .building-list{padding:0 16px 8px}
@@ -57,22 +58,22 @@ body{background:var(--atlas-paper)}
 .app-shell .building-row.selected .building-row__name{color:var(--atlas-acc)}
 .app-shell .building-row__n{font-family:'Inter',sans-serif;font-size:10px;color:var(--atlas-mute);font-variant-numeric:tabular-nums}
 .app-shell .building-row__name{font-family:var(--atlas-serif);font-size:14.5px;font-weight:600;display:flex;align-items:center;gap:7px;white-space:nowrap}
-.app-shell .building-row__name i{width:7px;height:7px;border-radius:1px;background:var(--cf-state);flex:none}
+.app-shell .building-row__name i{width:7px;height:7px;border-radius:50%;background:var(--cf-state);flex:none}
 .app-shell .building-row__leader{border-bottom:1px dotted #cbc3b1;height:8px;min-width:12px}
 .app-shell .building-row__v{font-size:12px;color:var(--atlas-mute);font-variant-numeric:tabular-nums;white-space:nowrap;display:flex;align-items:baseline;gap:8px}
 .app-shell .building-row__v b{color:var(--atlas-ink);font-weight:500}
 .app-shell .building-row__task{display:inline-flex;align-items:center;gap:2px;color:var(--atlas-acc);font-weight:500}
 .app-shell .sidebar-footer{border-top:1px solid var(--atlas-rule);padding:6px 12px}
-.app-shell .sidebar-footer button{color:var(--atlas-ink);font-size:12.5px;border-radius:3px}
+.app-shell .sidebar-footer button{color:var(--atlas-ink);font-size:12.5px;border-radius:var(--radius-sm)}
 .app-shell .sidebar-footer button:hover{background:var(--atlas-soft)}
 .app-shell .start-import{padding:18px 18px 22px}
 .app-shell .start-import h2{font-family:var(--atlas-serif);font-weight:600;font-size:22px}
 .app-shell .start-import p{color:var(--atlas-mute)}
-.app-shell .import-file-icon{background:var(--atlas-soft);color:var(--atlas-ink);border-radius:3px}
-.app-shell .primary-button{background:var(--atlas-ink);color:var(--atlas-paper);border-radius:3px;box-shadow:none}
+.app-shell .import-file-icon{background:var(--atlas-soft);color:var(--atlas-ink);border-radius:var(--radius-sm)}
+.app-shell .primary-button{background:var(--atlas-ink);color:var(--atlas-paper);border-radius:var(--radius-sm);box-shadow:none}
 
 /* ------------------------------------------------------------------ floating cards */
-.app-shell .district-sidebar,.app-shell .workspace>.cf-building-panel{border:1px solid var(--atlas-rule);border-radius:3px;box-shadow:0 1px 0 #fff inset,0 16px 40px #3a2e1a24}
+.app-shell .district-sidebar,.app-shell .workspace>.cf-building-panel{border:1px solid var(--atlas-rule);border-radius:var(--radius-md);box-shadow:0 1px 0 #fff inset,0 16px 40px #3a2e1a24}
 .app-shell .cf-building-panel{background:var(--atlas-card);color:var(--atlas-ink);padding:0;display:flex;flex-direction:column}
 .app-shell .cf-building-panel .cf-building-content{flex:1;min-height:0}
 
@@ -83,7 +84,7 @@ body{background:var(--atlas-paper)}
 .app-shell .cf-plate__title h2{margin:3px 0 2px;font-family:var(--atlas-serif);font-size:27px;font-weight:700;letter-spacing:.01em;line-height:1.25}
 .app-shell .cf-plate__title p{margin:0;color:var(--atlas-mute);font-size:12.5px}
 .app-shell .cf-plate__state{display:inline-flex;align-items:center;gap:5px;color:var(--atlas-ink)}
-.app-shell .cf-plate__state i{width:7px;height:7px;border-radius:1px;background:var(--cf-state)}
+.app-shell .cf-plate__state i{width:7px;height:7px;border-radius:50%;background:var(--cf-state)}
 .app-shell .cf-plate__figures{display:flex;gap:24px;padding:12px 18px;border-bottom:1px solid var(--atlas-rule);margin:0;background:transparent}
 .app-shell .cf-plate__figures div{display:flex;align-items:baseline;gap:5px}
 .app-shell .cf-plate__figures b{font-family:var(--atlas-serif);font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--atlas-ink)}
@@ -106,10 +107,10 @@ body{background:var(--atlas-paper)}
 /* The elevation matrix: every floor and unit of the building in one view. */
 .app-shell .cf-matrix{display:grid;grid-template-columns:40px repeat(var(--cf-cols),minmax(0,1fr)) 40px;gap:3px;align-items:center;max-height:340px;overflow:auto}
 .app-shell .cf-matrix__col{font-family:'Inter',sans-serif;font-size:10px;letter-spacing:.06em;color:var(--atlas-mute);text-align:center;padding-bottom:2px;position:sticky;top:0;background:var(--atlas-card);z-index:1}
-.app-shell .cf-matrix__floor{border:0;background:transparent;font-family:'Inter',sans-serif;font-size:11px;color:var(--atlas-mute);text-align:left;padding:0 2px;min-height:22px;border-radius:1px;display:flex;align-items:center;gap:3px}
+.app-shell .cf-matrix__floor{border:0;background:transparent;font-family:'Inter',sans-serif;font-size:11px;color:var(--atlas-mute);text-align:left;padding:0 2px;min-height:22px;border-radius:0;display:flex;align-items:center;gap:3px}
 .app-shell .cf-matrix__floor:hover,.app-shell .cf-matrix__floor.is-active{color:var(--atlas-ink);background:var(--atlas-soft)}
 .app-shell .cf-matrix__sum{font-size:10.5px;color:var(--atlas-mute);text-align:right;font-variant-numeric:tabular-nums}
-.app-shell .cf-cell{position:relative;height:22px;border:1px solid transparent;border-radius:1px;background:var(--cf-state);color:#fff;cursor:pointer;padding:0;font:inherit}
+.app-shell .cf-cell{position:relative;height:22px;border:1px solid transparent;border-radius:0;background:var(--cf-state);color:#fff;cursor:pointer;padding:0;font:inherit}
 .app-shell .cf-cell.is-gray{background:repeating-linear-gradient(135deg,#ece6d8 0 4px,#e2dbca 4px 8px);color:#8b8576}
 .app-shell .cf-cell.is-none{background:transparent;cursor:default}
 .app-shell .cf-cell:hover{filter:brightness(1.06);border-color:#0000002a}
@@ -123,76 +124,79 @@ body{background:var(--atlas-paper)}
 .app-shell .cf-event__meta{color:var(--atlas-mute);font-size:11px}
 .app-shell .cf-event__meta span{font-family:'Inter',sans-serif;letter-spacing:.1em;text-transform:uppercase;font-size:9.5px}
 .app-shell .cf-event h4{font-size:13.5px;font-weight:400;line-height:1.7;margin:4px 0}
-.app-shell .cf-chip{background:transparent;border:0;padding:0 10px 0 0;border-radius:0;font-size:11px;color:var(--atlas-mute)}
+.app-shell .cf-chip{background:transparent;border:0;padding:0 10px 0 0;border-radius:var(--radius-sm);font-size:11px;color:var(--atlas-mute)}
 .app-shell .cf-chip:before{content:'— '}
 .app-shell .cf-chip svg{display:none}
 .app-shell .cf-chip--uncertain{color:var(--atlas-acc)}
 .app-shell .cf-event__note,.app-shell .cf-event__recorded{color:var(--atlas-mute);font-size:11.5px}
-.app-shell .cf-followup{background:var(--atlas-task-bg);color:var(--atlas-ink);border-left:2px solid var(--atlas-task);border-radius:0;font-size:12.5px}
+.app-shell .cf-followup{background:var(--atlas-task-bg);color:var(--atlas-ink);border-radius:var(--radius-md);font-size:12.5px}
 .app-shell .cf-followup svg{color:var(--atlas-task)}
-.app-shell .cf-followup.is-resolved{background:transparent;border-left-color:var(--atlas-rule);color:var(--atlas-mute)}
+.app-shell .cf-followup.is-resolved{background:transparent;color:var(--atlas-mute)}
 .app-shell .cf-followup-trail{color:var(--atlas-mute)}
 .app-shell .cf-resolved-note,.app-shell .cf-superseded-note{color:var(--atlas-mute);font-size:11.5px}
 .app-shell .cf-record-action{background:var(--atlas-card);border-top:1px solid var(--atlas-rule);box-shadow:none;padding:10px 18px 14px}
 .app-shell .cf-record-action>span{color:var(--atlas-mute);font-size:11.5px}
 
 /* ------------------------------------------------------------------ buttons & inputs */
-.app-shell .cf-button{border-radius:3px;font-weight:500}
+.app-shell .cf-button{border-radius:var(--radius-sm);font-weight:500}
 .app-shell .cf-button--primary{background:var(--atlas-ink);color:var(--atlas-paper)}
 .app-shell .cf-button--primary:hover{background:#2e3a35}
 .app-shell .cf-button--secondary{background:transparent;color:var(--atlas-ink);border:1px solid var(--atlas-ink)}
 .app-shell .cf-button--ghost{background:transparent;color:var(--atlas-ink);border:1px solid var(--atlas-rule)}
 .app-shell .cf-button--small{min-height:30px}
-.app-shell .cf-dialog{background:var(--atlas-card);color:var(--atlas-ink);border-radius:4px;box-shadow:0 24px 64px #2a200f40}
+.app-shell .cf-dialog{background:var(--atlas-card);color:var(--atlas-ink);border-radius:var(--radius-md);box-shadow:0 24px 64px #2a200f40}
 .app-shell .cf-dialog::backdrop{background:#2a2419a6}
 .app-shell .cf-dialog h2{font-family:var(--atlas-serif);font-weight:700}
 .app-shell .cf-eyebrow{font-family:'Inter',sans-serif;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--atlas-mute)}
-.app-shell .cf-callout{background:var(--atlas-soft);color:var(--atlas-ink);border-radius:2px}
+.app-shell .cf-callout{background:var(--atlas-soft);color:var(--atlas-ink);border-radius:var(--radius-md)}
 .app-shell .cf-choice-row legend{font-weight:500}
-.app-shell .cf-choice{border:1px solid var(--atlas-rule);border-radius:2px;background:transparent;min-height:38px;padding:7px 11px;font-size:13px}
+.app-shell .cf-choice{border:1px solid var(--atlas-rule);border-radius:var(--radius-sm);background:transparent;min-height:38px;padding:7px 11px;font-size:13px}
 .app-shell .cf-choice.is-on{border-color:var(--atlas-ink);background:var(--atlas-soft);font-weight:500}
-.app-shell .cf-form-grid input,.app-shell .cf-form-grid textarea,.app-shell .cf-form-grid select,.app-shell .cf-editor input,.app-shell .cf-followup-actions__cancel input{border:1px solid var(--atlas-rule);border-radius:2px;background:#fff}
-.app-shell .cf-followup-fields{background:var(--atlas-paper);border-radius:2px}
-.app-shell .cf-more{border-color:var(--atlas-rule);border-radius:2px}
+.app-shell .cf-form-grid input,.app-shell .cf-form-grid textarea,.app-shell .cf-form-grid select,.app-shell .cf-editor input,.app-shell .cf-followup-actions__cancel input{border:1px solid var(--atlas-rule);border-radius:var(--radius-sm);background:#fff}
+.app-shell .cf-followup-fields{background:var(--atlas-paper);border-radius:var(--radius-md)}
+.app-shell .cf-more{border-color:var(--atlas-rule);border-radius:var(--radius-md)}
 .app-shell .cf-more>summary{color:var(--atlas-ink);font-weight:500}
 .app-shell .cf-dialog__footer{border-top-color:var(--atlas-rule);color:var(--atlas-mute)}
-.app-shell .excel-steps section,.app-shell .cf-review__summary,.app-shell .cf-counts div{background:var(--atlas-paper);border-color:var(--atlas-rule);border-radius:2px}
+.app-shell .excel-steps section{background:var(--atlas-paper);border-color:var(--atlas-rule);border-radius:var(--radius-md)}
+.app-shell .cf-review__summary{background:var(--atlas-paper);border-color:var(--atlas-rule);border-radius:var(--radius-md)}
+.app-shell .cf-counts div{background:var(--atlas-paper);border-color:var(--atlas-rule);border-radius:var(--radius-sm)}
 .app-shell .excel-steps h3{font-family:var(--atlas-serif);font-weight:600}
-.app-shell .cf-dropzone{background:var(--atlas-paper);border-color:#cbc3b1;border-radius:2px;color:var(--atlas-ink)}
-.app-shell .cf-issue-table,.app-shell .cf-recognition{border-color:var(--atlas-rule);border-radius:2px}
+.app-shell .cf-dropzone{background:var(--atlas-paper);border-color:#cbc3b1;border-radius:var(--radius-md);color:var(--atlas-ink)}
+.app-shell .cf-issue-table{border-color:var(--atlas-rule);border-radius:0}
+.app-shell .cf-recognition{border-color:var(--atlas-rule);border-radius:0}
 
 /* ------------------------------------------------------------------ map chrome */
-.app-shell .map-scene .map-tools{background:var(--atlas-card);border:1px solid var(--atlas-rule);border-radius:3px;box-shadow:0 8px 24px #3a2e1a1f}
+.app-shell .map-scene .map-tools{background:var(--atlas-card);border:1px solid var(--atlas-rule);border-radius:var(--radius-md);box-shadow:0 8px 24px #3a2e1a1f}
 .app-shell .map-scene .map-tool{background:var(--atlas-card);color:var(--atlas-mute);font-family:'Inter',sans-serif}
 .app-shell .map-scene .map-tool:hover,.app-shell .map-scene .map-tool.is-active{background:var(--atlas-soft);color:var(--atlas-ink)}
-.app-shell .map-scene .map-legend{background:var(--atlas-card);border:1px solid var(--atlas-rule);border-radius:3px;box-shadow:none;color:var(--atlas-mute);font-size:11px}
-.app-shell .map-scene .legend-swatch{border-radius:1px}
-.app-shell .map-prompt{background:var(--atlas-card);border:1px solid var(--atlas-rule);border-radius:3px;box-shadow:0 12px 30px #3a2e1a1f}
+.app-shell .map-scene .map-legend{background:var(--atlas-card);border:1px solid var(--atlas-rule);border-radius:var(--radius-md);box-shadow:none;color:var(--atlas-mute);font-size:11px}
+.app-shell .map-scene .legend-swatch{border-radius:50%}
+.app-shell .map-prompt{background:var(--atlas-card);border:1px solid var(--atlas-rule);border-radius:var(--radius-md);box-shadow:0 12px 30px #3a2e1a1f}
 .app-shell .map-prompt strong{font-family:var(--atlas-serif);font-weight:600}
-.app-shell .map-prompt>span{background:var(--atlas-soft);color:var(--atlas-ink);border-radius:2px}
-.app-shell .map-scene .building-map-marker{background:#fffdf8f2;border:1px solid var(--atlas-rule);border-radius:2px;box-shadow:0 4px 14px #3a2e1a1f;color:var(--atlas-ink);min-height:30px;padding:5px 9px}
+.app-shell .map-prompt>span{background:var(--atlas-soft);color:var(--atlas-ink);border-radius:var(--radius-sm)}
+.app-shell .map-scene .building-map-marker{background:#fffdf8f2;border:1px solid var(--atlas-rule);border-radius:var(--radius-sm);box-shadow:0 4px 14px #3a2e1a1f;color:var(--atlas-ink);min-height:30px;padding:5px 9px}
 .app-shell .map-scene .building-map-marker strong{font-family:var(--atlas-serif);font-weight:600;font-size:12.5px}
-.app-shell .map-scene .building-map-marker span{border-radius:1px}
+.app-shell .map-scene .building-map-marker span{border-radius:50%}
 .app-shell .map-scene .building-map-marker__task{color:var(--atlas-acc);background:transparent;border:0;font-style:normal;font-size:11px}
-.app-shell .map-scene .floor-map-label{background:#fffdf8f2;border-color:var(--atlas-rule);border-radius:2px;color:var(--atlas-ink)}
+.app-shell .map-scene .floor-map-label{background:#fffdf8f2;border-color:var(--atlas-rule);border-radius:var(--radius-sm);color:var(--atlas-ink)}
 .app-shell .map-scene .floor-map-label.needs-followup{background:var(--atlas-task-bg);border-color:#e5cf9f;color:var(--atlas-task)}
 .app-shell .map-scene .floor-map-label.selected{background:var(--atlas-ink);border-color:var(--atlas-ink);color:var(--atlas-paper)}
 .app-shell .map-scene .floor-map-label.selected:before{background:var(--atlas-ink)}
-.app-shell .map-scene .floor-map-label__breakdown b{border-radius:1px}
-.app-shell .toast{background:var(--atlas-ink);border-color:var(--atlas-ink);color:var(--atlas-paper);border-radius:3px}
+.app-shell .map-scene .floor-map-label__breakdown b{border-radius:50%}
+.app-shell .toast{background:var(--atlas-ink);border-color:var(--atlas-ink);color:var(--atlas-paper);border-radius:var(--radius-md)}
 
 /* ------------------------------------------------------------------ settings & sign-in */
 .login-page,.account-loading{background:var(--atlas-paper);color:var(--atlas-ink)}
-.login-card{background:var(--atlas-card);border:1px solid var(--atlas-rule);border-radius:3px;box-shadow:0 18px 44px #3a2e1a1f}
+.login-card{background:var(--atlas-card);border:1px solid var(--atlas-rule);border-radius:var(--radius-md);box-shadow:0 18px 44px #3a2e1a1f}
 .login-card h1{font-family:var(--atlas-serif);font-weight:700}
-.login-card button:not(.account-text-button){background:var(--atlas-ink);border-color:var(--atlas-ink);color:var(--atlas-paper);border-radius:3px}
-.login-card input{border-radius:2px;border-color:var(--atlas-rule)}
+.login-card button:not(.account-text-button){background:var(--atlas-ink);border-color:var(--atlas-ink);color:var(--atlas-paper);border-radius:var(--radius-sm)}
+.login-card input{border-radius:var(--radius-sm);border-color:var(--atlas-rule)}
 .authenticated-app{background:var(--atlas-paper)}
 .account-page{background:var(--atlas-paper);color:var(--atlas-ink)}
 .account-page h1,.account-page h2{font-family:var(--atlas-serif);font-weight:600}
-.account-page section{background:var(--atlas-card);border-color:var(--atlas-rule);border-radius:3px}
-.account-page button{border-radius:3px;border-color:var(--atlas-rule)}
-.account-page input,.account-page select{border-radius:2px;border-color:var(--atlas-rule)}
+.account-page section{background:var(--atlas-card);border-color:var(--atlas-rule);border-radius:var(--radius-md)}
+.account-page button{border-radius:var(--radius-sm);border-color:var(--atlas-rule)}
+.account-page input,.account-page select{border-radius:var(--radius-sm);border-color:var(--atlas-rule)}
 .app-shell .workspace-tabs{justify-content:flex-start}
 .app-shell .workspace-tabs button{flex:none;justify-content:flex-start}
 .app-shell .list-heading{margin:0;padding:10px 16px 2px}
@@ -206,7 +210,7 @@ body{background:var(--atlas-paper)}
 .app-shell .paper-shell{background:#e7e1d3;color:var(--atlas-ink)}
 .app-shell .paper-controls{font-size:13px}
 .app-shell .paper-controls>span{color:var(--atlas-mute);font-size:12px}
-.app-shell .paper-controls select{border-color:var(--atlas-rule);border-radius:2px;background:var(--atlas-card);font-family:var(--atlas-serif);font-weight:600}
+.app-shell .paper-controls select{border-color:var(--atlas-rule);border-radius:var(--radius-sm);background:var(--atlas-card);font-family:var(--atlas-serif);font-weight:600}
 .app-shell .paper-page{background:#fffefa;box-shadow:0 1px 0 #fff inset,0 18px 48px #3a2e1a2e;font-family:var(--atlas-sans);color:var(--atlas-ink)}
 .app-shell .paper-page header{border-bottom:1.5px solid var(--atlas-ink);padding-bottom:12px}
 .app-shell .paper-page header>span{font-family:'Inter',sans-serif;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--atlas-acc)}
@@ -226,37 +230,38 @@ body{background:var(--atlas-paper)}
    ledgers: hairlines, caps headings, tabular figures, no tinted cards. */
 .app-shell .cf-dialog--import h3,.app-shell .cf-issues>h3,.app-shell .excel-record-preview>h3{font-family:var(--atlas-serif);font-weight:600;font-size:15px}
 .app-shell .cf-issues>h3 span,.app-shell .excel-record-preview>h3 span{font-family:'Inter',sans-serif;font-weight:400;font-size:11px;color:var(--atlas-mute)}
-.app-shell .cf-review__summary{background:transparent;border:0;border-top:1.5px solid var(--atlas-ink);border-bottom:1px solid var(--atlas-rule);border-radius:0;padding:12px 0}
+.app-shell .cf-review__summary{background:transparent;border:0;border-top:1.5px solid var(--atlas-ink);border-bottom:1px solid var(--atlas-rule);border-radius:var(--radius-md);padding:12px 0}
 .app-shell .cf-review__summary strong{font-family:var(--atlas-serif);font-weight:600}
 .app-shell .cf-review__summary small{color:var(--atlas-mute)}
 .app-shell .cf-ready{color:var(--atlas-ink);font-weight:500}
 .app-shell .cf-not-ready{color:var(--atlas-acc);font-weight:500}
 .app-shell .cf-counts{gap:0;border-bottom:1px solid var(--atlas-rule)}
-.app-shell .cf-counts div{background:transparent;border:0;border-right:1px dotted var(--atlas-rule);border-radius:0;padding:10px 12px}
+.app-shell .cf-counts div{background:transparent;border:0;border-right:1px dotted var(--atlas-rule);border-radius:var(--radius-sm);padding:10px 12px}
 .app-shell .cf-counts div:last-child{border-right:0}
 .app-shell .cf-counts dt{font-size:11px;color:var(--atlas-mute)}
 .app-shell .cf-counts dd{font-family:var(--atlas-serif);font-size:24px;font-weight:600;color:var(--atlas-ink);font-variant-numeric:tabular-nums}
-.app-shell .excel-district-demo{background:transparent;border:0;border-top:1px solid var(--atlas-rule);border-bottom:1px solid var(--atlas-rule);border-radius:0;padding:12px 0}
+.app-shell .excel-district-demo{background:transparent;border:0;border-top:1px solid var(--atlas-rule);border-bottom:1px solid var(--atlas-rule);border-radius:var(--radius-md);padding:12px 0}
 .app-shell .excel-district-demo strong{font-family:var(--atlas-serif);font-weight:600;color:var(--atlas-ink)}
 .app-shell .excel-district-demo p{color:var(--atlas-mute)}
-.app-shell .excel-merge-summary{background:transparent;border-bottom:1px solid var(--atlas-rule);border-radius:0;padding:10px 0;color:var(--atlas-mute);font-size:13px}
+.app-shell .excel-merge-summary{background:transparent;border-bottom:1px solid var(--atlas-rule);border-radius:var(--radius-md);padding:10px 0;color:var(--atlas-mute);font-size:13px}
 .app-shell .excel-merge-summary b{font-family:var(--atlas-serif);font-weight:600;color:var(--atlas-ink)}
-.app-shell .excel-record-preview>div,.app-shell .cf-issue-table{border:0;border-top:1px solid var(--atlas-ink);border-bottom:1px solid var(--atlas-rule);border-radius:0}
+.app-shell .excel-record-preview>div{border:0;border-top:1px solid var(--atlas-ink);border-bottom:1px solid var(--atlas-rule);border-radius:var(--radius-md)}
+.app-shell .cf-issue-table{border:0;border-top:1px solid var(--atlas-ink);border-bottom:1px solid var(--atlas-rule);border-radius:0}
 .app-shell .excel-record-preview article{border-bottom:1px dotted var(--atlas-rule);padding:9px 2px}
 .app-shell .excel-record-preview article strong{font-family:var(--atlas-serif);font-weight:600}
 .app-shell .excel-record-preview article p{color:var(--atlas-mute)}
 .app-shell .cf-issue-row{border-top:1px dotted var(--atlas-rule);font-size:12px}
 .app-shell .cf-issue-row--head,.app-shell .cf-mapping__row--head{background:var(--atlas-card);font-family:'Inter',sans-serif;font-size:10px;font-weight:500;letter-spacing:.12em;color:var(--atlas-mute);border-top:0;border-bottom:1px solid var(--atlas-rule)}
 .app-shell .cf-issue-row span:nth-child(2){font-variant-numeric:tabular-nums}
-.app-shell .cf-issue-row.is-error{border-left:2px solid var(--atlas-acc)}
-.app-shell .cf-issue-row.is-warning{border-left:2px solid var(--atlas-task)}
+.app-shell .cf-issue-row.is-error{}
+.app-shell .cf-issue-row.is-warning{}
 .app-shell .cf-success{background:transparent;color:var(--atlas-ink);padding:8px 0}
-.app-shell .cf-error{background:#f6e9e3;color:var(--atlas-acc);border-radius:2px}
+.app-shell .cf-error{background:#f6e9e3;color:var(--atlas-acc);border-radius:var(--radius-md)}
 .app-shell .cf-recognition,.app-shell .cf-recognition.is-unknown,.app-shell .cf-recognition.is-ambiguous{background:transparent;border:0;border-top:1px solid var(--atlas-ink);border-radius:0}
 .app-shell .cf-recognition__head,.app-shell .cf-recognition.is-unknown .cf-recognition__head,.app-shell .cf-recognition.is-ambiguous .cf-recognition__head{background:transparent;padding:12px 0}
 .app-shell .cf-recognition__head h3{font-family:var(--atlas-serif);font-weight:600}
 .app-shell .cf-recognition__head p,.app-shell .cf-recognition__profile small,.app-shell .cf-mapping__basis{color:var(--atlas-mute)}
-.app-shell .cf-status{border-radius:2px;background:var(--atlas-soft);color:var(--atlas-ink)}
+.app-shell .cf-status{border-radius:var(--radius-sm);background:var(--atlas-soft);color:var(--atlas-ink)}
 .app-shell .cf-status.is-ambiguous{background:var(--atlas-task-bg);color:var(--atlas-task)}
 .app-shell .cf-status.is-unknown{background:#f6e9e3;color:var(--atlas-acc)}
 .app-shell .cf-status.is-candidate,.app-shell .cf-status.is-template{background:transparent;border:1px solid var(--atlas-rule);color:var(--atlas-mute)}
@@ -265,14 +270,14 @@ body{background:var(--atlas-paper)}
 .app-shell .cf-recognition__facts dt{color:var(--atlas-mute)}
 .app-shell .cf-recognition__profile,.app-shell .cf-mapping,.app-shell .cf-recognition__extra,.app-shell .cf-recognition__issues{border-top-color:var(--atlas-rule)}
 .app-shell .cf-recognition__profile,.app-shell .cf-mapping__row,.app-shell .cf-recognition__extra,.app-shell .cf-recognition__issues li{padding-left:0;padding-right:0}
-.app-shell .cf-recognition__profile select,.app-shell .cf-mapping select{border-color:var(--atlas-rule);border-radius:2px}
+.app-shell .cf-recognition__profile select,.app-shell .cf-mapping select{border-color:var(--atlas-rule);border-radius:var(--radius-sm)}
 .app-shell .cf-mapping__row{border-bottom:1px dotted var(--atlas-rule)}
 .app-shell .cf-mapping__row.is-ambiguous,.app-shell .cf-mapping__row.is-unknown{background:var(--atlas-task-bg)}
 .app-shell .cf-mapping__field strong{font-weight:600}
-.app-shell .cf-required{border-radius:2px;background:transparent;border:1px solid #d9b8ad;color:var(--atlas-acc)}
+.app-shell .cf-required{border-radius:var(--radius-sm);background:transparent;border:1px solid #d9b8ad;color:var(--atlas-acc)}
 .app-shell .cf-field-status.is-ambiguous,.app-shell .cf-field-status.is-unknown,.app-shell .cf-candidates{color:var(--atlas-task)}
 .app-shell .cf-recognition__applied{background:var(--atlas-soft);color:var(--atlas-ink)}
-.app-shell .cf-recognition__extra li{background:var(--atlas-soft);border-radius:2px}
+.app-shell .cf-recognition__extra li{background:var(--atlas-soft);border-radius:var(--radius-sm)}
 .app-shell .cf-recognition__issues li{border-bottom:1px dotted var(--atlas-rule)}
 .app-shell .cf-recognition__issues li.is-error{background:transparent;color:var(--atlas-acc)}
 .app-shell .cf-recognition__issues li.is-warning{background:transparent;color:var(--atlas-task)}
@@ -284,37 +289,37 @@ body{background:var(--atlas-paper)}
    rather than in the corner of whichever slice happens to be first. */
 .app-shell .cf-cell-split{display:flex;gap:2px;height:22px;container-type:inline-size;position:relative}
 .app-shell .cf-cell-split .cf-cell{flex:1;min-width:0}
-.app-shell .cf-cell.is-room{border-left-color:#ffffff66}
+.app-shell .cf-cell.is-room{}
 /* Once a slice is narrower than a badge, the badges collide instead of reading, and the
    lines already say how many rooms there are. They come back as the cell grows. */
 @container (max-width:62px){.app-shell .cf-cell__task,.app-shell .cf-cell__clue{display:none}}
-.app-shell .cf-structure-toggle{margin-left:auto;white-space:nowrap;flex-shrink:0;display:inline-flex;align-items:center;gap:4px;border:1px solid var(--atlas-line,#d8d2c4);background:transparent;border-radius:6px;padding:2px 8px;font:inherit;font-size:11.5px;color:var(--atlas-ink);cursor:pointer}
+.app-shell .cf-structure-toggle{margin-left:auto;white-space:nowrap;flex-shrink:0;display:inline-flex;align-items:center;gap:4px;border:1px solid var(--atlas-line,#d8d2c4);background:transparent;border-radius:var(--radius-sm);padding:2px 8px;font:inherit;font-size:11.5px;color:var(--atlas-ink);cursor:pointer}
 .app-shell .cf-structure-toggle small{font-size:9px;color:#a15c1c;letter-spacing:.04em}
 .app-shell .cf-structure-toggle.is-active{background:var(--atlas-ink);color:var(--atlas-card)}
 .app-shell .cf-matrix__edit{display:flex;gap:2px;justify-content:flex-end}
-.app-shell .cf-matrix__edit button{width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--atlas-line,#d8d2c4);border-radius:4px;background:var(--atlas-card);color:var(--atlas-mute);padding:0;cursor:pointer}
+.app-shell .cf-matrix__edit button{width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--atlas-line,#d8d2c4);border-radius:var(--radius-sm);background:var(--atlas-card);color:var(--atlas-mute);padding:0;cursor:pointer}
 .app-shell .cf-matrix__edit button:disabled{opacity:.35;cursor:default}
 /* Removing the whole floor is the one mark that reaches past this row, so it is the one
    that is coloured. */
 .app-shell .cf-matrix__edit button.is-danger{color:#8b3e32;border-color:#d8a79c}
-.app-shell .cf-structure{margin-top:10px;padding:10px;border:1px dashed #c9a46a;border-radius:8px;background:#fffaf0;font-size:12px;display:flex;flex-direction:column;gap:8px}
+.app-shell .cf-structure{margin-top:10px;padding:10px;border:1px dashed #c9a46a;border-radius:var(--radius-md);background:#fffaf0;font-size:12px;display:flex;flex-direction:column;gap:8px}
 .app-shell .cf-structure__row{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
-.app-shell .cf-structure__row input{width:48px;padding:3px 5px;border:1px solid #cfc6b3;border-radius:5px;font:inherit}
-.app-shell .cf-structure__row button{display:inline-flex;align-items:center;gap:4px;padding:4px 9px;border:1px solid #cfc6b3;border-radius:6px;background:#fff;font:inherit;cursor:pointer;color:var(--atlas-ink)}
+.app-shell .cf-structure__row input{width:48px;padding:3px 5px;border:1px solid #cfc6b3;border-radius:var(--radius-sm);font:inherit}
+.app-shell .cf-structure__row button{display:inline-flex;align-items:center;gap:4px;padding:4px 9px;border:1px solid #cfc6b3;border-radius:var(--radius-sm);background:#fff;font:inherit;cursor:pointer;color:var(--atlas-ink)}
 .app-shell .cf-structure__row button:disabled{opacity:.45;cursor:default}
 .app-shell .cf-structure__row button.is-primary{background:var(--atlas-ink);border-color:var(--atlas-ink);color:var(--atlas-card)}
 .app-shell .cf-structure__hint{margin:0;color:var(--atlas-mute);line-height:1.5}
 /* Deleting the one unit the editor has open sits under the split form, kept apart from the
    add/split controls so a destructive act is not mistaken for one of them. */
 .app-shell .cf-structure__delete{display:flex}
-.app-shell .cf-structure__delete button{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border:1px solid #d8a79c;border-radius:6px;background:#fff;color:#8b3e32;font:inherit;font-size:12.5px;cursor:pointer}
+.app-shell .cf-structure__delete button{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border:1px solid #d8a79c;border-radius:var(--radius-sm);background:#fff;color:#8b3e32;font:inherit;font-size:12.5px;cursor:pointer}
 .app-shell .cf-structure__delete button:hover{background:#fff0ed}
-.app-shell .cf-structure__problem{margin:0;padding:5px 8px;border-radius:5px;background:#fff0ed;color:#8b3e32}
+.app-shell .cf-structure__problem{margin:0;padding:5px 8px;border-radius:var(--radius-md);background:#fff0ed;color:#8b3e32}
 /* Only a delete that would take records with it reaches this, so the count is on screen
    at the moment staff decide. */
-.app-shell .cf-structure__confirm{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 10px;border:1px solid #d8a79c;border-radius:6px;background:#fff0ed;color:#8b3e32}
+.app-shell .cf-structure__confirm{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 10px;border:1px solid #d8a79c;border-radius:var(--radius-md);background:#fff0ed;color:#8b3e32}
 .app-shell .cf-structure__confirm p{margin:0;flex:1;min-width:170px;line-height:1.5}
-.app-shell .cf-structure__confirm button{padding:4px 10px;border:1px solid #cfc6b3;border-radius:6px;background:#fff;font:inherit;cursor:pointer;color:var(--atlas-ink)}
+.app-shell .cf-structure__confirm button{padding:4px 10px;border:1px solid #cfc6b3;border-radius:var(--radius-sm);background:#fff;font:inherit;cursor:pointer;color:var(--atlas-ink)}
 .app-shell .cf-structure__confirm button.is-danger{background:#8b3e32;border-color:#8b3e32;color:#fff}
 /* The buttons sit together on their own line, so the sentence and the state of the gate
    under it are read as the dialog rather than as a run-on of controls. */
@@ -323,29 +328,29 @@ body{background:var(--atlas-paper)}
 .app-shell .cf-structure__confirm p.cf-structure__gate.is-ready{color:#3f6b47}
 .app-shell .cf-structure__confirm button:disabled{opacity:.5;cursor:not-allowed}
 .app-shell .cf-link{border:0;background:none;padding:0;font:inherit;color:var(--atlas-acc);text-decoration:underline;cursor:pointer}
-.app-shell .cf-cell-split.is-selected{outline:2px solid var(--atlas-acc);outline-offset:1px;border-radius:1px}
+.app-shell .cf-cell-split.is-selected{outline:2px solid var(--atlas-acc);outline-offset:1px;border-radius:0}
 /* 劏房: one unit's rooms as rows in that unit's ledger, and the small form that sets how
    many there are — docked under 新增樓層, inside the structure editor, not floating. */
-.cf-room-split{display:flex;flex-direction:column;gap:8px;padding:10px;border:1px solid var(--atlas-line,#d8d2c4);border-radius:6px;background:var(--atlas-card,#fff);font-family:var(--atlas-sans,system-ui,sans-serif);color:var(--atlas-ink)}
+.cf-room-split{display:flex;flex-direction:column;gap:8px;padding:10px;border:1px solid var(--atlas-line,#d8d2c4);border-radius:var(--radius-md);background:var(--atlas-card,#fff);font-family:var(--atlas-sans,system-ui,sans-serif);color:var(--atlas-ink)}
 .cf-room-split header{display:flex;align-items:flex-start;gap:10px}
 .cf-room-split h4{margin:3px 0 0;font-family:var(--atlas-serif);font-size:15px}
-.cf-room-split header button{margin-left:auto;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:1px solid var(--atlas-rule);border-radius:5px;background:transparent;color:var(--atlas-mute);cursor:pointer}
+.cf-room-split header button{margin-left:auto;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:1px solid var(--atlas-rule);border-radius:var(--radius-sm);background:transparent;color:var(--atlas-mute);cursor:pointer}
 .cf-room-split form{display:flex;align-items:center;gap:8px}
-.cf-room-split form input{width:56px;padding:4px 6px;border:1px solid #cfc6b3;border-radius:5px;font:inherit}
-.cf-room-split form button{display:inline-flex;align-items:center;gap:5px;margin-left:auto;padding:5px 12px;border:1px solid var(--atlas-ink);border-radius:6px;background:var(--atlas-ink);color:var(--atlas-card);font:inherit;font-size:12.5px;cursor:pointer}
+.cf-room-split form input{width:56px;padding:4px 6px;border:1px solid #cfc6b3;border-radius:var(--radius-sm);font:inherit}
+.cf-room-split form button{display:inline-flex;align-items:center;gap:5px;margin-left:auto;padding:5px 12px;border:1px solid var(--atlas-ink);border-radius:var(--radius-sm);background:var(--atlas-ink);color:var(--atlas-card);font:inherit;font-size:12.5px;cursor:pointer}
 .cf-room-split__hint{margin:0;font-size:12px;color:var(--atlas-mute);line-height:1.6}
-.cf-room-split__problem{margin:0;padding:7px 10px;border-radius:5px;background:#fff0ed;color:#8b3e32;font-size:12.5px}
+.cf-room-split__problem{margin:0;padding:7px 10px;border-radius:var(--radius-md);background:#fff0ed;color:#8b3e32;font-size:12.5px}
 .cf-room-ledger__count{margin:0 0 6px;font-size:12px;color:var(--atlas-mute)}
 .cf-room-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
 .cf-room-list li{display:flex;flex-direction:column;gap:5px}
 .cf-room-list__row{display:flex;align-items:center;gap:5px}
-.cf-room-list__pick{flex:1;min-width:0;display:inline-flex;align-items:center;gap:6px;padding:5px 8px;border:1px solid var(--atlas-rule);border-radius:5px;background:transparent;font:inherit;color:inherit;text-align:left;cursor:default}
+.cf-room-list__pick{flex:1;min-width:0;display:inline-flex;align-items:center;gap:6px;padding:5px 8px;border:1px solid var(--atlas-rule);border-radius:var(--radius-sm);background:transparent;font:inherit;color:inherit;text-align:left;cursor:default}
 button.cf-room-list__pick{cursor:pointer}
 button.cf-room-list__pick:hover{border-color:var(--atlas-acc)}
-.cf-room-list__pick i{width:9px;height:9px;flex:none;border-radius:1px;background:var(--cf-state)}
+.cf-room-list__pick i{width:9px;height:9px;flex:none;border-radius:50%;background:var(--cf-state)}
 .cf-room-list__pick strong{font-size:13.5px}
 .cf-room-list__pick small{color:var(--atlas-mute);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.cf-room-list__act{display:inline-flex;align-items:center;gap:3px;padding:5px 9px;border:1px solid var(--atlas-rule);border-radius:5px;background:transparent;font:inherit;font-size:12px;color:inherit;cursor:pointer}
+.cf-room-list__act{display:inline-flex;align-items:center;gap:3px;padding:5px 9px;border:1px solid var(--atlas-rule);border-radius:var(--radius-sm);background:transparent;font:inherit;font-size:12px;color:inherit;cursor:pointer}
 
 /* Picking several units off the elevation for one batch. A picked block is dashed, so it
    reads as "part of a set" beside the solid outline of the one unit that is open. */
@@ -353,7 +358,7 @@ button.cf-room-list__pick:hover{border-color:var(--atlas-acc)}
    quieter than the key above: it is read once, then the blocks are what matters. */
 .app-shell .cf-plate__hint{margin:10px 0 0;color:var(--atlas-mute);font-size:11px;line-height:1.6}
 .app-shell .cf-cell.is-picked{outline:2px dashed var(--atlas-ink);outline-offset:1px}
-.app-shell .cf-cell-split.is-picked{outline:2px dashed var(--atlas-ink);outline-offset:1px;border-radius:1px}
+.app-shell .cf-cell-split.is-picked{outline:2px dashed var(--atlas-ink);outline-offset:1px;border-radius:0}
 /* The unit that is open keeps its solid accent outline, so the set reads as the dashed
    blocks around the one whose ledger is on screen. */
 .app-shell .cf-cell.is-picked.is-selected{outline:2px solid var(--atlas-acc)}
@@ -361,12 +366,24 @@ button.cf-room-list__pick:hover{border-color:var(--atlas-acc)}
 .app-shell .cf-pick{flex-shrink:0;background:var(--atlas-card);border-top:1px solid var(--atlas-rule);box-shadow:none;padding:10px 18px 14px;display:flex;flex-direction:column;gap:8px}
 .app-shell .cf-pick__head{display:flex;align-items:center;gap:6px;margin:0;font-size:12.5px}
 .app-shell .cf-pick__head strong{color:var(--atlas-ink)}
-.app-shell .cf-pick__help,.app-shell .cf-pick__clear{margin-left:auto;display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border:1px solid var(--atlas-rule);border-radius:5px;background:transparent;color:var(--atlas-mute);font:inherit;font-size:11.5px;cursor:pointer}
+.app-shell .cf-pick__help,.app-shell .cf-pick__clear{margin-left:auto;display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border:1px solid var(--atlas-rule);border-radius:var(--radius-sm);background:transparent;color:var(--atlas-mute);font:inherit;font-size:11.5px;cursor:pointer}
 .app-shell .cf-pick__help{margin-left:0;padding:3px 5px}
-.app-shell .cf-pick__more{margin:0;padding:8px 10px;border:1px solid var(--atlas-rule);border-radius:5px;background:var(--atlas-paper);color:var(--atlas-mute);font-size:12px;line-height:1.6}
+.app-shell .cf-pick__more{margin:0;padding:8px 10px;border:1px solid var(--atlas-rule);border-radius:var(--radius-md);background:var(--atlas-paper);color:var(--atlas-mute);font-size:12px;line-height:1.6}
 .app-shell .cf-pick__acts{display:flex;flex-wrap:wrap;gap:8px}
 .app-shell .cf-pick__acts .cf-button{flex:1;min-width:150px;justify-content:center}
 /* The batch line sits under the dialog heading: what the one form is about to write. */
-.app-shell .cf-editor__batch{margin:0;padding:7px 10px;border-radius:5px;background:var(--atlas-paper);color:var(--atlas-mute);font-size:12.5px;line-height:1.5}
+.app-shell .cf-editor__batch{margin:0;padding:7px 10px;border-radius:var(--radius-md);background:var(--atlas-paper);color:var(--atlas-mute);font-size:12.5px;line-height:1.5}
 .app-shell .cf-editor__confirm{display:flex;align-items:center;gap:8px;font-size:13px}
 .app-shell .cf-editor__confirm input{width:auto}
+
+/* Controls use the small radius; joined floor/table cells stay square. */
+button,input,select,textarea{border-radius:var(--radius-sm)}
+.app-shell .cf-cell,.app-shell .cf-cell-split,.app-shell .cf-matrix__floor,.cf-floor-strip button,.cf-units button{border-radius:0}
+/* Child controls touch this panel edge; clip them to the panel rather than rounding each corner. */
+.map-scene .map-tools button{border-radius:0}
+.cf-reminder__group{overflow:hidden}
+/* MapLibre's own controls follow the same panel/label rules. */
+.maplibregl-ctrl-group{border-radius:var(--radius-md);overflow:hidden}
+.maplibregl-ctrl-group button,.maplibregl-ctrl-group button:first-child,.maplibregl-ctrl-group button:last-child{border-radius:0}
+.maplibregl-ctrl-scale{border-radius:0}
+.maplibregl-ctrl-attrib,.maplibregl-ctrl-attrib.maplibregl-compact,.maplibregl-ctrl-attrib-button{border-radius:var(--radius-sm)}
