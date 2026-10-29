@@ -99,6 +99,10 @@
 .map-scene .building-map-marker.is-compact .building-map-marker__task { display:none; }
 .map-scene .building-map-marker.is-compact:hover .building-map-marker__task,
 .map-scene .building-map-marker.is-compact:focus-visible .building-map-marker__task { display:inline-block; }
+/* The 可能重複 badge folds away with the name; the list and the building panel still show it. */
+.map-scene .building-map-marker.is-compact .building-overlap-badge { display:none; }
+.map-scene .building-map-marker.is-compact:hover .building-overlap-badge,
+.map-scene .building-map-marker.is-compact:focus-visible .building-overlap-badge { display:inline-block; }
 
 /* Composition to the right of a 3D floor label: a dot and a count per state present. */
 .floor-map-label__breakdown{display:inline-flex;gap:6px;margin-left:2px;padding-left:7px;}

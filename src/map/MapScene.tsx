@@ -1,5 +1,5 @@
 import { scheduleFlatPitchLock } from './flatPitchLock';
-import { buildingOverlapGroups } from './buildingOverlaps';
+import { buildingOverlapGroups, overlapGroupOf } from './buildingOverlaps';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Map as LibreMap, Marker, MercatorCoordinate, NavigationControl, ScaleControl, setWorkerUrl, type ExpressionSpecification, type GeoJSONSource, type MapMouseEvent } from 'maplibre-gl';
 import mapWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
@@ -460,21 +460,29 @@ export default function MapScene(props: MapSceneProps) {
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
+    const groupOf = overlapGroupOf(props.buildings);
     const arrange = () => {
       const labels = markers.current.map(marker => {
         const element = marker.getElement();
         const point = map.project(marker.getLngLat());
         return { id: element.dataset.buildingId!, x: point.x, y: point.y, width: Number(element.dataset.labelWidth) };
       });
-      const duplicates = new Set(markers.current.filter(marker => marker.getElement().dataset.possibleDuplicate === 'true').map(marker => marker.getElement().dataset.buildingId!));
-      const offsets = duplicateMarkerOffsets(labels, duplicates);
+      const offsets = duplicateMarkerOffsets(labels, groupOf);
       const canvas = map.getCanvas();
-      const names = visibleDistrictLabels(labels.map(label => ({ ...label, y: label.y - (offsets.get(label.id) ?? 0) })), canvas.clientWidth, canvas.clientHeight);
+      // A stacked group competes for room through its bottom label, then shows or folds as one.
+      const lift = new Map<string, number>();
+      for (const label of labels) {
+        const group = groupOf.get(label.id);
+        if (group !== undefined) lift.set(group, Math.max(lift.get(group) ?? 0, offsets.get(label.id) ?? 0));
+      }
+      const names = visibleDistrictLabels(labels.filter(label => !offsets.get(label.id)).map(label => ({ ...label, lift: lift.get(groupOf.get(label.id) ?? '') })), canvas.clientWidth, canvas.clientHeight);
+      const shownGroups = new Set([...names].map(id => groupOf.get(id)).filter(Boolean));
       markers.current.forEach(marker => {
         const element = marker.getElement();
         const id = element.dataset.buildingId!;
-        marker.setOffset([0, -6 - (offsets.get(id) ?? 0)]);
-        element.classList.toggle('is-compact', !duplicates.has(id) && !names.has(id));
+        const shown = names.has(id) || (!!offsets.get(id) && shownGroups.has(groupOf.get(id)));
+        marker.setOffset([0, -6 - (shown ? offsets.get(id) ?? 0 : 0)]);
+        element.classList.toggle('is-compact', !shown);
       });
     };
     arrange();

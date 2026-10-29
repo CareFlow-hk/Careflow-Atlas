@@ -144,13 +144,13 @@ export function districtBounds(buildings: MapBuilding[]): [[number, number], [nu
   ];
 }
 
-export interface ProjectedLabel { id: string; x: number; y: number; width: number; }
+export interface ProjectedLabel { id: string; x: number; y: number; width: number; /** Extra room above the label, for a stack resting on it. */ lift?: number; }
 /** Suppress overlapping names only. Every building keeps its clickable location dot. */
 export function visibleDistrictLabels(labels: ProjectedLabel[], width: number, height: number): Set<string> {
   const placed: { left: number; right: number; top: number; bottom: number }[] = [];
   const visible = new Set<string>();
   for (const label of labels) {
-    const rect = { left: label.x - label.width / 2, right: label.x + label.width / 2, top: label.y - 44, bottom: label.y - 4 };
+    const rect = { left: label.x - label.width / 2, right: label.x + label.width / 2, top: label.y - 44 - (label.lift ?? 0), bottom: label.y - 4 };
     if (rect.left < 12 || rect.right > width - 12 || rect.top < 112 || rect.bottom > height - 104) continue;
     if ((rect.left < 235 && rect.top < 176) || (rect.right > width - 82 && rect.top < 380)) continue;
     // Keep a little separation, so adjacent labels remain distinct at district scale.
@@ -161,15 +161,17 @@ export function visibleDistrictLabels(labels: ProjectedLabel[], width: number, h
   return visible;
 }
 
-/** Stack only colliding duplicate labels, preserving each marker's geographic anchor.
- * Ordinary neighbouring labels retain their existing compact-dot layout. */
-export function duplicateMarkerOffsets(labels: ProjectedLabel[], duplicateIds: ReadonlySet<string>): Map<string, number> {
-  const offsets = new Map<string, number>(), placed: ProjectedLabel[] = [];
+/** Stack colliding labels of one overlap group, preserving each marker's geographic anchor.
+ * A label is only lifted clear of its own group: comparing across groups chains the lifts
+ * upward without bound wherever many groups sit close together. */
+export function duplicateMarkerOffsets(labels: ProjectedLabel[], groupOf: ReadonlyMap<string, string>): Map<string, number> {
+  const offsets = new Map<string, number>(), placed: (ProjectedLabel & { group: string })[] = [];
   for (const label of labels) {
-    if (!duplicateIds.has(label.id)) continue;
+    const group = groupOf.get(label.id);
+    if (group === undefined) continue;
     let y = label.y;
-    while (placed.some(other => Math.abs(label.x - other.x) < (label.width + other.width) / 2 + 8 && Math.abs(y - other.y) < 44)) y -= 44;
-    placed.push({ ...label, y }); offsets.set(label.id, label.y - y);
+    while (placed.some(other => other.group === group && Math.abs(label.x - other.x) < (label.width + other.width) / 2 + 8 && Math.abs(y - other.y) < 44)) y -= 44;
+    placed.push({ ...label, y, group }); offsets.set(label.id, label.y - y);
   }
   return offsets;
 }
