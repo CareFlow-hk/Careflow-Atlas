@@ -1,3 +1,4 @@
+import { footprintsOverlap } from './footprintsOverlap';
 import type { FeatureCollection, Polygon } from 'geojson';
 import { nodeTagLabel, stateColors, stateLabels, stateSelectedColors } from '../domain/presentation';
 import type { State, StateBreakdown } from '../domain/types';
@@ -33,6 +34,7 @@ export interface MarkerLabel {
   className: string; ariaLabel: string; title: string; labelWidth: number;
   /** Present only when the building has open tasks; the text shown beside its name. */
   task?: string;
+  possibleDuplicate: boolean;
   /** The manual mark, drawn as a flag beside the name. */
   tagged: boolean;
 }
@@ -43,18 +45,18 @@ export interface MarkerLabel {
  * the dot says how the visit went, the tag says whether anything is left to do, and a
  * green building with a task on it therefore shows both.
  */
-export function markerLabel(building: MapBuilding, selected: boolean): MarkerLabel {
+export function markerLabel(building: MapBuilding, selected: boolean, possibleDuplicate = false): MarkerLabel {
   const task = building.followUps > 0 ? '待跟進' : undefined;
   const state = stateLabels[building.state];
   const lead = selected ? `正在查看${building.name}` : `在地圖選擇${building.name}`;
-  const tag = building.tagged ? ` · ${nodeTagLabel}` : '';
+  const tag = (building.tagged ? ` · ${nodeTagLabel}` : '') + (possibleDuplicate ? ' · 可能重複' : '');
   return {
     className: `building-map-marker${selected ? ' is-selected' : ''}${task ? ' has-followup' : ''}${building.tagged ? ' is-tagged' : ''}`,
     ariaLabel: `${lead} · ${state}${task ? ` · ${building.followUps} 項待跟進` : ''}${tag}`,
     title: `${building.name} · ${state}${task ? ` · ${building.followUps} 項待跟進` : ''}${tag}`,
     // The declared width feeds label collision, so the tag and the mark are counted in it.
-    labelWidth: Math.max(100, building.name.length * 14 + 38 + (task ? 60 : 0) + (building.tagged ? 18 : 0)),
-    task,
+    labelWidth: Math.max(100, building.name.length * 14 + 38 + (task ? 60 : 0) + (building.tagged ? 18 : 0) + (possibleDuplicate ? 70 : 0)),
+    task, possibleDuplicate,
     tagged: building.tagged,
   };
 }
@@ -85,7 +87,7 @@ export function defaultFootprintRing(point: { lng: number; lat: number }): numbe
 }
 
 /** Declared synthetic geometry only; not an indoor survey or inferred subdivision. */
-export function footprintOf(building: MapBuilding, paddingMetres = 0): number[][] {
+export function footprintOf(building: Pick<MapBuilding, 'longitude' | 'latitude' | 'footprint'>, paddingMetres = 0): number[][] {
   if (building.footprint && !paddingMetres) return building.footprint;
   const metresX = 111320 * Math.cos(building.latitude * Math.PI / 180);
   const ring = building.footprint ?? defaultFootprintRing({ lng: building.longitude, lat: building.latitude });
@@ -117,8 +119,16 @@ export function floorFeatures(building: MapBuilding | undefined, separation: num
   };
 }
 
+/** The focused floor stack owns its ground. Overview keeps every business record. */
+export function visibleBuildings(buildings: MapBuilding[], selectedId?: string): MapBuilding[] {
+  const selected = buildings.find(building => building.id === selectedId);
+  if (!selected) return buildings;
+  const ring = footprintOf(selected);
+  return buildings.filter(building => building.id === selectedId || !footprintsOverlap(ring, footprintOf(building)));
+}
+
 export function buildingFeatures(buildings: MapBuilding[], selectedId?: string): FeatureCollection<Polygon> {
-  return { type: 'FeatureCollection', features: buildings.filter(b => b.id !== selectedId).map(b => ({
+  return { type: 'FeatureCollection', features: visibleBuildings(buildings, selectedId).filter(b => b.id !== selectedId).map(b => ({
     type: 'Feature', id: b.id, properties: { id: b.id, color: stateColors[b.state], height: Math.max(8, b.floors.length * FLOOR_HEIGHT) },
     geometry: { type: 'Polygon', coordinates: [footprintOf(b)] },
   })) };
@@ -149,4 +159,17 @@ export function visibleDistrictLabels(labels: ProjectedLabel[], width: number, h
     visible.add(label.id);
   }
   return visible;
+}
+
+/** Stack only colliding duplicate labels, preserving each marker's geographic anchor.
+ * Ordinary neighbouring labels retain their existing compact-dot layout. */
+export function duplicateMarkerOffsets(labels: ProjectedLabel[], duplicateIds: ReadonlySet<string>): Map<string, number> {
+  const offsets = new Map<string, number>(), placed: ProjectedLabel[] = [];
+  for (const label of labels) {
+    if (!duplicateIds.has(label.id)) continue;
+    let y = label.y;
+    while (placed.some(other => Math.abs(label.x - other.x) < (label.width + other.width) / 2 + 8 && Math.abs(y - other.y) < 44)) y -= 44;
+    placed.push({ ...label, y }); offsets.set(label.id, label.y - y);
+  }
+  return offsets;
 }

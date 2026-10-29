@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { stateLabels } from '../domain/presentation';
-import { buildingFeatures, districtBounds, visibleDistrictLabels, floorFeatures, footprintOf, markerLabel, FLOOR_HEIGHT, type MapBuilding } from './mapModel';
+import { buildingFeatures, visibleBuildings, districtBounds, visibleDistrictLabels, floorFeatures, footprintOf, markerLabel, FLOOR_HEIGHT, type MapBuilding } from './mapModel';
 
 const building: MapBuilding = {
   id: 'test', name: 'Synthetic', longitude: 114.1418, latitude: 22.2863, state: 'YELLOW', followUps: 1, tagged: false,
@@ -131,5 +131,26 @@ describe('the manual mark on a building marker', () => {
   });
   it('widens the declared label so collision accounts for the flag', () => {
     expect(markerLabel({ ...building, tagged: true }, false).labelWidth).toBeGreaterThan(markerLabel(building, false).labelWidth);
+  });
+});
+
+
+describe('overlapping buildings in focus mode', () => {
+  it('keeps both records in overview but removes the other shell and ground outline in focus', () => {
+    const duplicate = { ...building, id: 'duplicate' };
+    const distant = { ...building, id: 'distant', longitude: building.longitude + .002 };
+    const buildings = [building, duplicate, distant];
+    expect(buildingFeatures(buildings).features.map(f => f.id)).toEqual(['test', 'duplicate', 'distant']);
+    // Both extrusion and ground layers use this same source.
+    expect(buildingFeatures(buildings, 'test').features.map(f => f.id)).toEqual(['distant']);
+    expect(visibleBuildings(buildings, 'test').map(b => b.id)).toEqual(['test', 'distant']);
+    expect(visibleBuildings(buildings, 'missing')).toEqual(buildings);
+  });
+  it('keeps a shared-wall neighbour visible while hiding a contained building', () => {
+    const ring = footprintOf(building), width = ring[1][0] - ring[0][0];
+    const adjacent = { ...building, id: 'adjacent', footprint: ring.map(([x,y]) => [x+width,y]) };
+    const small = { ...building, id: 'small', footprint: ring.map(([x,y]) => [(x+building.longitude)/2,(y+building.latitude)/2]) };
+    expect(buildingFeatures([building, adjacent, small], 'test').features.map(f => f.id)).toEqual(['adjacent']);
+    expect(buildingFeatures([building, adjacent, small], 'small').features.map(f => f.id)).toEqual(['adjacent']);
   });
 });

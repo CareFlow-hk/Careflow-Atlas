@@ -1,14 +1,16 @@
+import { scheduleFlatPitchLock } from './flatPitchLock';
+import { buildingOverlapGroups } from './buildingOverlaps';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Map as LibreMap, Marker, MercatorCoordinate, NavigationControl, ScaleControl, setWorkerUrl, type ExpressionSpecification, type GeoJSONSource, type MapMouseEvent } from 'maplibre-gl';
 import mapWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
-import { Compass, Flag, Layers3, MapPinPlus, Minus, PenLine, Plus, Scan, WifiOff } from 'lucide-react';
+import { Compass, Flag, Layers3, MapPinPlus, Minus, PenLine, Plus, RotateCcw, Scan, WifiOff } from 'lucide-react';
 import { FootprintEditor } from './FootprintEditor';
 import { AddBuildingPanel } from './AddBuildingPanel';
 import type { NewBuildingInput } from '../data/newBuilding';
 import { findOsmFootprint } from './osmFootprint';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { FeatureCollection, Polygon } from 'geojson';
-import { buildingFeatures, districtBounds, visibleDistrictLabels, DISTRICT_CAMERA, floorFeatures, floorBase, footprintOf, markerLabel, FLOOR_HEIGHT, type MapBuilding } from './mapModel';
+import { buildingFeatures, duplicateMarkerOffsets, visibleBuildings, districtBounds, visibleDistrictLabels, DISTRICT_CAMERA, floorFeatures, floorBase, footprintOf, markerLabel, FLOOR_HEIGHT, type MapBuilding } from './mapModel';
 import { easeInOutCubic, motionDuration, spatialMotion } from '../app/motion';
 import { contextPosition, cutawayEnabled, CutawayTransition, CUTAWAY_DURATION, focusCameraState, focusHeight, shouldLowerBuilding, sightBearing, cameraGroundPoint } from './focusContext';
 import { breakdownLabel, mapSceneColors, nodeTagLabel, stateColors, stateLabels, stateLegendNotes } from '../domain/presentation';
@@ -69,6 +71,7 @@ export default function MapScene(props: MapSceneProps) {
   const [adding, setAdding] = useState(false);
   const addingRef = useRef(false);
   addingRef.current = adding;
+  const cancelPitchLock = useRef<(() => void) | undefined>(undefined);
   const beforeEdit = useRef<{ center: [number, number]; zoom: number; pitch: number; bearing: number; maxPitch: number } | undefined>(undefined);
   const editOrigin = useMemo(() => active ? { lng: active.longitude, lat: active.latitude } : undefined, [active?.longitude, active?.latitude]); // eslint-disable-line react-hooks/exhaustive-deps
   // Observation edits should refresh colours without moving the user's camera.
@@ -136,7 +139,7 @@ export default function MapScene(props: MapSceneProps) {
           try { map.setPaintProperty(layer.id, layer.type === 'background' ? 'background-color' : 'fill-color', tone); } catch { /* a style without that property keeps its own */ }
         }
         // Preserve string IDs through vector tiling for per-building animation state.
-        map.addSource('outreach-buildings', { type: 'geojson', promoteId: 'id', data: buildingFeatures(current.current.buildings) });
+        map.addSource('outreach-buildings', { type: 'geojson', promoteId: 'id', data: buildingFeatures(current.current.buildings, current.current.selectedBuildingId) });
         map.addSource('focused-city', { type: 'geojson', promoteId: 'id', data: { type: 'FeatureCollection', features: [] } });
         map.addLayer({ id: 'focused-city', source: 'focused-city', type: 'fill-extrusion', paint: {
           'fill-extrusion-color': mapSceneColors.contextBuilding, 'fill-extrusion-height': overviewContextHeight,
@@ -227,6 +230,7 @@ export default function MapScene(props: MapSceneProps) {
       observer.observe(container.current);
       return () => {
         disposed = true; observer.disconnect(); window.clearTimeout(timeout);
+        cancelPitchLock.current?.(); cancelPitchLock.current = undefined;
         markers.current.forEach(m => m.remove()); markers.current = [];
         map.remove(); mapRef.current = null;
       };
@@ -252,15 +256,17 @@ export default function MapScene(props: MapSceneProps) {
      * name and task tag would otherwise sit over the floor stack that focusing is meant
      * to show. The building's own state and count stay readable in the detail panel.
      */
-    markers.current = props.buildings.map(building => {
+    const overlapPeers = buildingOverlapGroups(props.buildings).peers;
+    markers.current = visibleBuildings(props.buildings, props.selectedBuildingId).map(building => {
       // The wording and the class names come from `markerLabel`, so what a marker says
       // can be asserted without a browser; only the assembly happens here.
-      const label = markerLabel(building, building.id === props.selectedBuildingId);
+      const label = markerLabel(building, building.id === props.selectedBuildingId, overlapPeers.has(building.id));
       const button = document.createElement('button');
       button.className = label.className;
       button.setAttribute('aria-label', label.ariaLabel);
       button.title = label.title;
       button.dataset.buildingId = building.id;
+      button.dataset.possibleDuplicate = String(label.possibleDuplicate);
       button.dataset.labelWidth = String(label.labelWidth);
       const dot = document.createElement('span'); dot.style.background = stateColors[building.state];
       const name = document.createElement('strong'); name.textContent = building.name;
@@ -274,6 +280,10 @@ export default function MapScene(props: MapSceneProps) {
         const task = document.createElement('em'); task.className = 'building-map-marker__task';
         task.textContent = label.task;
         button.append(task);
+      }
+      if (label.possibleDuplicate) {
+        const badge = document.createElement('em'); badge.className = 'building-overlap-badge';
+        badge.textContent = '可能重複'; button.append(badge);
       }
       button.addEventListener('click', e => { e.stopPropagation(); current.current.onSelectBuilding(building.id); });
       return new Marker({ element: button, anchor: 'bottom', offset: [0, -6] }).setLngLat([building.longitude, building.latitude]).addTo(map);
@@ -355,12 +365,11 @@ export default function MapScene(props: MapSceneProps) {
     };
   }, [active, ready]);
 
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !ready) return;
-    map.resize();
-    setHover(undefined);
-    setNotice('');
+  const restoreDefaultView = (map: LibreMap) => {
+    // Recover from a stale edit lock as well as arbitrary pan/zoom/pitch/rotation.
+    cancelPitchLock.current?.(); cancelPitchLock.current = undefined;
+    map.stop();
+    map.setMaxPitch(85);
     if (active) {
       // Size the stack to the part of the map the floating cards leave visible, but only
       // gently: floors thinner than their labels would stack the labels on each other.
@@ -377,6 +386,15 @@ export default function MapScene(props: MapSceneProps) {
     } else {
       frameDistrict(map);
     }
+  };
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    map.resize();
+    setHover(undefined);
+    setNotice('');
+    restoreDefaultView(map);
   // Camera changes follow selection, not observation edits.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.selectedBuildingId, ready, compact, extentKey]);
@@ -448,11 +466,15 @@ export default function MapScene(props: MapSceneProps) {
         const point = map.project(marker.getLngLat());
         return { id: element.dataset.buildingId!, x: point.x, y: point.y, width: Number(element.dataset.labelWidth) };
       });
+      const duplicates = new Set(markers.current.filter(marker => marker.getElement().dataset.possibleDuplicate === 'true').map(marker => marker.getElement().dataset.buildingId!));
+      const offsets = duplicateMarkerOffsets(labels, duplicates);
       const canvas = map.getCanvas();
-      const names = visibleDistrictLabels(labels, canvas.clientWidth, canvas.clientHeight);
+      const names = visibleDistrictLabels(labels.map(label => ({ ...label, y: label.y - (offsets.get(label.id) ?? 0) })), canvas.clientWidth, canvas.clientHeight);
       markers.current.forEach(marker => {
         const element = marker.getElement();
-        element.classList.toggle('is-compact', !names.has(element.dataset.buildingId!));
+        const id = element.dataset.buildingId!;
+        marker.setOffset([0, -6 - (offsets.get(id) ?? 0)]);
+        element.classList.toggle('is-compact', !duplicates.has(id) && !names.has(id));
       });
     };
     arrange();
@@ -469,11 +491,14 @@ export default function MapScene(props: MapSceneProps) {
     beforeEdit.current = { center: [c.lng, c.lat], zoom: map.getZoom(), pitch: map.getPitch(), bearing: map.getBearing(), maxPitch: map.getMaxPitch() };
     for (const id of SHAPE_HIDDEN) if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'none');
     setHover(undefined); setEditing(active.id);
+    cancelPitchLock.current?.();
+    cancelPitchLock.current = scheduleFlatPitchLock(map);
     // Flat and tilt-locked: dragging handles on a tilted map misplaces them.
     map.easeTo({ center: [active.longitude, active.latitude], zoom: Math.max(map.getZoom(), 18.6), pitch: 0, duration: motionDuration(spatialMotion.pitch), easing: easeInOutCubic });
-    map.once('moveend', () => { if (editingRef.current) map.setMaxPitch(0); });
+
   };
   const stopEditing = () => {
+    cancelPitchLock.current?.(); cancelPitchLock.current = undefined;
     const map = mapRef.current;
     setEditing(undefined);
     if (!map) return;
@@ -489,11 +514,14 @@ export default function MapScene(props: MapSceneProps) {
     const c = map.getCenter();
     beforeEdit.current = { center: [c.lng, c.lat], zoom: map.getZoom(), pitch: map.getPitch(), bearing: map.getBearing(), maxPitch: map.getMaxPitch() };
     setHover(undefined); setNotice(''); setAdding(true);
+    cancelPitchLock.current?.();
+    cancelPitchLock.current = scheduleFlatPitchLock(map);
     // Flat, so a click lands on the ground under the building rather than behind a tall one.
     map.easeTo({ zoom: Math.max(map.getZoom(), 17.6), pitch: 0, duration: motionDuration(spatialMotion.pitch), easing: easeInOutCubic });
-    map.once('moveend', () => { if (addingRef.current) map.setMaxPitch(0); });
+
   };
   const stopAdding = (restoreCamera: boolean) => {
+    cancelPitchLock.current?.(); cancelPitchLock.current = undefined;
     const map = mapRef.current;
     setAdding(false);
     if (!map) return;
@@ -504,10 +532,6 @@ export default function MapScene(props: MapSceneProps) {
   };
   // What a new building can be said to be near, as the add panel words its address suggestion.
   const neighbours = useMemo(() => props.buildings.map(b => ({ name: b.name, lng: b.longitude, lat: b.latitude })), [props.buildings]);
-  const existingAt = useMemo(() => (e: MapMouseEvent) => {
-    const id = mapRef.current?.queryRenderedFeatures(e.point, { layers: ['outreach-buildings'] })[0]?.properties.id;
-    return id === undefined ? undefined : current.current.buildings.find(b => b.id === String(id))?.name ?? String(id);
-  }, []);
   // Opening a building (from the list, say) ends adding without saving.
   useEffect(() => { if (adding && props.selectedBuildingId) stopAdding(false); }, [props.selectedBuildingId]); // eslint-disable-line react-hooks/exhaustive-deps
   // Leaving the building (or losing it) ends editing without saving.
@@ -542,6 +566,7 @@ export default function MapScene(props: MapSceneProps) {
     <div className="map-tools" role="group" aria-label="相機控制" title="右鍵拖曳可自由旋轉及調整傾角">
       {active && active.floors.length > 0 && <button className={`map-tool ${props.expanded ? 'is-active' : ''}`} aria-label={props.expanded ? '合攏樓層' : '展開樓層'} title={props.expanded ? '合攏樓層' : '展開樓層'} aria-pressed={props.expanded} onClick={props.onToggleExpanded} disabled={!ready}><Layers3 size={19} /></button>}
       <button className="map-tool" aria-label={active ? '返回街區總覽' : '框選全部大廈'} title={active ? '返回街區總覽' : '框選全部大廈'} disabled={!ready} onClick={() => { if (active) props.onOverview(); else if (mapRef.current) frameDistrict(mapRef.current); }}><Scan size={19} /></button>
+      <button className="map-tool" aria-label="恢復預設視角" title={editing || adding ? '請先儲存或取消形狀，再恢復預設視角' : '恢復預設視角：重設位置、縮放、方向與傾角'} disabled={!ready || !!editing || adding} onClick={() => { if (mapRef.current) restoreDefaultView(mapRef.current); }}><RotateCcw size={19} /></button>
       <button className="map-tool" onClick={toggle3D} aria-label={is3D ? '切換平面地圖' : '切換立體地圖'} disabled={!ready}>{is3D ? '2D' : '3D'}</button>
       <button className="map-tool" aria-label="放大地圖" onClick={() => mapRef.current?.zoomIn({ duration: motionDuration(300), easing: easeInOutCubic })} disabled={!ready}><Plus size={19} /></button>
       <button className="map-tool" aria-label="縮小地圖" onClick={() => mapRef.current?.zoomOut({ duration: motionDuration(300), easing: easeInOutCubic })} disabled={!ready}><Minus size={19} /></button>
@@ -557,12 +582,14 @@ export default function MapScene(props: MapSceneProps) {
     </div>}
     </div>
     {adding && mapRef.current && props.onAddBuilding && <div className="fp-editor-dock" style={{ left: (props.insets?.left ?? 0) + 16, right: (props.insets?.right ?? 0) + 16 }}>
-      <AddBuildingPanel map={mapRef.current} neighbours={neighbours} existingAt={existingAt}
+      <AddBuildingPanel map={mapRef.current} neighbours={neighbours} buildings={props.buildings}
+        onSelectBuilding={id => { stopAdding(false); props.onSelectBuilding(id); }}
         onCancel={() => stopAdding(true)}
         onAdd={input => props.onAddBuilding?.(input)} />
     </div>}
     {editing && active && editOrigin && mapRef.current && <div className="fp-editor-dock" style={{ left: (props.insets?.left ?? 0) + 16, right: (props.insets?.right ?? 0) + 16 }}>
-      <FootprintEditor key={active.id} map={mapRef.current} name={active.name} origin={editOrigin} ring={footprintOf(active)}
+      <FootprintEditor key={active.id} map={mapRef.current} name={active.name} buildingId={active.id} buildings={props.buildings}
+        onSelectBuilding={id => { stopEditing(); props.onSelectBuilding(id); }} origin={editOrigin} ring={footprintOf(active)}
         onCancel={stopEditing}
         onSave={ring => { props.onSaveFootprint?.(active.id, ring); stopEditing(); }}
         onRestoreOsm={async () => { const m = await findOsmFootprint({ lng: active.longitude, lat: active.latitude }); return m.kind === 'none' ? undefined : m.ring; }} />

@@ -1,3 +1,5 @@
+import { buildingOverlapGroups } from '../map/buildingOverlaps';
+import '../map/buildingOverlaps.css';
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Building2, Check, ChevronDown, ChevronRight, CircleHelp, FileSpreadsheet, Footprints, MapPin, RotateCcw, Search, Sparkles, Upload, X } from 'lucide-react';
 import { useWorkspace } from './store';
@@ -172,6 +174,8 @@ export default function App() {
       }),
     };
   }) ?? [], [snapshot]);
+
+  const overlaps = useMemo(() => buildingOverlapGroups(mapBuildings), [mapBuildings]);
 
   const buildings = snapshot?.buildings.filter(building => `${building.name} ${building.address}`.includes(query) && (filter === 'ALL' || getCoverageSummary(snapshot, building.id).followUps > 0)) ?? [];
   // Counts buildings, the same unit the filtered list shows ("13 幢"), not tasks.
@@ -360,7 +364,7 @@ export default function App() {
       <aside className={`district-sidebar ${hasDistrictDemo ? 'is-expanded-demo' : ''} ${finderOpen ? 'is-open' : ''}`} aria-label="外展大廈清單">
         <button type="button" className="finder-bar" aria-expanded={finderOpen} aria-controls="finder-body" onClick={() => setFinderOpen(!finderOpen)}>
           <MapPin size={16} /><strong>西營盤</strong>
-          <span>{snapshot ? `${snapshot.buildings.length} 幢 · ${followupCount} 幢待跟進` : '未載入資料'}</span>
+          <span>{snapshot ? `${snapshot.buildings.length} 幢 · ${followupCount} 幢待跟進${overlaps.groups.length ? ` · ${overlaps.groups.length} 組可能重複` : ''}` : '未載入資料'}</span>
           <ChevronDown size={16} className="finder-bar__chevron" />
         </button>
         <div className="finder-body" id="finder-body">
@@ -373,7 +377,7 @@ export default function App() {
             const summary = getCoverageSummary(snapshot, building.id);
             const state = buildingState(snapshot, building.id);
             const selected = selectedBuildingId === building.id;
-            return <BuildingCard key={building.id} name={building.name} address={building.address} floorCount={building.floorCount} index={index} state={state} summary={summary} selected={selected} onSelect={() => { workspace.selectBuilding(building.id); setFinderOpen(false); }} />;
+            return <BuildingCard possibleDuplicate={overlaps.peers.has(building.id)} key={building.id} name={building.name} address={building.address} floorCount={building.floorCount} index={index} state={state} summary={summary} selected={selected} onSelect={() => { workspace.selectBuilding(building.id); setFinderOpen(false); }} />;
           })}{!buildings.length && <div className="list-empty"><Search size={24} /><p>{query ? '找不到相符的大廈' : '暫無待跟進大廈'}</p><button onClick={() => { setQuery(''); setFilter('ALL'); }}>查看所有大廈</button></div>}</div>
         </> : workspace.loading
           // The account端 copy has not arrived yet; offering "load demo" here would invite a merge into it.
@@ -390,7 +394,7 @@ export default function App() {
         <div className="spatial-content"><Suspense fallback={<div className="map-loading">正在準備地圖…</div>}><MapScene buildings={mapBuildings} insets={mapInsets} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} expanded={expanded} onSelectBuilding={workspace.selectBuilding} onSelectFloor={workspace.selectFloor} onToggleExpanded={workspace.toggleExpanded} onOverview={() => workspace.selectBuilding()} onSaveFootprint={(id, ring) => { try { workspace.setFootprint(id, ring); setToast('已儲存大廈形狀。記錄沒有改變。'); } catch { setToast('形狀未能儲存，請重試。'); } }} onAddBuilding={input => { try { const refused = workspace.addBuilding(input); if (!refused) { setToast(`已新增「${input.name.trim()}」。`); setFinderOpen(false); } return refused; } catch { return { error: '未能儲存，請重試。', field: '' }; } }} /></Suspense></div>
         {!selectedBuildingId && snapshot && !explored && <div className="map-prompt"><span><Building2 size={19} /></span><div><strong>從一幢大廈開始</strong><p>選擇地圖標記，讓每一層的記錄展開。</p></div><ChevronRight size={18} /></div>}
       </section>
-      {snapshot && selectedBuildingId && <BuildingDetail snapshot={snapshot} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} selectedUnitId={selectedUnitId} onBack={() => workspace.selectBuilding()} onSelectFloor={workspace.selectFloor} onSelectUnit={workspace.selectUnit} onToggleTag={workspace.setTag} onFollowUpAction={workspace.actOnFollowUp} onStartObservation={startObservation} onStructureChange={features.structureEditing ? change => { const result = workspace.changeStructure(change); if ('error' in result) return result.error; setToast(result.message); return undefined; } : undefined} onBackup={downloadWorkbook} onWithdrawObservation={withdrawObservation} canWithdraw={canWithdraw} canDeleteStructure={workspace.role !== 'MEMBER'} />}
+      {snapshot && selectedBuildingId && <BuildingDetail overlapPeers={overlaps.peers.get(selectedBuildingId)} onSelectBuilding={workspace.selectBuilding} snapshot={snapshot} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} selectedUnitId={selectedUnitId} onBack={() => workspace.selectBuilding()} onSelectFloor={workspace.selectFloor} onSelectUnit={workspace.selectUnit} onToggleTag={workspace.setTag} onFollowUpAction={workspace.actOnFollowUp} onStartObservation={startObservation} onStructureChange={features.structureEditing ? change => { const result = workspace.changeStructure(change); if ('error' in result) return result.error; setToast(result.message); return undefined; } : undefined} onBackup={downloadWorkbook} onWithdrawObservation={withdrawObservation} canWithdraw={canWithdraw} canDeleteStructure={workspace.role !== 'MEMBER'} />}
     </main>
     {workspace.storageError && <div className="storage-banner" role="alert">
       <span>{workspace.storageError}</span>

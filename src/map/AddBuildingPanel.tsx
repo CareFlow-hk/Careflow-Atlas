@@ -1,3 +1,5 @@
+import { overlappingBuildings, type SpatialBuilding } from './buildingOverlaps';
+import { OverlapNotice } from './OverlapNotice';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { GeoJSONSource, Map as LibreMap, MapMouseEvent } from 'maplibre-gl';
 import type { FeatureCollection } from 'geojson';
@@ -14,8 +16,8 @@ interface Props {
   map: LibreMap;
   /** Buildings already on the atlas; the nearest one words the address suggestion. */
   neighbours?: readonly KnownBuilding[];
-  /** Name of a building already on the atlas under a point, so it is not added twice. */
-  existingAt: (e: MapMouseEvent) => string | undefined;
+  buildings: readonly SpatialBuilding[];
+  onSelectBuilding: (id: string) => void;
   onAdd: (input: NewBuildingInput) => { error: string; field: string } | undefined;
   onCancel: () => void;
   find?: (p: { lng: number; lat: number }) => Promise<FootprintMatch>;
@@ -26,7 +28,7 @@ const C = footprintEditorColors;
 const NOWHERE: Origin = { lng: 0, lat: 0 };
 
 /** Pick a spot on the flat map — left-click for a mapped building, right-click for a new one — then name it and shape it. */
-export function AddBuildingPanel({ map, neighbours, existingAt, onAdd, onCancel, find = findOsmFootprint }: Props) {
+export function AddBuildingPanel({ map, neighbours, buildings, onSelectBuilding, onAdd, onCancel, find = findOsmFootprint }: Props) {
   const [picked, setPicked] = useState<Picked>();
   const [form, setForm] = useState<AddBuildingForm>({ name: '', address: '' });
   const [problem, setProblem] = useState<{ text: string; field?: string }>();
@@ -41,6 +43,7 @@ export function AddBuildingPanel({ map, neighbours, existingAt, onAdd, onCancel,
   // rather than in a second mode, and handed over with the rest of the form.
   const seed = useMemo(() => (picked ? seedRing(picked) : undefined), [picked]);
   const outline = drawn ?? seed;
+  const collisions = outline ? overlappingBuildings(outline, buildings) : [];
   const origin = useMemo(() => (picked ? { lng: picked.point.lng, lat: picked.point.lat } : NOWHERE), [picked]);
   // A move answers whatever the last refusal was about, so nothing stale is left standing.
   const acceptOutline = (next: number[][]) => { setDrawn(next); setShapeRefusal(undefined); };
@@ -71,8 +74,6 @@ export function AddBuildingPanel({ map, neighbours, existingAt, onAdd, onCancel,
     const place = (e: MapMouseEvent, manual: boolean) => {
       // A click on the outline is someone shaping the building, not choosing a new place for it.
       if (onShape(e.point)) return;
-      const existing = existingAt(e);
-      if (existing) { setProblem({ text: `這裡已經有「${existing}」。請點另一幢大廈。` }); return; }
       const point = { lng: e.lngLat.lng, lat: e.lngLat.lat };
       const ticket = ++pickCount.current;
       setPicked({ point, ...(manual ? { manual: true } : {}) }); setDrawn(undefined); setShapeRefusal(undefined); setProblem(undefined);
@@ -89,7 +90,7 @@ export function AddBuildingPanel({ map, neighbours, existingAt, onAdd, onCancel,
     map.on('click', click);
     map.on('contextmenu', contextmenu);
     return () => { map.off('click', click); map.off('contextmenu', contextmenu); };
-  }, [map, existingAt, find, onShape]);
+  }, [map, find, onShape]);
 
   const first = !!picked && pickCount.current === 1;
   useEffect(() => { if (first) nameRef.current?.focus(); }, [first]);
@@ -111,7 +112,7 @@ export function AddBuildingPanel({ map, neighbours, existingAt, onAdd, onCancel,
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!picked || (!picked.manual && !picked.match) || shape.problem) return;
+    if (!picked || (!picked.manual && !picked.match) || shape.problem || collisions.length) return;
     const refused = onAdd(buildingInput(form, picked, outline ? { ring: outline, edited } : undefined));
     setProblem(refused ? { text: refused.error, field: refused.field } : undefined);
   };
@@ -138,6 +139,7 @@ export function AddBuildingPanel({ map, neighbours, existingAt, onAdd, onCancel,
           <p className="add-building__shape-hint">直接在地圖上拖動：拖<b>邊</b>＝平行移動（按住 Alt 可自由移動）· 拖<b>頂點</b> · 點邊中間的<b>小圓點</b>加頂點 · 選中頂點按 Delete 刪除 · ⌘Z 復原。</p>
         </div>}
         {(shape.problem ?? shapeRefusal) && <p className="fp-editor__note is-problem" role="status">{shape.problem ?? shapeRefusal}</p>}
+        <OverlapNotice buildings={collisions} onSelect={onSelectBuilding} />
         <div className="add-building__grid">
           <label>大廈名稱<input ref={nameRef} {...field('name')} placeholder="例如：福滿大廈" required /></label>
           <label>地址（可留空）<input ref={addressRef} {...field('address')} placeholder={suggestion ? suggestion.text : '例如：第三街 88 號'} /></label>
@@ -150,7 +152,7 @@ export function AddBuildingPanel({ map, neighbours, existingAt, onAdd, onCancel,
         <div className="fp-editor__actions">
           <span />
           <button type="button" onClick={onCancel}>取消</button>
-          <button type="submit" className="is-primary" disabled={(!picked.manual && !picked.match) || !!shape.problem}>新增大廈</button>
+          <button type="submit" className="is-primary" disabled={(!picked.manual && !picked.match) || !!shape.problem || collisions.length > 0}>新增大廈</button>
         </div>
       </form>}
       {!picked && problem && <p className="fp-editor__note is-problem" role="alert">{problem.text}</p>}
