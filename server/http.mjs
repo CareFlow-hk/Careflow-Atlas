@@ -6,9 +6,10 @@ import { createWorkspaceStore, WORKSPACE_BODY_LIMIT } from './workspace.mjs';
 import { createWorkspaceKeyStore } from './workspaceKey.mjs';
 import { createAiService, AI_BODY_LIMIT } from './aiProxy.mjs';
 import { createAiRequestStore } from './aiRequests.mjs';
+import { createPlaceSearch } from './placeSearch.mjs';
 import { HttpError, requireValue, publicUser, SESSION_IDLE_MS } from './auth.mjs';
 
-export function createAuthServer(auth, { origin, secure = true, trustProxy = false, photos = createPhotoService(), features = createFeatureStore(auth), workspace = createWorkspaceStore(auth), keys = createWorkspaceKeyStore(auth), aiProxy = createAiService(), aiRequests = createAiRequestStore(auth) }) {
+export function createAuthServer(auth, { origin, secure = true, trustProxy = false, photos = createPhotoService(), features = createFeatureStore(auth), workspace = createWorkspaceStore(auth), keys = createWorkspaceKeyStore(auth), aiProxy = createAiService(), aiRequests = createAiRequestStore(auth), places = createPlaceSearch() }) {
   requireValue(new URL(origin).origin === origin, 500, 'APP_ORIGIN 必須是完整 origin，不帶路徑或末尾斜線。');
   requireValue(!secure || origin.startsWith('https://'), 500, '安全 Cookie 需要 HTTPS APP_ORIGIN。');
   const cookieName = secure ? '__Host-atlas_session' : 'atlas_session';
@@ -19,7 +20,8 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
   const server = createServer(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Content-Type-Options', 'nosniff');
     try {
-      const path = new URL(req.url, origin).pathname;
+      const url = new URL(req.url, origin);
+      const path = url.pathname;
       if (req.method === 'GET' && path === '/api/health') {
         auth.get('SELECT 1'); return send(res, 200, { ok: true });
       }
@@ -90,6 +92,21 @@ export function createAuthServer(auth, { origin, secure = true, trustProxy = fal
        * which is why it stays visible even while the switch is off.
        */
       if (req.method === 'GET' && path === '/api/ai/status') return send(res, 200, { ...aiProxy.status(), enabled: features.enabled('aiAssistant', user.org_id) });
+      /*
+       * Building-name search. Off unless the platform turned it on for this institution: the
+       * words typed into the box leave for an outside service, so the switch is enforced
+       * here and not by hiding the box (CLAUDE.md §6). The query is not audited and not
+       * logged — a search box invites 「5樓B室」 as readily as a building name.
+       */
+      if (req.method === 'GET' && path === '/api/place-search') {
+        requireValue(features.enabled('placeSearch', user.org_id), 403, '大廈名稱搜尋未開啟，請聯絡平台管理員。');
+        auth.limit(`place:${user.id}`, 60);
+        const controller = new AbortController();
+        const abort = () => { if (!res.writableEnded) controller.abort(); };
+        res.on('close', abort);
+        try { return send(res, 200, await places.search(url.searchParams.get('q') ?? '', controller.signal)); }
+        finally { res.off('close', abort); }
+      }
       if (aiRequest) {
         const controller = new AbortController();
         const abort = () => { if (!res.writableEnded) controller.abort(); };

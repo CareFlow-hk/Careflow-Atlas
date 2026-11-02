@@ -1,6 +1,6 @@
 import { overlappingBuildings, type SpatialBuilding } from './buildingOverlaps';
 import { OverlapNotice } from './OverlapNotice';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { GeoJSONSource, Map as LibreMap, MapMouseEvent } from 'maplibre-gl';
 import type { FeatureCollection } from 'geojson';
 import { CornerDownLeft, MapPin, Trash2, Undo2, X } from 'lucide-react';
@@ -10,6 +10,7 @@ import { area, type Origin } from './footprintGeometry';
 import { findOsmFootprint, type FootprintMatch } from './osmFootprint';
 import { addressFromTab, buildingInput, seedRing, shapeNote, type AddBuildingForm, type Picked } from './addBuildingDraft';
 import { suggestNearbyAddress, type KnownBuilding } from './nearbyAddress';
+import { nearbyBuilding, type PlaceResult } from './placeSearch';
 import { useFootprintShape } from './useFootprintShape';
 
 interface Props {
@@ -21,6 +22,11 @@ interface Props {
   onAdd: (input: NewBuildingInput) => { error: string; field: string } | undefined;
   onCancel: () => void;
   find?: (p: { lng: number; lat: number }) => Promise<FootprintMatch>;
+  /**
+   * Look up a building by name. Without it the search box is not offered at all — the switch
+   * lives on the server, which refuses the request whether or not the box is drawn.
+   */
+  search?: (query: string) => Promise<PlaceResult[]>;
 }
 const SOURCE = 'add-preview', LAYERS = ['add-preview-point'];
 const C = footprintEditorColors;
@@ -28,13 +34,21 @@ const C = footprintEditorColors;
 const NOWHERE: Origin = { lng: 0, lat: 0 };
 
 /** Pick a spot on the flat map — left-click for a mapped building, right-click for a new one — then name it and shape it. */
-export function AddBuildingPanel({ map, neighbours, buildings, onSelectBuilding, onAdd, onCancel, find = findOsmFootprint }: Props) {
+export function AddBuildingPanel({ map, neighbours, buildings, onSelectBuilding, onAdd, onCancel, find = findOsmFootprint, search }: Props) {
   const [picked, setPicked] = useState<Picked>();
   const [form, setForm] = useState<AddBuildingForm>({ name: '', address: '' });
   const [problem, setProblem] = useState<{ text: string; field?: string }>();
   const [drawn, setDrawn] = useState<number[][]>();
   /** Why the outline would not take the last shape edit, in the editor's words. */
   const [shapeRefusal, setShapeRefusal] = useState<string>();
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<PlaceResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searched, setSearched] = useState(false);
+  const [searchProblem, setSearchProblem] = useState<string>();
+  /** The spot came from a search result, so only that pick raises 「可能重複」. */
+  const [chosenBySearch, setChosenBySearch] = useState(false);
+  const searchTicket = useRef(0);
   const pickCount = useRef(0);
   const nameRef = useRef<HTMLInputElement>(null);
   const addressRef = useRef<HTMLInputElement>(null);
@@ -70,27 +84,34 @@ export function AddBuildingPanel({ map, neighbours, buildings, onSelectBuilding,
     ] });
   }, [map, picked]);
 
+  /**
+   * A spot is a spot whether it was clicked or found by name: it moves the pick, asks the
+   * basemap about the outline, and leaves the words to the person. A right-click is the one
+   * difference — it asks for a building the basemap does not have, so nothing is matched.
+   */
+  const pickAt = useCallback((point: { lng: number; lat: number }, manual: boolean) => {
+    const ticket = ++pickCount.current;
+    setPicked({ point, ...(manual ? { manual: true } : {}) }); setDrawn(undefined); setShapeRefusal(undefined); setProblem(undefined);
+    // Keep the picked building clear of this panel, which sits at the bottom of the map.
+    map.easeTo({ center: [point.lng, point.lat], offset: [0, -Math.min(170, map.getCanvas().clientHeight * .22)], duration: 450 });
+    if (manual) return;
+    find(point).then(match => { if (ticket === pickCount.current) setPicked({ point, match }); },
+      () => { if (ticket === pickCount.current) setPicked({ point, match: { kind: 'none', reason: '地圖資料未能連接' } }); });
+  }, [map, find]);
+
   useEffect(() => {
     const place = (e: MapMouseEvent, manual: boolean) => {
       // A click on the outline is someone shaping the building, not choosing a new place for it.
       if (onShape(e.point)) return;
-      const point = { lng: e.lngLat.lng, lat: e.lngLat.lat };
-      const ticket = ++pickCount.current;
-      setPicked({ point, ...(manual ? { manual: true } : {}) }); setDrawn(undefined); setShapeRefusal(undefined); setProblem(undefined);
-      // Keep the picked building clear of this panel, which sits at the bottom of the map.
-      map.easeTo({ center: [point.lng, point.lat], offset: [0, -Math.min(170, map.getCanvas().clientHeight * .22)], duration: 450 });
-      // A right-click asks for a building the basemap does not have, so nothing is matched
-      // for it; snapping to an outline metres away would put the new building where it is not.
-      if (manual) return;
-      find(point).then(match => { if (ticket === pickCount.current) setPicked({ point, match }); },
-        () => { if (ticket === pickCount.current) setPicked({ point, match: { kind: 'none', reason: '地圖資料未能連接' } }); });
+      setChosenBySearch(false);
+      pickAt({ lng: e.lngLat.lng, lat: e.lngLat.lat }, manual);
     };
     const click = (e: MapMouseEvent) => place(e, false);
     const contextmenu = (e: MapMouseEvent) => place(e, true);
     map.on('click', click);
     map.on('contextmenu', contextmenu);
     return () => { map.off('click', click); map.off('contextmenu', contextmenu); };
-  }, [map, find, onShape]);
+  }, [map, pickAt, onShape]);
 
   const first = !!picked && pickCount.current === 1;
   useEffect(() => { if (first) nameRef.current?.focus(); }, [first]);
@@ -103,6 +124,39 @@ export function AddBuildingPanel({ map, neighbours, buildings, onSelectBuilding,
   // Where the new building is, said the way a field note would: after the nearest one on the atlas.
   const suggestion = useMemo(() => (picked ? suggestNearbyAddress(picked.point, neighbours ?? []) : undefined), [picked, neighbours]);
   const fillAddress = () => setForm(current => (suggestion ? { ...current, address: suggestion.text } : current));
+
+  const submitSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const words = query.trim();
+    if (!search || words.length < 2 || searching) return;
+    const ticket = ++searchTicket.current;
+    setSearching(true); setSearchProblem(undefined);
+    try {
+      const found = await search(words);
+      if (ticket !== searchTicket.current) return;
+      setResults(found); setSearched(true);
+    } catch (error) {
+      if (ticket !== searchTicket.current) return;
+      // A failure is said out loud: an empty list would read as 「沒有這幢大廈」, which is a different thing.
+      setResults([]); setSearched(true);
+      setSearchProblem(error instanceof Error ? error.message : '搜尋未成功，請再試一次。');
+    } finally {
+      if (ticket === searchTicket.current) setSearching(false);
+    }
+  };
+
+  /** A result is a place to look at, not a record: it moves the pick and pre-fills the two fields. */
+  const choosePlace = (result: PlaceResult) => {
+    setResults([]); setSearchProblem(undefined); setChosenBySearch(true);
+    setForm(current => ({ ...current, name: current.name.trim() ? current.name : result.name, address: result.address || current.address }));
+    pickAt({ lng: result.lng, lat: result.lat }, false);
+  };
+
+  // A searched name can point at a building the atlas already has; saying so is a warning with
+  // a way to get there, not a block — the outline check still decides whether it can be added.
+  const occupied = useMemo(() => (chosenBySearch && picked
+    ? nearbyBuilding(picked.point, buildings.map(b => ({ id: b.id, name: b.name, lng: b.longitude, lat: b.latitude })))
+    : undefined), [chosenBySearch, picked, buildings]);
   const keydown = (e: React.KeyboardEvent<HTMLFormElement>) => {
     if (e.key !== 'Tab' || e.shiftKey) return;
     const from = e.target === nameRef.current ? 'name' : e.target === addressRef.current ? 'address' : 'other';
@@ -127,6 +181,24 @@ export function AddBuildingPanel({ map, neighbours, buildings, onSelectBuilding,
         <strong>新增大廈</strong>
         <button type="button" className="add-building__close" aria-label="取消新增大廈" onClick={onCancel}><X size={16} /></button>
       </div>
+      {search && <form className="add-building__search" role="search" onSubmit={submitSearch}>
+        <label>搜尋大廈名稱<input value={query} onChange={e => setQuery(e.target.value)} placeholder="例如：福滿大廈" aria-label="搜尋大廈名稱" /></label>
+        <button type="submit" disabled={searching || query.trim().length < 2}>{searching ? '搜尋中…' : '搜尋'}</button>
+      </form>}
+      {searchProblem && <p className="fp-editor__note is-problem" role="status">{searchProblem}</p>}
+      {results.length > 0 && <ul className="add-building__results" aria-label="搜尋結果">
+        {results.map(result => <li key={result.id}>
+          <button type="button" onClick={() => choosePlace(result)}>
+            <span className="add-building__result-name">{result.name}</span>
+            {result.address && result.address !== result.name && <small>{result.address}</small>}
+          </button>
+        </li>)}
+      </ul>}
+      {searched && !searching && !searchProblem && results.length === 0 && <p className="fp-editor__note" role="status">找不到「{query.trim()}」，可換個名稱再試，或直接在地圖上點位置。</p>}
+      {occupied && <p className="add-building__duplicate" role="status">
+        這個位置已有「{occupied.name.trim() || '未命名大廈'}」，可能是同一幢大廈。
+        <button type="button" onClick={() => onSelectBuilding(occupied.id)}>前往該大廈</button>
+      </p>}
       {!picked ? <p className="fp-editor__hint">在地圖上<b>點一下大廈</b>的位置，系統會套用底圖上這幢建築的形狀；在空白位置<b>按右鍵</b>，就直接新增一個底圖上沒有的大廈單位。地址可以留空，大廈編號會自動編；樓層之後在「編輯結構」加。按 Esc 取消。</p> : <form onSubmit={submit} onKeyDown={keydown}>
         <p className={`fp-editor__note ${note?.check ? 'is-problem' : ''}`} role="status">{note?.text}<br /><small>點地圖其他位置可重新選擇。</small></p>
         {outline && <div className="add-building__shape" role="group" aria-label="大廈形狀">

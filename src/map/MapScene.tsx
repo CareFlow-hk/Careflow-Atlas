@@ -6,6 +6,7 @@ import mapWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { Compass, Flag, Layers3, MapPinPlus, Minus, PenLine, Plus, RotateCcw, Scan, WifiOff } from 'lucide-react';
 import { FootprintEditor } from './FootprintEditor';
 import { AddBuildingPanel } from './AddBuildingPanel';
+import { searchPlaces } from './placeSearch';
 import type { NewBuildingInput } from '../data/newBuilding';
 import { findOsmFootprint } from './osmFootprint';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -42,6 +43,8 @@ interface MapSceneProps {
   onSaveFootprint?: (buildingId: string, ring: number[][]) => void;
   /** Add a building clicked on the map. Without it the tool is not offered. */
   onAddBuilding?: (input: NewBuildingInput) => { error: string; field: string } | undefined;
+  /** Offer name search in the add-building panel. The address service is the server's to call, and its switch is the server's to enforce. */
+  placeSearch?: boolean;
 }
 
 export default function MapScene(props: MapSceneProps) {
@@ -590,7 +593,7 @@ export default function MapScene(props: MapSceneProps) {
     </div>}
     </div>
     {adding && mapRef.current && props.onAddBuilding && <div className="fp-editor-dock" style={{ left: (props.insets?.left ?? 0) + 16, right: (props.insets?.right ?? 0) + 16 }}>
-      <AddBuildingPanel map={mapRef.current} neighbours={neighbours} buildings={props.buildings}
+      <AddBuildingPanel map={mapRef.current} neighbours={neighbours} buildings={props.buildings} search={props.placeSearch ? searchPlaces : undefined}
         onSelectBuilding={id => { stopAdding(false); props.onSelectBuilding(id); }}
         onCancel={() => stopAdding(true)}
         onAdd={input => props.onAddBuilding?.(input)} />

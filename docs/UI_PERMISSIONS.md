@@ -75,6 +75,7 @@ export function capabilities(role: 'ADMIN' | 'MEMBER' | undefined) {
 | `photoIntake` | 顶栏按钮已隐藏；设定页无对应区块（现状已符合） |
 | `workspaceSync` | 设定页「机构密语」整块不渲染（待定，见 6.1） |
 | `aiAssistant` | 设定页「AI 助手」区块不渲染；「功能开关」里不列该项；顶栏按 6.2 处理 |
+| `placeSearch` | 「新增大廈」面板不渲染搜索框（`MapScene` 不把搜索能力交给面板）；设定页「功能开关」里不列该项 |
 
 服务器端不受影响：开关关闭时接口本来就拒，隐藏只是别让人对着死按钮点。
 

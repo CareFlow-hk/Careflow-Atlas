@@ -471,7 +471,7 @@ test('feature switches start off, only the platform administrator turns them, an
   const orgAdmin = await f.account('ADMIN', 'org-admin@example.test');
   assert.equal((await f.request('/api/admin/features', { method: 'PUT', ...orgAdmin, body: { key: 'photoIntake', enabled: true } })).status, 403);
   assert.equal((await f.request('/api/features', orgAdmin)).value.features.photoIntake, false);
-  assert.deepEqual((await f.request('/api/features', member)).value, { features: { photoIntake: false, workspaceSync: false, aiAssistant: false } });
+  assert.deepEqual((await f.request('/api/features', member)).value, { features: { photoIntake: false, workspaceSync: false, aiAssistant: false, placeSearch: false } });
   assert.equal((await f.request('/api/photos/status', member)).value.enabled, false);
   // Off: refused before the upload is read, so nothing reaches Azure.
   assert.equal((await f.request('/api/photos/recognize', { method: 'POST', ...member, body: { image: 'x' } })).status, 403);
@@ -481,7 +481,7 @@ test('feature switches start off, only the platform administrator turns them, an
   assert.equal((await f.request('/api/admin/features', { method: 'PUT', ...admin, body: { key: 'nope', enabled: true } })).status, 400);
   assert.equal((await f.request('/api/admin/features', { method: 'PUT', ...admin, body: { key: 'photoIntake', enabled: 'yes' } })).status, 400);
   const on = await f.request('/api/admin/features', { method: 'PUT', ...admin, body: { key: 'photoIntake', enabled: true } });
-  assert.deepEqual(on.value.features, { photoIntake: true, workspaceSync: false, aiAssistant: false });
+  assert.deepEqual(on.value.features, { photoIntake: true, workspaceSync: false, aiAssistant: false, placeSearch: false });
   assert.equal((await f.request('/api/photos/recognize', { method: 'POST', ...member, body: { image: 'x' } })).status, 200);
   assert.equal(calls, 1);
   // Setting the same value again writes nothing new; each real change is audited with who did it.
@@ -490,6 +490,25 @@ test('feature switches start off, only the platform administrator turns them, an
   const events = f.auth.all("SELECT actor, action, target FROM audit WHERE action LIKE 'feature_%' ORDER BY id").map(row => ({ ...row }));
   assert.deepEqual(events, [{ actor: admin.id, action: 'feature_enabled', target: 'photoIntake' }, { actor: admin.id, action: 'feature_disabled', target: 'photoIntake' }]);
   assert.equal((await f.request('/api/photos/recognize', { method: 'POST', ...member, body: { image: 'x' } })).status, 403);
+});
+
+test('building-name search is closed until the platform opens it, and the words are not kept', async t => {
+  const asked = [];
+  const places = { status: () => ({ provider: 'als', configured: true }), search: async query => { asked.push(query); return { places: [{ id: 'als-0', name: '福滿大廈', address: '第三街88號', lng: 114.1422, lat: 22.2867 }] }; } };
+  const f = await fixture(t, { places });
+  const admin = await f.platform(await f.account()), member = await f.account('MEMBER');
+  // Off by default: the service is not asked, whatever the page happens to show.
+  assert.equal((await f.request('/api/place-search?q=福滿大廈', member)).status, 403);
+  assert.equal(asked.length, 0);
+  // A member cannot open it, and it is the platform's switch to turn.
+  assert.equal((await f.request('/api/admin/features', { method: 'PUT', ...member, body: { key: 'placeSearch', enabled: true } })).status, 403);
+  assert.equal((await f.request('/api/admin/features', { method: 'PUT', ...admin, body: { key: 'placeSearch', enabled: true } })).status, 200);
+  const found = await f.request(`/api/place-search?q=${encodeURIComponent('福滿大廈')}`, member);
+  assert.equal(found.status, 200);
+  assert.equal(found.value.places[0].name, '福滿大廈');
+  assert.deepEqual(asked, ['福滿大廈']);
+  // A query is a question, not a record: it does not reach the audit table.
+  assert.equal(f.auth.all("SELECT id FROM audit WHERE target LIKE '%福滿%'").length, 0);
 });
 
 test('the workspace stays on the device until an administrator turns sync on and sets a key', async t => {

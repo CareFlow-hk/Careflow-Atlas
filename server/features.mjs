@@ -25,6 +25,9 @@ export const FEATURES = Object.freeze({
   workspaceSync: { label: '跨裝置同步（加密後存到伺服器）', scope: 'org', who: 'platform' },
   // Needs the server's Azure key configured (server/azure.mjs); off for every institution until then.
   aiAssistant: { label: 'AI 助手（欄位建議）', scope: 'org', who: 'platform' },
+  // Sends what a colleague types into a search box to an outside address lookup
+  // (server/placeSearch.mjs). Off until the platform has checked that service's terms.
+  placeSearch: { label: '大廈名稱搜尋（地址服務）', scope: 'org', who: 'platform' },
 });
 const keysOf = scope => Object.keys(FEATURES).filter(key => FEATURES[key].scope === scope);
 

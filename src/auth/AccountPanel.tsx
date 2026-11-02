@@ -15,6 +15,7 @@ const providerText: Record<string, string> = { 'azure-openai': 'Azure OpenAI', o
 const featureText: Record<keyof FeatureSwitches, { label: string; detail: string }> = {
   photoIntake: { label: '照片回錄（Azure 辨識）', detail: '開啟後，同事可以上傳紙本照片，照片會傳送到 Azure 辨識。關閉時頂欄不顯示入口，伺服器也拒絕轉送照片。' },
   workspaceSync: { label: '跨裝置同步（加密後存到伺服器）', detail: '開啟後，同一機構的同事在不同裝置看到同一份資料。住戶姓名、電話、備註和記錄文字先在瀏覽器用機構密語加密，伺服器只存加密後的內容。關閉時資料只留在各自的裝置，伺服器拒絕讀寫。需要先在下面設定機構密語。' },
+  placeSearch: { label: '大廈名稱搜尋', detail: '開啟後，同事在「新增大廈」面板可以輸入大廈名稱或地址，由伺服器代為查詢政府的地址搜尋服務（ALS），取回名稱、地址和座標填入表單。查詢結果只保留字面相符的地址；搜尋字串不寫進操作記錄。關閉時面板不顯示搜尋框，伺服器也拒絕查詢。' },
   aiAssistant: { label: 'AI 助手', detail: '開啟後，同事在頁首的「助手」對話框裡可以貼上文字或上傳表格，請 AI 整理成待確認的記錄，或建議欄位對應；AI 只提建議，下一步會列出「將執行的目標」，由登入的同事確認後署名寫入。AI 由伺服器代理 Azure，密鑰只由平台管理員在伺服器設定，因此這個開關也由平台管理員決定；關閉時頁首不顯示「助手」按鈕，伺服器也不會把任何內容送到 Azure。' },
 };
 export function AccountPanel({ session, features = {}, onFeaturesChanged, onKeyChanged, onClose, onSignedOut, advanced }: { session: Session; /** Site-wide switches; only an administrator sees and changes them. */ features?: FeatureSwitches; onFeaturesChanged?: (features: FeatureSwitches) => void; /** The institution key on this device changed. */ onKeyChanged?: () => void; onClose: () => void; onSignedOut: () => void; /** Workspace settings, folded under 高級設定. */ advanced?: ReactNode }) {
