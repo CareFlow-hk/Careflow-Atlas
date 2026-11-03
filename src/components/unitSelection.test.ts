@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { nextSelection, pickerKeyAction, pruneSelection } from './unitSelection';
 
 /*
- * The picked set behind Ctrl/Command-clicking the elevation. It only ever holds ids the
+ * The picked set behind Shift-clicking the elevation. It only ever holds ids the
  * person put there: nothing is inferred from a unit being similar to another, and a unit
  * is never added on the strength of a previous batch.
  */

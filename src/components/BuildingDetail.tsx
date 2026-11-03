@@ -53,7 +53,7 @@ export function BuildingDetail(props: BuildingDetailProps) {
   const pendingSeq = useRef(0);
   /**
    * The units currently picked out of the elevation, for acting on several at once. It is
-   * the ordinary selection plus whatever Ctrl/Command-clicking has added to it: one entry
+   * the ordinary selection plus whatever Shift-clicking has added to it: one entry
    * is just a selected unit, so nothing extra is offered until a second one joins.
    */
   const [chosen, setChosen] = useState<string[]>([]);
@@ -154,7 +154,7 @@ export function BuildingDetail(props: BuildingDetailProps) {
     ? <span className={`cf-cell__clue${clue === "VERIFIED" ? " is-verified" : ""}`} aria-hidden="true">{clueMarks[clue]}</span>
     : null;
   /*
-   * A plain click steps into one unit, as it always has. Ctrl/Command adds a unit to the
+   * A plain click steps into one unit, as it always has. Shift adds a unit to the
    * set instead, so a run of identical results can be written in one go; the ledger keeps
    * following the last cell touched, so what is picked and what is open stay legible
    * together. Rooms are picked one slice at a time: they are separate places, and each
@@ -162,7 +162,7 @@ export function BuildingDetail(props: BuildingDetailProps) {
    */
   const pick = (unit: Unit, event: MouseEvent<HTMLButtonElement>) => {
     if (editing) { setSplitTarget(unit.parentUnitId ?? unit.id); return; }
-    if (!event.ctrlKey && !event.metaKey) { setChosen([unit.id]); onSelectUnit(unit.id); return; }
+    if (!event.shiftKey) { setChosen([unit.id]); onSelectUnit(unit.id); return; }
     const next = nextSelection(chosen, unit.id, true);
     setChosen(next);
     onSelectUnit(next.includes(unit.id) ? unit.id : next.at(-1));
@@ -284,11 +284,11 @@ export function BuildingDetail(props: BuildingDetailProps) {
               ];
             })}
           </div> : <p className="cf-layout-note">尚未有已聲明的樓層或單位佈局，仍可記錄大廈層面的到訪。{onStructureChange && !editing && " 可按「編輯結構」直接加樓層。"}</p>}
-          {/* How a set is picked, said where the picking happens. Ctrl/Command-clicking is not
+          {/* How a set is picked, said where the picking happens. Shift-clicking is not
               discoverable on its own, and the batch bar that would otherwise explain it only
               appears once the thing it explains has already been done. Hidden while the
               structure editor is open: there a click sets a 劏房 count instead of picking. */}
-          {hasMatrix && !editing && <p className="cf-plate__hint">按住 Ctrl／Command 點色塊，可以一次記錄多個單位。</p>}
+          {hasMatrix && !editing && <p className="cf-plate__hint">按住 Shift 點色塊，可以一次記錄多個單位。</p>}
           {editing && onStructureChange && <StructureBar snapshot={snapshot} buildingId={building.id} splitUnitId={splitTarget} onCloseSplit={() => setSplitTarget(undefined)} onChange={runChange} onDeleteUnit={canDeleteStructure ? deleteUnit : undefined} canDelete={canDeleteStructure} />}
           {/* Only ever shown for a delete that would take records with it, so the count is on
               screen at the moment staff decide — not after the fact. It sits outside the

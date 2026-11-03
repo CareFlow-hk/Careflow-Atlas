@@ -48,7 +48,7 @@ export function UnitPickerBar({ count, recordCount, onClear, onDelete, onRecord 
         <button type="button" className="cf-pick__clear" onClick={onClear}><X size={13} />清除選取</button>
       </p>
       <p className="cf-pick__more" id="cf-pick-help" hidden={!helpOpen}>
-        按住 Ctrl／Command 點色塊，可以逐個加入或移出選取；直接點色塊就還原成只選一個。按 Esc 清除選取。
+        按住 Shift 點色塊，可以逐個加入或移出選取；直接點色塊就還原成只選一個。按 Esc 清除選取。
         劏房房間要逐格點；已經分拆的單位不能確認無劏房，會被略過。
       </p>
       <div className="cf-pick__acts">
