@@ -15,7 +15,8 @@ const providerText: Record<string, string> = { 'azure-openai': 'Azure OpenAI', o
 const featureText: Record<keyof FeatureSwitches, { label: string; detail: string }> = {
   photoIntake: { label: '照片回錄（Azure 辨識）', detail: '開啟後，同事可以上傳紙本照片，照片會傳送到 Azure 辨識。關閉時頂欄不顯示入口，伺服器也拒絕轉送照片。' },
   workspaceSync: { label: '跨裝置同步（加密後存到伺服器）', detail: '開啟後，同一機構的同事在不同裝置看到同一份資料。住戶姓名、電話、備註和記錄文字先在瀏覽器用機構密語加密，伺服器只存加密後的內容。關閉時資料只留在各自的裝置，伺服器拒絕讀寫。需要先在下面設定機構密語。' },
-  aiAssistant: { label: 'AI 助手', detail: '開啟後，同事在頁首的「AI 助手」對話框裡可以貼上文字或上傳表格，請 AI 整理成待確認的記錄，或建議欄位對應；AI 只提建議，下一步會列出「將執行的目標」，由登入的同事確認後署名寫入。AI 由伺服器代理 Azure，密鑰只由平台管理員在伺服器設定，因此這個開關也由平台管理員決定；關閉時伺服器不會把任何內容送到 Azure。' },
+  placeSearch: { label: '大廈名稱或地址搜尋', detail: '開啟後，同事在「新增大廈」面板可以輸入大廈名稱或地址（例如「下鄉道 3 號」），由伺服器代為查詢政府的地址搜尋服務（ALS），取回名稱、地址和座標填入表單。查詢結果只保留與輸入相符的處所，打錯一個字仍會找到最接近的幾幢；搜尋字串不寫進操作記錄。關閉時面板不顯示搜尋框，伺服器也拒絕查詢。' },
+  aiAssistant: { label: 'AI 助手', detail: '開啟後，同事在頁首的「助手」對話框裡可以貼上文字或上傳表格，請 AI 整理成待確認的記錄，或建議欄位對應；AI 只提建議，下一步會列出「將執行的目標」，由登入的同事確認後署名寫入。AI 由伺服器代理 Azure，密鑰只由平台管理員在伺服器設定，因此這個開關也由平台管理員決定；關閉時頁首不顯示「助手」按鈕，伺服器也不會把任何內容送到 Azure。' },
 };
 export function AccountPanel({ session, features = {}, onFeaturesChanged, onKeyChanged, onClose, onSignedOut, advanced }: { session: Session; /** Site-wide switches; only an administrator sees and changes them. */ features?: FeatureSwitches; onFeaturesChanged?: (features: FeatureSwitches) => void; /** The institution key on this device changed. */ onKeyChanged?: () => void; onClose: () => void; onSignedOut: () => void; /** Workspace settings, folded under 高級設定. */ advanced?: ReactNode }) {
   const [users, setUsers] = useState<Account[]>([]);
@@ -87,13 +88,19 @@ export function AccountPanel({ session, features = {}, onFeaturesChanged, onKeyC
   };
   /** The AI-assisted rows are a disclosure of how a record was produced, not an accusation. */
   const aiEvents = auditFilter === 'ai' ? events.filter(event => event.action === 'ai_assisted_write') : events;
-  /**
+  /*
    * Every switch here sends data off this deployment, and the AI key is now the platform's
    * (server `.env`), so none of them is an institution administrator's call
-   * (`docs/AI_ASSISTANT.md` 2.2 decision 18). An institution's administrator still sees the
-   * state; the server refuses the change either way.
+   * (`docs/AI_ASSISTANT.md` 2.2 decision 18). Only the platform gets a control; the server
+   * refuses the change either way.
    */
-  const mayTurn = () => platform;
+  /**
+   * An institution's administrator does not turn these switches, so the ones that are off are
+   * not listed for them: a row of disabled checkboxes only invites a request to flip them
+   * (docs/UI_PERMISSIONS.md). They see what is on; the platform sees every switch, since
+   * turning them is its job. Nothing is drawn when there is nothing on to report.
+   */
+  const featureKeys = (Object.keys(featureText) as (keyof FeatureSwitches)[]).filter(key => platform || features[key] === true);
   return <section className="account-page" aria-label="設定">
     <header><div><h1>設定</h1><p>{session.user.name} · {session.user.email}</p></div><button onClick={onClose}>返回工作台</button></header>
     {error && <p role="alert" className="account-error">{error}</p>}
@@ -114,18 +121,21 @@ export function AccountPanel({ session, features = {}, onFeaturesChanged, onKeyC
         <button disabled={busy} onClick={() => void perform(async () => { await api('/sessions/revoke-others', 'POST'); await reload(); setMessage('其他裝置已登出。'); })}>登出其他裝置</button>
       </section>
     </div>
-    {/* Every member sees whether the assistant is set up; since phase 5 nobody sets a key here. */}
-    <AiSettingsPanel />
+    {/* Shown only while the assistant is on: with the switch off there is nothing to set up,
+        and a panel describing a service this institution cannot use is noise. */}
+    {features.aiAssistant === true && <AiSettingsPanel />}
     {admin && <>
-      <section className="account-features"><h2>功能開關</h2><p>{platform
+      {featureKeys.length > 0 && <section className="account-features"><h2>{platform ? '功能開關' : '已開啟的功能'}</h2><p>{platform
         ? '照片回錄影響全站；跨裝置同步和 AI 助手按機構分開，這裡是本機構的，其他機構的開關在下面「機構」裡。三項都由平台管理員決定，預設全部關閉，每次開關都記在操作記錄裡。'
-        : '這三項都由平台管理員（CareFlow 團隊）設定，你在這裡看到的是本機構目前的狀態；需要開啟請聯絡平台管理員。'}</p>
-        <ul>{(Object.keys(featureText) as (keyof FeatureSwitches)[]).map(key => <li key={key}>
-          <label><input type="checkbox" checked={features[key] === true} disabled={busy || !mayTurn()} onChange={e => toggle(key, e.target.checked)} /><strong>{featureText[key].label}</strong>{!mayTurn() && <span className="account-features__state">{features[key] ? '已開啟' : '已關閉'}</span>}</label>
+        : '以下是你所在機構目前已開啟的功能，由平台管理員（CareFlow 團隊）設定；需要開啟其他功能請聯絡平台管理員。'}</p>
+        <ul>{featureKeys.map(key => <li key={key}>
+          {platform
+            ? <label><input type="checkbox" checked={features[key] === true} disabled={busy} onChange={e => toggle(key, e.target.checked)} /><strong>{featureText[key].label}</strong></label>
+            : <p className="account-features__on"><strong>{featureText[key].label}</strong><span className="account-features__state">已開啟</span></p>}
           <p>{featureText[key].detail}</p>
           {key === 'photoIntake' && azureReady === false && <p className="account-features__warn">伺服器未設定 Azure 金鑰：即使開啟，照片也無法辨識。</p>}
         </li>)}</ul>
-      </section>
+      </section>}
       {platform && orgs.length > 0 && <section className="account-orgs"><h2>機構</h2>
         <p>每間機構有自己的工作區和機構密語，互相看不到。新增機構、把帳號移到另一間機構，要在伺服器用命令完成（見 docs/ACCOUNTS.md）。</p>
         <div className="account-table"><table><thead><tr><th>機構</th><th>機構管理員</th><th>員工</th><th>跨裝置同步</th></tr></thead><tbody>{orgs.map(org => <tr key={org.id}>

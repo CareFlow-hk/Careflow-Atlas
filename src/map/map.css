@@ -124,6 +124,20 @@
 .fp-editor__actions button{display:inline-flex;align-items:center;gap:5px;min-height:36px;padding:0 12px;border-radius:var(--radius-sm);border:1px solid #c9d6cd;background:#fff;color:#2c4a42;font:inherit;cursor:pointer}
 .fp-editor__actions button:disabled{opacity:.45;cursor:default}.fp-editor__actions button.is-primary{background:#126455;border-color:#126455;color:#fff}
 .add-building__close{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border:0;border-radius:var(--radius-sm);background:transparent;color:#5f716d;cursor:pointer}.add-building__close:hover{background:#eef5f1}
+/* Search sits at the top of the panel: find the building by name, then check the spot it lands on. */
+.add-building__search{display:flex;gap:8px;align-items:flex-end;margin-top:8px}
+.add-building__search label{display:flex;flex:1;flex-direction:column;gap:4px;color:#5f716d;font-size:12px;min-width:0}
+.add-building__search input{font:inherit;font-size:14px;color:#203b36;padding:7px 9px;border:1px solid #c9d6cd;border-radius:var(--radius-sm);background:#fff;min-width:0}
+.add-building__search button{min-height:36px;padding:0 14px;border:1px solid #126455;border-radius:var(--radius-sm);background:#126455;color:#fff;font:inherit;cursor:pointer}
+.add-building__search button:disabled{opacity:.45;cursor:default}
+.add-building__results{list-style:none;margin:8px 0 0;padding:0;max-height:180px;overflow-y:auto;border:1px solid #cfe0d6;border-radius:var(--radius-md);background:#fff}
+.add-building__results li+li{border-top:1px solid #e4ece7}
+.add-building__results button{display:flex;flex-direction:column;gap:2px;width:100%;padding:8px 10px;border:0;background:transparent;font:inherit;text-align:left;color:#203b36;cursor:pointer}
+.add-building__results button:hover{background:#eef5f1}
+.add-building__result-name{font-weight:600}
+.add-building__results small{color:#5f716d;font-size:12px}
+.add-building__duplicate{margin:8px 0 0;padding:6px 10px;border-radius:var(--radius-md);background:#fff6e5;color:#6b4f1d}
+.add-building__duplicate button{margin-left:8px;padding:2px 8px;border:1px solid #d8c39a;border-radius:var(--radius-sm);background:#fff;color:#6b4f1d;font:inherit;font-size:12px;cursor:pointer}
 .add-building__grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 10px;margin-top:10px}
 .add-building__grid label{display:flex;flex-direction:column;gap:4px;color:#5f716d;font-size:12px}
 .add-building__grid input{font:inherit;font-size:14px;color:#203b36;padding:7px 9px;border:1px solid #c9d6cd;border-radius:var(--radius-sm);background:#fff;min-width:0}

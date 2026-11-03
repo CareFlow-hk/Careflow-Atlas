@@ -199,7 +199,7 @@ export function SessionGate({ children }: { children: ReactNode }) {
     {!settings && sync.mode === 'local' && sync.reason !== 'off' && <p className="workspace-unlock is-later" role="status">{sync.reason === 'error'
       ? '未能讀取機構密鑰，資料暫時只留在這部裝置。請稍後重新整理。'
       : admin ? '跨裝置同步已開啟，但尚未設定機構密語，資料只留在這部裝置。請到「設定」設定機構密語。' : '管理員尚未設定機構密語，資料暫時只留在這部裝置，不會同步給同事。'}</p>}
-    {settings ? <AccountPanel session={session} features={features} onFeaturesChanged={setFeatures} onKeyChanged={() => setSyncRound(round => round + 1)} onClose={() => setSettings(false)} onSignedOut={signedOut} advanced={<WorkspaceAdvancedSettings />} />
+    {settings ? <AccountPanel session={session} features={features} onFeaturesChanged={setFeatures} onKeyChanged={() => setSyncRound(round => round + 1)} onClose={() => setSettings(false)} onSignedOut={signedOut} advanced={<WorkspaceAdvancedSettings role={session.user.role} />} />
       // Keyed on where the workspace lives, so switching to the shared copy loads it afresh.
       : <div key={`${session.user.id}:${sync.mode === 'on' ? sync.key.keyId : 'local'}`} className="authenticated-workspace">{children}</div>}
   </div></AccountContext.Provider>;

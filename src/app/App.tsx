@@ -3,6 +3,7 @@ import '../map/buildingOverlaps.css';
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Building2, Check, ChevronDown, ChevronRight, CircleHelp, FileSpreadsheet, Footprints, MapPin, RotateCcw, Search, Sparkles, Upload, X } from 'lucide-react';
 import { useWorkspace } from './store';
+import { capabilities } from './capabilities';
 import { PhotoIntake } from '../photos/PhotoIntake';
 import { Camera } from 'lucide-react';
 import { registerWorkspaceTools } from './webmcp';
@@ -97,6 +98,10 @@ export default function App() {
   const [photoOpen, setPhotoOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const aiAssistant = account?.features.aiAssistant === true;
+  // Name search asks the server, which asks the address service; off means the box is not offered.
+  const placeSearch = account?.features.placeSearch === true;
+  // What this account may take away; the server decides the same way (CLAUDE.md 3.5).
+  const may = capabilities(workspace.role);
   const [importError, setImportError] = useState<string>();
   const [importLoading, setImportLoading] = useState(false);
   const [editTarget, setEditTarget] = useState<EditTarget>();
@@ -306,7 +311,7 @@ export default function App() {
     const result = workspace.deleteObservation(observationId);
     setToast('error' in result ? result.error : result.message);
   };
-  const canWithdraw = (observation: Observation) => Boolean(workspace.operator) && canWithdrawObservation(observation, workspace.operator!, workspace.role === 'ADMIN');
+  const canWithdraw = (observation: Observation) => Boolean(workspace.operator) && canWithdrawObservation(observation, workspace.operator!, may.mayWithdrawAnyRecord);
   /* A batch carries one id per picked unit, so every record it writes is its own record. */
   const startObservation = (target: Omit<EditTarget, 'eventIds' | 'visitId'>) => setEditTarget({
     ...target, visitId: activeVisitId,
@@ -356,7 +361,10 @@ export default function App() {
       <button ref={helpButtonRef} className="help-button icon-button" aria-label="示範說明" aria-expanded={helpOpen} aria-controls="demo-help" onClick={() => setHelpOpen(!helpOpen)}><CircleHelp size={19} /></button>
       <AccountMenu />
       {snapshot && photoIntake && <button className="photo-entry" onClick={() => setPhotoOpen(true)}><Camera size={16} />照片回錄</button>}
-      {snapshot && <button className="photo-entry" onClick={() => setAiOpen(true)}><Sparkles size={16} />AI 助手</button>}
+      {/* No switch, no entry (2026-11-02, docs/UI_PERMISSIONS.md 6.2). The task list can still
+          be reached from the sidebar's 「待跟進」 tab, so hiding this loses no data — it only
+          stops offering a dialog the server would refuse to answer. */}
+      {snapshot && aiAssistant && <button className="photo-entry" onClick={() => setAiOpen(true)} title="AI 助手與任務提醒"><Sparkles size={16} />助手</button>}
     </header>
     <main className={`workspace ${selectedBuildingId ? 'has-selection' : ''}`}>
       {/* On desktop the finder floats over the map: a one-line bar, opened when needed to
@@ -391,10 +399,10 @@ export default function App() {
       </aside>
       <section className="spatial-workspace" aria-label="街區探索">
         <div className="map-topbar"><div><MapPin size={15} /><span>西營盤</span>{selectedBuildingId && <><ChevronRight size={13} /><strong>{snapshot?.buildings.find(b => b.id === selectedBuildingId)?.name}</strong>{selectedFloorId && <><ChevronRight size={13} /><span>{snapshot?.floors.find(f => f.id === selectedFloorId)?.label}</span></>}{selectedUnitId && <><ChevronRight size={13} /><span>{snapshot?.units.find(u => u.id === selectedUnitId)?.label.replace(/^.*? /, '')}</span></>}</>}</div></div>
-        <div className="spatial-content"><Suspense fallback={<div className="map-loading">正在準備地圖…</div>}><MapScene buildings={mapBuildings} insets={mapInsets} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} expanded={expanded} onSelectBuilding={workspace.selectBuilding} onSelectFloor={workspace.selectFloor} onToggleExpanded={workspace.toggleExpanded} onOverview={() => workspace.selectBuilding()} onSaveFootprint={(id, ring) => { try { workspace.setFootprint(id, ring); setToast('已儲存大廈形狀。記錄沒有改變。'); } catch { setToast('形狀未能儲存，請重試。'); } }} onAddBuilding={input => { try { const refused = workspace.addBuilding(input); if (!refused) { setToast(`已新增「${input.name.trim()}」。`); setFinderOpen(false); } return refused; } catch { return { error: '未能儲存，請重試。', field: '' }; } }} /></Suspense></div>
+        <div className="spatial-content"><Suspense fallback={<div className="map-loading">正在準備地圖…</div>}><MapScene buildings={mapBuildings} insets={mapInsets} placeSearch={placeSearch} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} expanded={expanded} onSelectBuilding={workspace.selectBuilding} onSelectFloor={workspace.selectFloor} onToggleExpanded={workspace.toggleExpanded} onOverview={() => workspace.selectBuilding()} onSaveFootprint={(id, ring) => { try { workspace.setFootprint(id, ring); setToast('已儲存大廈形狀。記錄沒有改變。'); } catch { setToast('形狀未能儲存，請重試。'); } }} onAddBuilding={input => { try { const refused = workspace.addBuilding(input); if (!refused) { setToast(`已新增「${input.name.trim()}」。`); setFinderOpen(false); } return refused; } catch { return { error: '未能儲存，請重試。', field: '' }; } }} /></Suspense></div>
         {!selectedBuildingId && snapshot && !explored && <div className="map-prompt"><span><Building2 size={19} /></span><div><strong>從一幢大廈開始</strong><p>選擇地圖標記，讓每一層的記錄展開。</p></div><ChevronRight size={18} /></div>}
       </section>
-      {snapshot && selectedBuildingId && <BuildingDetail overlapPeers={overlaps.peers.get(selectedBuildingId)} onSelectBuilding={workspace.selectBuilding} snapshot={snapshot} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} selectedUnitId={selectedUnitId} onBack={() => workspace.selectBuilding()} onSelectFloor={workspace.selectFloor} onSelectUnit={workspace.selectUnit} onToggleTag={workspace.setTag} onFollowUpAction={workspace.actOnFollowUp} onStartObservation={startObservation} onStructureChange={features.structureEditing ? change => { const result = workspace.changeStructure(change); if ('error' in result) return result.error; setToast(result.message); return undefined; } : undefined} onBackup={downloadWorkbook} onWithdrawObservation={withdrawObservation} canWithdraw={canWithdraw} canDeleteStructure={workspace.role !== 'MEMBER'} />}
+      {snapshot && selectedBuildingId && <BuildingDetail overlapPeers={overlaps.peers.get(selectedBuildingId)} onSelectBuilding={workspace.selectBuilding} snapshot={snapshot} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} selectedUnitId={selectedUnitId} onBack={() => workspace.selectBuilding()} onSelectFloor={workspace.selectFloor} onSelectUnit={workspace.selectUnit} onToggleTag={workspace.setTag} onFollowUpAction={workspace.actOnFollowUp} onStartObservation={startObservation} onStructureChange={features.structureEditing ? change => { const result = workspace.changeStructure(change); if ('error' in result) return result.error; setToast(result.message); return undefined; } : undefined} onBackup={downloadWorkbook} onWithdrawObservation={withdrawObservation} canWithdraw={canWithdraw} canDeleteStructure={may.mayRemoveStructure} />}
     </main>
     {workspace.storageError && <div className="storage-banner" role="alert">
       <span>{workspace.storageError}</span>

@@ -1,10 +1,16 @@
 import { useState } from "react";
 import { useWorkspace } from "../app/store";
+import { capabilities, type Role } from "../app/capabilities";
 import { deleteGate, type BackupAttempt } from "../domain/structure";
 import { OptionManager } from "./OptionManager";
 
-/** 設定 › 高級設定: this account's self-defined entry options. Everyday use needs none of it. */
-export function WorkspaceAdvancedSettings() {
+/**
+ * 設定 › 高級設定: this account's self-defined entry options. Everyday use needs none of it.
+ *
+ * `role` comes from the signed-in session rather than the workspace store: the settings page
+ * already knows who is asking, and one source is one answer.
+ */
+export function WorkspaceAdvancedSettings({ role }: { role: Role }) {
   const optionPrefs = useWorkspace(state => state.optionPrefs);
   const setOptionPrefs = useWorkspace(state => state.setOptionPrefs);
   return (
@@ -14,16 +20,15 @@ export function WorkspaceAdvancedSettings() {
         <p className="cf-custom-options__note">把經常用到的說法存成選項，之後會出現在「記錄今次結果」的選單。每個自訂選項都要歸入一個內置類別，顏色只按類別計算。</p>
         <OptionManager prefs={optionPrefs} onChange={setOptionPrefs} />
       </section>
-      <ClearWorkspace />
+      <ClearWorkspace role={role} />
     </>
   );
 }
 
 /** Two steps, with an export beside the button: clearing cannot be undone. */
-function ClearWorkspace() {
+function ClearWorkspace({ role }: { role: Role }) {
   const snapshot = useWorkspace(state => state.snapshot);
   const clearWorkspace = useWorkspace(state => state.clearWorkspace);
-  const role = useWorkspace(state => state.role);
   const [confirming, setConfirming] = useState(false);
   const [attempt, setAttempt] = useState<BackupAttempt>('IDLE');
   const [message, setMessage] = useState('');
@@ -31,15 +36,11 @@ function ClearWorkspace() {
   const counts = snapshot ? `${snapshot.buildings.length} 幢大廈、${snapshot.observations.length} 筆記錄` : '';
   /*
    * Clearing empties the whole institution's shared workspace, not one person's copy, so
-   * only an administrator is offered it. The server refuses it for anyone else anyway;
-   * hiding the button keeps the screen honest about what this account can do.
+   * only an administrator is offered it. The server refuses it for anyone else anyway.
+   * Nothing is drawn for a member — not even a note about it: a whole block explaining a
+   * button they will never see only invites the question of why not (docs/UI_PERMISSIONS.md).
    */
-  if (role === 'MEMBER') return (
-    <section className="cf-settings-advanced">
-      <h3>清空工作區</h3>
-      <p className="cf-custom-options__note">清空會刪除整個機構的大廈、樓層、人員及到訪記錄，只有管理員可以執行。如需移除個別記錄，請在該記錄按「撤回這筆記錄」；撤回會保留歷史。</p>
-    </section>
-  );
+  if (!capabilities(role).mayClearWorkspace) return null;
   /** Answers whether the browser was handed the file; the answer is what opens the delete. */
   const exportExcel = async (): Promise<boolean> => {
     if (!snapshot) return false;

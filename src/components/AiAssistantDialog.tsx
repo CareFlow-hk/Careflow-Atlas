@@ -574,7 +574,9 @@ export function AiAssistantDialog({ open, onClose, snapshot, orgId, onWrite, onA
 
   return <dialog aria-labelledby="ai-title" ref={dialogRef} className="cf-dialog cf-dialog--ai" onCancel={event => { event.preventDefault(); onClose(); }} onClose={() => { if (open) onClose(); }}>
     <div className="cf-ai">
-      <header className="cf-dialog__header"><div><span className="cf-eyebrow">AI 助手</span><h2 id="ai-title">{aiEnabled ? '說一句，或放一份表' : '問未完成的跟進'}</h2></div><button className="cf-icon-button" onClick={onClose} aria-label="關閉"><X /></button></header>
+      {/* The task list is computed here, without AI, so the heading names it plainly when
+          the assistant switch is off rather than promising something the server would refuse. */}
+      <header className="cf-dialog__header"><div><span className="cf-eyebrow">{aiEnabled ? 'AI 助手' : '助手'}</span><h2 id="ai-title">{aiEnabled ? '說一句，或放一份表' : '問未完成的跟進'}</h2></div><button className="cf-icon-button" onClick={onClose} aria-label="關閉"><X /></button></header>
 
       {stage.kind === 'idle' && <>
         {!snapshot && <p className="cf-error" role="alert"><AlertTriangle />尚未載入工作區資料，先載入後再使用。</p>}
