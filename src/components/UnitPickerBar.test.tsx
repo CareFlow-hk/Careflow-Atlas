@@ -37,7 +37,7 @@ describe('the bar that acts on a picked set', () => {
   });
 
   /*
-   * Ctrl/Command-clicking is not discoverable on its own, and a 劏房 room has to be picked
+   * Shift-clicking is not discoverable on its own, and a 劏房 room has to be picked
    * slice by slice. The help is there for both, folded away until it is asked for.
    */
   it('keeps the how-to folded away until it is asked for', () => {
@@ -48,7 +48,7 @@ describe('the bar that acts on a picked set', () => {
 
   it('spells out the picking, the keys, and what a split unit will not accept', () => {
     const markup = render();
-    expect(markup).toContain('Ctrl／Command');
+    expect(markup).toContain('Shift');
     expect(markup).toContain('Esc');
     expect(markup).toContain('劏房');
     expect(markup).toContain('略過');

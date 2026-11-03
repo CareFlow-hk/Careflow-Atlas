@@ -564,11 +564,10 @@ describe('the building panel before anything is picked', () => {
     expect(markup).not.toContain('is-picked');
   });
 
-  /* Ctrl/Command-clicking is not discoverable on its own, and the batch bar only appears
+  /* Shift-clicking is not discoverable on its own, and the batch bar only appears
      after the picking it explains has already been done. */
   it('says under the blocks how a set is picked', () => {
-    expect(markup).toContain('Ctrl');
-    expect(markup).toContain('Command');
+    expect(markup).toContain('按住 Shift 點色塊');
     // It is the elevation's own note, and it is not the key: the key names marks, not keys.
     expect(markup).toContain('cf-plate__hint');
     expect(keyLine(markup).startsWith('↻')).toBe(true);

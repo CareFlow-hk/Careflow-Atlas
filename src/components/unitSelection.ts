@@ -1,4 +1,4 @@
-/** What Ctrl/Command-clicking does to the picked set. A plain click replaces it outright. */
+/** What Shift-clicking does to the picked set. A plain click replaces it outright. */
 export function nextSelection(current: readonly string[], unitId: string, additive: boolean): string[] {
   if (!additive) return [unitId];
   return current.includes(unitId) ? current.filter(id => id !== unitId) : [...current, unitId];
