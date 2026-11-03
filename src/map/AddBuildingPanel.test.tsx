@@ -86,13 +86,13 @@ describe('adding a building on the map', () => {
     expect(addressFromTab('name', '', undefined)).toBeUndefined();
   });
 
-  it('offers name search only when the server has the switch on', () => {
+  it('offers the name-and-address search only when the server has the switch on', () => {
     const props = { map: {} as LibreMap, buildings: [], onSelectBuilding: noop, onAdd: noop, onCancel: noop };
-    expect(renderToStaticMarkup(<AddBuildingPanel {...props} />)).not.toContain('搜尋大廈名稱');
+    expect(renderToStaticMarkup(<AddBuildingPanel {...props} />)).not.toContain('大廈名稱或地址');
     const html = renderToStaticMarkup(<AddBuildingPanel {...props} search={async () => []} />);
     // At the top of the panel, before the instruction to click the map.
-    expect(html).toContain('搜尋大廈名稱');
-    expect(html.indexOf('搜尋大廈名稱')).toBeLessThan(html.indexOf('按右鍵'));
+    expect(html).toContain('大廈名稱或地址');
+    expect(html.indexOf('大廈名稱或地址')).toBeLessThan(html.indexOf('按右鍵'));
   });
 
   it('offers the right-click on the map in its instructions', () => {

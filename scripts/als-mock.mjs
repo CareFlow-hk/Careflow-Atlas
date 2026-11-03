@@ -24,10 +24,17 @@ import { createServer } from 'node:http';
 
 const PORT = Number(process.argv[2] || process.env.ALS_MOCK_PORT || 5199);
 
-/** Invented premises, inside the Hong Kong box the real answer would fall in. */
+/**
+ * Invented premises, inside the Hong Kong box the real answer would fall in. Two of them share
+ * a name and a street and differ only by door number, which is what the server's number check
+ * has to tell apart; one is a near miss, which the typo tolerance has to keep out when an exact
+ * answer exists.
+ */
 const PLACES = [
-  { id: 'MOCK-1', name: '示範大廈', en: 'DEMO BUILDING', street: '示範街', enStreet: 'DEMO STREET', no: '1', district: '中西區', enDistrict: 'CENTRAL AND WESTERN DISTRICT', region: '香港', enRegion: 'HK', lng: 114.1422, lat: 22.2867, keys: ['示範大廈', '示範', 'demo'] },
-  { id: 'MOCK-2', name: '測試中心', en: 'TEST CENTRE', street: '測試道', enStreet: 'TEST ROAD', no: '8', district: '油尖旺區', enDistrict: 'YAU TSIM MONG DISTRICT', region: '九龍', enRegion: 'KLN', lng: 114.1401, lat: 22.2881, keys: ['測試中心', '測試', 'test'] },
+  { id: 'MOCK-1', name: '示範大廈', en: 'DEMO BUILDING', street: '示範街', enStreet: 'DEMO STREET', no: '3', district: '中西區', enDistrict: 'CENTRAL AND WESTERN DISTRICT', region: '香港', enRegion: 'HK', lng: 114.1422, lat: 22.2867 },
+  { id: 'MOCK-2', name: '示範大廈', en: 'DEMO BUILDING', street: '示範街', enStreet: 'DEMO STREET', no: '5', district: '中西區', enDistrict: 'CENTRAL AND WESTERN DISTRICT', region: '香港', enRegion: 'HK', lng: 114.1424, lat: 22.2869 },
+  { id: 'MOCK-3', name: '富滿大廈', en: 'FU MUN BUILDING', street: '示範街', enStreet: 'DEMO STREET', no: '7', district: '中西區', enDistrict: 'CENTRAL AND WESTERN DISTRICT', region: '香港', enRegion: 'HK', lng: 114.1426, lat: 22.2871 },
+  { id: 'MOCK-4', name: '測試中心', en: 'TEST CENTRE', street: '測試道', enStreet: 'TEST ROAD', no: '8', district: '油尖旺區', enDistrict: 'YAU TSIM MONG DISTRICT', region: '九龍', enRegion: 'KLN', lng: 114.1401, lat: 22.2881 },
 ];
 
 const esc = value => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -93,12 +100,14 @@ const server = createServer((req, res) => {
   if (lower.includes('失敗') || lower.includes('fail')) { res.writeHead(500).end('mock upstream failure'); return; }
   if (lower.includes('慢') || lower.includes('slow')) { setTimeout(() => reply(200, []), 15_000); return; }
   if (lower.includes('壞') || lower.includes('garbage')) { res.writeHead(200, { 'content-type': 'text/html' }).end('<html><body>not an address answer</body></html>'); return; }
-  const found = lower.length < 2 ? [] : PLACES.filter(place => place.keys.some(key => key.includes(lower) || lower.includes(key)));
-  reply(200, found.slice(0, limit));
+  // Like the real service, this answers with the nearest premises whether or not they are what
+  // was asked for; deciding relevance is the server's job, and that is what the mock is here to
+  // exercise. Nothing is invented per query, so the same rows come back for any words.
+  reply(200, lower.length < 2 ? [] : PLACES.slice(0, limit));
 });
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`ALS mock on http://127.0.0.1:${PORT}/lookup  (再在 .env 設 PLACE_PROVIDER=als、ALS_ENDPOINT=http://127.0.0.1:${PORT}/lookup)`);
-  console.log('  q=示範大廈 → 示範大廈；q=測試中心 → 測試中心；其他 → 空結果');
+  console.log('  q=示範大廈 → 示範街 3、5 號；q=示範街3號 → 只回 3 號；q=示範大樓 → 打錯一個字仍有結果；其他 → 空結果');
   console.log('  q=失敗 → HTTP 500；q=慢 → 15 秒後才回；q=壞 → 不是地址回應');
 });

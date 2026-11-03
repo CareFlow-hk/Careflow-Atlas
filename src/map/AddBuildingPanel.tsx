@@ -182,7 +182,7 @@ export function AddBuildingPanel({ map, neighbours, buildings, onSelectBuilding,
         <button type="button" className="add-building__close" aria-label="取消新增大廈" onClick={onCancel}><X size={16} /></button>
       </div>
       {search && <form className="add-building__search" role="search" onSubmit={submitSearch}>
-        <label>搜尋大廈名稱<input value={query} onChange={e => setQuery(e.target.value)} placeholder="例如：福滿大廈" aria-label="搜尋大廈名稱" /></label>
+        <label>大廈名稱或地址<input value={query} onChange={e => setQuery(e.target.value)} placeholder="例如：福滿大廈、下鄉道 3 號" aria-label="大廈名稱或地址" /></label>
         <button type="submit" disabled={searching || query.trim().length < 2}>{searching ? '搜尋中…' : '搜尋'}</button>
       </form>}
       {searchProblem && <p className="fp-editor__note is-problem" role="status">{searchProblem}</p>}

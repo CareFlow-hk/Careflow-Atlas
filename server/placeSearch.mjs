@@ -164,7 +164,11 @@ function alsPlace(raw) {
     raw.region, raw.engRegion, raw.district, raw.engDistrict,
     raw.location, raw.engLocation, raw.street, raw.engStreet, raw.block,
   ].filter(Boolean).join(' ');
-  return { ...built, match };
+  // The numbers this place itself carries, so 「承啟道 28 號」 is not answered with 承啟道 38.
+  // A range (`BuildingNoFrom` can be 「1-3」) contributes both ends.
+  const numbers = [...new Set(`${raw.number ?? ''} ${raw.block ?? ''}`.match(/\d+/g) ?? [])]
+    .map(number => String(Number(number)));
+  return { ...built, match, numbers };
 }
 
 /** 「1座」, or 「BLK 1」 when the row has no Chinese block; blank when it is not a blocked building. */
@@ -329,6 +333,59 @@ export function parseHaRows(text) {
 /** Matching ignores case, width and every kind of space: the live list suffixes some names with U+3000. */
 const fold = text => String(text ?? '').normalize('NFKC').replace(/\s+/g, '').toLowerCase();
 
+/**
+ * A number and whatever word says what the number is: 「3 號」 is a street number, 「1 座」 a
+ * block. Taken out of the words and matched separately, because the service writes the street
+ * and the number in one field and the estate and the block in another — 「德朗邨 1 座」 is not
+ * a substring of anything it answers with, and neither is 「下鄉道 3 號」.
+ */
+const COUNTED = /第?\d+[號号室樓楼層层座]?/g;
+/** A floor is not a place on this map: 「3 樓」 says which flat, not which building. */
+const FLOOR = new Set(['樓', '楼', '層', '层']);
+
+/**
+ * What the person typed, in the two things an answer can be checked against: the words, and
+ * the numbers. Folding is the same as everywhere else — case, width and spaces do not count.
+ */
+export function readQuery(query) {
+  const folded = fold(query);
+  const numbers = [];
+  for (const found of folded.matchAll(/\d+/g)) {
+    const after = folded.slice(found.index + found[0].length, found.index + found[0].length + 1);
+    if (FLOOR.has(after)) continue;
+    numbers.push(String(Number(found[0])));
+  }
+  return { text: folded.replace(COUNTED, ''), numbers: [...new Set(numbers)] };
+}
+
+/**
+ * How many of the query's characters appear, in order, somewhere in the answer — the longest
+ * common subsequence, which tolerates a wrong or missing character in the middle rather than
+ * losing the building to it. Case and width have already been folded away.
+ */
+export function overlap(wanted, haystack) {
+  const height = wanted.length;
+  let previous = new Array(height + 1).fill(0);
+  for (const letter of haystack) {
+    const current = new Array(height + 1).fill(0);
+    for (let index = 1; index <= height; index++) {
+      current[index] = letter === wanted[index - 1]
+        ? previous[index - 1] + 1
+        : Math.max(previous[index], current[index - 1]);
+    }
+    previous = current;
+  }
+  return previous[height];
+}
+
+/**
+ * How many characters of a query this long must be found. One in four may be mistyped or left
+ * out — and at least one once the word is long enough to have a shape — so a three-character
+ * name survives one wrong character and 「福滿大廈」 survives 福滿大樓 or 福滿廈. Two characters
+ * get no allowance: one wrong character out of two is not a typo, it is a different word.
+ */
+export const leastFound = text => (text.length <= 2 ? text.length : text.length - Math.max(1, Math.floor(text.length / 4)));
+
 /** The address a person sees: what the source knows, never a street number invented from it. */
 const haAddress = row => [row.region, row.district].filter(Boolean).join(' · ');
 
@@ -364,15 +421,50 @@ export function createPlaceSearch({ fetcher = fetch, env = process.env, now = Da
     catch { throw new HttpError(502, '地址服務的回應未能讀取。'); }
     const parsed = parseAlsPayload(text);
     if (parsed === undefined) throw new HttpError(502, '地址服務的回應格式未能識別，請聯絡平台管理員核對服務位址。');
-    // The service answers with the nearest rows whether or not they are what was asked for, so
-    // the words must appear somewhere in the answer (building, estate, street, district — either
-    // language). Then one entry per name-and-place: the same building can come back twice at one
-    // position, and a person picking a building does not need it listed twice.
-    const wanted = fold(query);
+    return rank(parsed, query);
+  }
+
+  /**
+   * The service answers with the nearest rows whether or not they are what was asked for, so
+   * something has to decide.
+   *
+   * The words are matched as a subsequence, with one character in four allowed to be wrong
+   * (see `leastFound`), so a mistyped character costs nothing. What is allowed is kept to the
+   * best the answer can do: when some row matches the words exactly, a row that is one
+   * character away is not offered beside it — otherwise every search would trail a tail of
+   * 富滿大廈, 樂滿大廈 and 金滿大廈 behind the 福滿大廈 that was actually typed. The near miss is
+   * what is shown when nothing is exact.
+   *
+   * A number the person typed narrows the answer but does not empty it: 「下鄉道 3 號」 has no
+   * premises of its own in the service, and the street it names is still the street that was
+   * meant. Only when nothing fits the number are the rows offered anyway — each one shows its
+   * real door number, so the person can see what they are being offered.
+   *
+   * Last, one entry per name-and-place: the same building can come back twice at one position,
+   * and a person picking a building does not need it listed twice.
+   */
+  function rank(parsed, rawQuery) {
+    const wanted = readQuery(rawQuery);
+    // 「3 樓」 is a floor and nothing else: with the number set aside as a floor there is nothing
+    // left to match, and answering with every nearest premises would be answering nothing.
+    if (!wanted.text && !wanted.numbers.length) return [];
+    const rows = [];
+    for (const item of parsed) {
+      let score = 1;
+      if (wanted.text) {
+        const same = overlap(wanted.text, fold(item.match));
+        if (same < leastFound(wanted.text)) continue;
+        score = same / wanted.text.length;
+      }
+      rows.push({ item, score, numbered: wanted.numbers.every(number => item.numbers.includes(number)) });
+    }
+    const narrowed = wanted.numbers.length > 0 && rows.some(row => row.numbered);
+    const fitting = narrowed ? rows.filter(row => row.numbered) : rows;
+    const best = Math.max(0, ...fitting.map(row => row.score));
     const seen = new Set();
     const kept = [];
-    for (const item of parsed) {
-      if (!fold(item.match).includes(wanted)) continue;
+    for (const { item, score } of fitting) {
+      if (score < best) continue;
       const key = `${fold(item.name)}|${item.lng}|${item.lat}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -429,23 +521,26 @@ export function createPlaceSearch({ fetcher = fetch, env = process.env, now = Da
     } finally { loading.delete(resource); }
   }
 
-  async function haSearch(query) {
+  async function haSearch(rawQuery) {
     const groups = await Promise.all(settings.resources.map(haList));
-    const wanted = fold(query);
+    const wanted = readQuery(rawQuery);
     const seen = new Set();
     const hits = [];
-    for (const row of groups.flat()) {
-      const names = [row.name, row.english].filter(Boolean);
-      if (!names.some(name => fold(name).includes(wanted))) continue;
+    // The estate list has names and districts only: no streets, no block numbers. A query that
+    // asks for one is a question this source cannot answer, and an empty list says so honestly.
+    if (!wanted.numbers.length && wanted.text) for (const row of groups.flat()) {
+      const names = [row.name, row.english].filter(Boolean).map(fold);
+      const same = Math.max(0, ...names.map(name => overlap(wanted.text, name)));
+      if (same < leastFound(wanted.text)) continue;
       // A shopping centre can sit on its estate's coordinate; one entry per place is enough.
       const key = `${row.lng},${row.lat},${row.name}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      hits.push({ row, exact: names.some(name => fold(name).startsWith(wanted)) });
+      hits.push({ row, same, exact: names.some(name => name.startsWith(wanted.text)) });
     }
-    // Names that begin with the words first, then the shortest — 「德朗」 should offer 德朗邨
-    // before anything that merely contains it.
-    hits.sort((a, b) => Number(b.exact) - Number(a.exact) || a.row.name.length - b.row.name.length);
+    // Names that begin with the words first, then the closest match, then the shortest — 「德朗」
+    // should offer 德朗邨 before anything that merely contains it.
+    hits.sort((a, b) => Number(b.exact) - Number(a.exact) || b.same - a.same || a.row.name.length - b.row.name.length);
     return hits.map(({ row }, index) => ({
       id: `ha-${row.lng},${row.lat}-${index}`,
       name: row.name,

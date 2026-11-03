@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ALS_MAX_RESULTS, HA_CACHE_MS, PLACE_MAX_QUERY, PLACE_MAX_RESULTS, createPlaceSearch, parseAlsJson, parseAlsPayload, parseAlsXml, parseHaRows, placeSettings } from './placeSearch.mjs';
+import { ALS_MAX_RESULTS, HA_CACHE_MS, PLACE_MAX_QUERY, PLACE_MAX_RESULTS, createPlaceSearch, parseAlsJson, parseAlsPayload, parseAlsXml, parseHaRows, placeSettings, readQuery } from './placeSearch.mjs';
 
 /*
  * The address lookup as it meets the rest of the server: what it sends, what it refuses, and
@@ -187,6 +187,82 @@ test('the same building at the same point is offered once', async () => {
   assert.equal(places.length, 1);
 });
 
+/*
+ * What the person typed, against what the service answered. The words are a subsequence with a
+ * tolerance of one character in four (measured against the live service on 2026-11-02: 「福滿
+ * 大樓」, 「福滿大厦」 and 「福滿大屢」 all mean 福滿大廈, and 「下鄉道 3 號」 means that street).
+ */
+
+/** One premises on a street, named, with the door number the service records. */
+const premises = (name, street, number, extra = {}) => ({ Address: { PremisesAddress: {
+  ChiPremisesAddress: { Region: '香港', ChiDistrict: { DcDistrict: '中西區' }, ChiStreet: { StreetName: street, BuildingNoFrom: number }, BuildingName: name, ...extra },
+  GeospatialInformation: { Latitude: '22.2856', Longitude: '114.1419' },
+} } });
+const answered = rows => replied(JSON.stringify({ RequestAddress: {}, SuggestedAddress: rows }));
+
+test('the words and the numbers of a query are read apart', () => {
+  assert.deepEqual(readQuery('下鄉道 3 號'), { text: '下鄉道', numbers: ['3'] });
+  assert.deepEqual(readQuery('德朗邨1座'), { text: '德朗邨', numbers: ['1'] });
+  // A house number and a block are what a name and a street cannot say on their own.
+  assert.deepEqual(readQuery('承啟道28號'), { text: '承啟道', numbers: ['28'] });
+  assert.deepEqual(readQuery('嘉輝花園第2座'), { text: '嘉輝花園', numbers: ['2'] });
+  // A floor is not a building: 「3 樓」 must not throw the name away looking for a door number 3.
+  assert.deepEqual(readQuery('福滿大廈3樓'), { text: '福滿大廈', numbers: [] });
+  // Width and case are folded like everywhere else.
+  assert.deepEqual(readQuery('ＴＡＫ　ＬＯＮＧ'), { text: 'taklong', numbers: [] });
+});
+
+test('one mistyped character does not lose the building', async () => {
+  const one = createPlaceSearch({ env, fetcher: answered([premises('福滿大廈', '第三街', '56')]) });
+  for (const typed of ['福滿大樓', '福滿大厦', '福滿大屢', '福满大廈']) {
+    assert.deepEqual((await one.search(typed)).places.map(p => p.name), ['福滿大廈'], `「${typed}」應能找到「福滿大廈」`);
+  }
+});
+
+test('a near miss is not offered beside the building that was asked for', async () => {
+  const rows = answered([
+    premises('福滿大廈', '第三街', '56'),
+    premises('樂滿大廈', '皇后大道東', '29'),
+    premises('富滿大廈', '皇后大道西', '398'),
+  ]);
+  const exact = await createPlaceSearch({ env, fetcher: rows }).search('福滿大廈');
+  assert.deepEqual(exact.places.map(p => p.name), ['福滿大廈'], '打對字時不該拖一串鄰居出來');
+  const typo = await createPlaceSearch({ env, fetcher: rows }).search('福滿大樓');
+  assert.deepEqual(typo.places.map(p => p.name), ['福滿大廈'], '打錯一個字時，最接近的那幾幢仍然要出來');
+});
+
+test('a number in the query picks the door number, not the street', async () => {
+  // The live service answers 「承啟道 28 號」 with rows on 承啟道 38 as well, because they are
+  // the nearest premises; the number the person typed is what tells the two apart.
+  const rows = answered([
+    premises('晴朗商場 B區', '承啟道', '28'),
+    premises('啟德體藝館', '承啟道', '38'),
+  ]);
+  const { places } = await createPlaceSearch({ env, fetcher: rows }).search('承啟道28號');
+  assert.deepEqual(places.map(p => p.name), ['晴朗商場 B區']);
+});
+
+test('a street with no such number is still offered, with the numbers it does have', async () => {
+  // 「下鄉道 3 號」 has no premises of its own in the service; an empty list would hide the
+  // street that was actually meant, so the rows come back and each shows its real number.
+  const rows = answered([premises('益民大廈', '下鄉道', '5'), premises('昌興大廈', '下鄉道', '26')]);
+  const { places } = await createPlaceSearch({ env, fetcher: rows }).search('下鄉道3號');
+  assert.deepEqual(places.map(p => p.address), ['香港 · 中西區 · 下鄉道 5', '香港 · 中西區 · 下鄉道 26']);
+});
+
+test('a block number picks that block of the estate', async () => {
+  const { places } = await createPlaceSearch({ env, fetcher: replied(json) }).search('德朗邨1座');
+  assert.deepEqual(places.map(p => p.name), ['德瑜樓']);
+});
+
+test('a floor in the query does not become a door number', async () => {
+  const { places } = await createPlaceSearch({ env, fetcher: replied(json) }).search('德瑜樓3樓');
+  assert.deepEqual(places.map(p => p.name), ['德瑜樓']);
+  // 「3 樓」 on its own says nothing this service can answer, so it is not answered with
+  // everything the service happens to have nearby.
+  assert.deepEqual(await createPlaceSearch({ env, fetcher: replied(json) }).search('3樓'), { places: [] });
+});
+
 test('a query shorter than two characters or longer than the limit is refused', async () => {
   const place = createPlaceSearch({ env, fetcher: replied(json) });
   await assert.rejects(place.search('樓'), /至少兩個字/);
@@ -307,6 +383,14 @@ test('a search finds a Chinese name, a partial name, and the English name of the
   assert.deepEqual((await place.search('啟晴')).places.map(p => p.name), ['啟晴邨']);
   assert.deepEqual((await place.search('Tak Long')).places.map(p => p.name), ['德朗邨']);
   assert.deepEqual((await place.search('kai ching')).places.map(p => p.name), ['啟晴邨']);
+});
+
+test('a mistyped English name still finds the estate, and a number finds nothing', async () => {
+  const place = createPlaceSearch({ env: haEnv, fetcher: haFetcher() });
+  assert.deepEqual((await place.search('Tak Longg')).places.map(p => p.name), ['德朗邨'], '打多一個字母');
+  // The estate list has names and districts only — no streets and no block numbers — so a
+  // query that asks for one is answered honestly rather than with the estate that is nearby.
+  assert.deepEqual(await place.search('德朗邨1座'), { places: [] });
 });
 
 test('the words are matched against every configured resource', async () => {
