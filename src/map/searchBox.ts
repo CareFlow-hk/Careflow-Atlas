@@ -15,6 +15,8 @@ export interface SearchBox {
   searching: boolean;
   /** A search has finished; whether it found anything is `results`. */
   searched: boolean;
+  /** Only this request may settle the box; typing or choosing invalidates it. */
+  requestId?: number;
   /** Why the search failed, in words the person can act on. */
   problem?: string;
 }
@@ -24,20 +26,22 @@ export const CLOSED: SearchBox = { query: '', results: [], searching: false, sea
 export type SearchEvent =
   /** The person typed; whatever the last search said no longer applies to these words. */
   | { kind: 'typed'; words: string }
-  | { kind: 'asked' }
-  | { kind: 'found'; results: PlaceResult[] }
-  | { kind: 'failed'; message: string }
+  | { kind: 'asked'; requestId: number }
+  | { kind: 'found'; requestId: number; results: PlaceResult[] }
+  | { kind: 'failed'; requestId: number; message: string }
   /** A result was chosen: the list closes, and so does anything said about it. */
   | { kind: 'chosen' };
 
 export function searchBox(state: SearchBox, event: SearchEvent): SearchBox {
   switch (event.kind) {
-    case 'typed': return { ...state, query: event.words, searched: false };
-    case 'asked': return { ...state, searching: true, problem: undefined };
-    case 'found': return { ...state, searching: false, results: event.results, searched: true };
+    case 'typed': return { ...CLOSED, query: event.words };
+    case 'asked': return { ...CLOSED, query: state.query, searching: true, requestId: event.requestId };
+    case 'found': return event.requestId === state.requestId
+      ? { ...state, requestId: undefined, searching: false, results: event.results, searched: true } : state;
     // A failure is said out loud: an empty list would read as 「沒有這幢大廈」, which is a different thing.
-    case 'failed': return { ...state, searching: false, results: [], searched: true, problem: event.message };
-    case 'chosen': return { ...state, searching: false, results: [], searched: false, problem: undefined };
+    case 'failed': return event.requestId === state.requestId
+      ? { ...state, requestId: undefined, searching: false, results: [], searched: true, problem: event.message } : state;
+    case 'chosen': return { ...CLOSED, query: state.query };
   }
 }
 

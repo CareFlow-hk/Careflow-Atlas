@@ -200,6 +200,75 @@ const premises = (name, street, number, extra = {}) => ({ Address: { PremisesAdd
 } } });
 const answered = rows => replied(JSON.stringify({ RequestAddress: {}, SuggestedAddress: rows }));
 
+test('JSON street ranges keep both ends and include interior door numbers', async () => {
+  const range = premises('合成範圍大廈', '第三街', '100', {
+    ChiStreet: { StreetName: '第三街', BuildingNoFrom: '100', BuildingNoTo: '106' },
+  });
+  for (const number of ['100', '102', '106']) {
+    const service = createPlaceSearch({ env, fetcher: answered([
+      range, premises('合成近似街道大廈', '第二街', number), premises('合成另一門牌', '第三街', '108'),
+    ]) });
+    const { places } = await service.search(`第三街${number}號`);
+    assert.deepEqual(places.map(p => p.name), ['合成範圍大廈']);
+    assert.equal(places[0].address, '香港 · 中西區 · 第三街 100–106');
+  }
+  const outside = await createPlaceSearch({ env, fetcher: answered([range, premises('合成另一門牌', '第三街', '108')]) }).search('第三街108號');
+  assert.deepEqual(outside.places.map(p => p.name), ['合成另一門牌']);
+});
+
+test('an exact street stays ahead of a near street with the requested number', async () => {
+  const { places } = await createPlaceSearch({ env, fetcher: answered([
+    premises('合成正確街道', '第三街', '108'), premises('合成錯街', '第二街', '102'),
+  ]) }).search('第三街102號');
+  assert.deepEqual(places.map(p => p.name), ['合成正確街道']);
+});
+
+test('inline numeric ranges include interior numbers without expanding lettered or reversed endpoints', async () => {
+  for (const range of ['100-106', '100–106', '１００－１０６', '100至106']) {
+    const { places } = await createPlaceSearch({ env, fetcher: answered([
+      premises('合成範圍大廈', '第三街', range), premises('合成單號大廈', '第三街', '102'),
+    ]) }).search('第三街102號');
+    assert.deepEqual(places.map(p => p.name), ['合成範圍大廈', '合成單號大廈']);
+  }
+  for (const range of ['100A-106B', '106-100']) {
+    const { places } = await createPlaceSearch({ env, fetcher: answered([
+      premises('合成不明範圍', '第三街', range), premises('合成單號大廈', '第三街', '102'),
+    ]) }).search('第三街102號');
+    assert.deepEqual(places.map(p => p.name), ['合成單號大廈']);
+  }
+});
+
+test('XML and English-only JSON preserve street ranges too', async () => {
+  const body = xml.replaceAll('<BuildingNoFrom>28</BuildingNoFrom>', '<BuildingNoFrom>28</BuildingNoFrom><BuildingNoTo>38</BuildingNoTo>');
+  assert.equal(parseAlsXml(body)[0].address, '九龍 · 九龍城區 · 德朗邨 · 1座 · 承啟道 28–38');
+  assert.deepEqual((await createPlaceSearch({ env, fetcher: replied(body) }).search('承啟道30號')).places.map(p => p.name), ['德瑜樓']);
+  const english = structuredClone(takYu);
+  delete english.Address.PremisesAddress.ChiPremisesAddress;
+  english.Address.PremisesAddress.EngPremisesAddress.EngStreet.BuildingNoTo = '38';
+  const { places } = await createPlaceSearch({ env, fetcher: answered([english]) }).search('SHING KAI ROAD 30');
+  assert.ok(places[0].address.endsWith('SHING KAI ROAD 28–38'));
+});
+
+test('identical named addresses with minor coordinate drift appear once', async () => {
+  const first = premises('合成同一大廈', '第三街', '100');
+  const near = structuredClone(first);
+  near.Address.PremisesAddress.GeospatialInformation = { Latitude: '22.28562', Longitude: '114.14191' };
+  const { places } = await createPlaceSearch({ env, fetcher: answered([first, near]) }).search('第三街100號');
+  assert.equal(places.length, 1);
+  assert.equal(places[0].lat, 22.2856);
+});
+
+test('same names do not hide distinct addresses, ranges, or distant positions', async () => {
+  const first = premises('合成同名大廈', '第三街', '100');
+  const otherAddress = premises('合成同名大廈', '第三街', '102');
+  const range = premises('合成同名大廈', '第三街', '100', { ChiStreet: { StreetName: '第三街', BuildingNoFrom: '100', BuildingNoTo: '106' } });
+  const distant = structuredClone(first);
+  distant.Address.PremisesAddress.GeospatialInformation.Longitude = '114.1519';
+  const { places } = await createPlaceSearch({ env, fetcher: answered([first, otherAddress, range, distant]) }).search('合成同名大廈');
+  assert.equal(places.length, 4);
+  assert.ok(places.some(p => p.address.endsWith('100–106')));
+});
+
 test('the words and the numbers of a query are read apart', () => {
   assert.deepEqual(readQuery('下鄉道 3 號'), { text: '下鄉道', numbers: ['3'] });
   assert.deepEqual(readQuery('德朗邨1座'), { text: '德朗邨', numbers: ['1'] });

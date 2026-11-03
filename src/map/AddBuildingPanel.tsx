@@ -128,12 +128,12 @@ export function AddBuildingPanel({ map, neighbours, buildings, onSelectBuilding,
     const words = box.query.trim();
     if (!search || words.length < 2 || box.searching) return;
     const ticket = ++searchTicket.current;
-    send({ kind: 'asked' });
+    send({ kind: 'asked', requestId: ticket });
     try {
       const found = await search(words);
-      if (ticket === searchTicket.current) send({ kind: 'found', results: found });
+      send({ kind: 'found', requestId: ticket, results: found });
     } catch (error) {
-      if (ticket === searchTicket.current) send({ kind: 'failed', message: error instanceof Error ? error.message : '搜尋未成功，請再試一次。' });
+      send({ kind: 'failed', requestId: ticket, message: error instanceof Error ? error.message : '搜尋未成功，請再試一次。' });
     }
   };
 
