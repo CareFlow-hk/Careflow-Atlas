@@ -131,6 +131,15 @@ const valueOf = value => {
 const field = (row, key) => valueOf(row?.[key]);
 const inner = (row, key) => (row && typeof row === 'object' ? row[key] : undefined);
 
+/** Keep the source's whole address; only plain ascending numeric endpoints form an interval. */
+function doorNumber(from = '', to = '') {
+  const text = from && to && from !== to ? `${from}–${to}` : from || to;
+  const range = /^(\d+)\s*[-–—至]\s*(\d+)$/.exec(text.normalize('NFKC'));
+  const start = range ? Number(range[1]) : NaN;
+  const end = range ? Number(range[2]) : NaN;
+  return { text, range: Number.isSafeInteger(start) && Number.isSafeInteger(end) && start <= end ? [start, end] : undefined };
+}
+
 /**
  * One premises row, in the terms the panel uses.
  *
@@ -141,17 +150,18 @@ const inner = (row, key) => (row && typeof row === 'object' ? row[key] : undefin
  * estate, and a worker standing at the wrong 德瑜樓 is a wasted visit.
  */
 function alsPlace(raw) {
+  const door = doorNumber(raw.number, raw.numberTo);
   // A street-only premises has no name of its own; the street and number are a name a person
   // can recognise, unlike the whole address repeated in the name column.
   const name = raw.chiName || raw.chiEstate || raw.engName || raw.engEstate
-    || [raw.street, raw.number].filter(Boolean).join(' ');
+    || [raw.street, door.text].filter(Boolean).join(' ');
   const address = [
     raw.region,
     raw.district,
     raw.location && raw.location !== raw.district ? raw.location : '',
     raw.chiEstate && raw.chiEstate !== name ? raw.chiEstate : '',
     raw.block,
-    [raw.street, raw.number].filter(Boolean).join(' '),
+    [raw.street, door.text].filter(Boolean).join(' '),
   ].filter(Boolean).join(' · ');
   const built = place({ id: raw.geoAddress ? `als-${raw.geoAddress}` : `${raw.lng},${raw.lat}`, name, address, lng: raw.lng, lat: raw.lat });
   if (!built) return undefined;
@@ -165,10 +175,10 @@ function alsPlace(raw) {
     raw.location, raw.engLocation, raw.street, raw.engStreet, raw.block,
   ].filter(Boolean).join(' ');
   // The numbers this place itself carries, so 「承啟道 28 號」 is not answered with 承啟道 38.
-  // A range (`BuildingNoFrom` can be 「1-3」) contributes both ends.
-  const numbers = [...new Set(`${raw.number ?? ''} ${raw.block ?? ''}`.match(/\d+/g) ?? [])]
+  // Keep explicit door/block numbers as well as a numeric interval; do not enumerate a range.
+  const numbers = [...new Set(`${door.text} ${raw.block ?? ''}`.normalize('NFKC').match(/\d+/g) ?? [])]
     .map(number => String(Number(number)));
-  return { ...built, match, numbers };
+  return { ...built, match, numbers, numberRange: door.range };
 }
 
 /** 「1座」, or 「BLK 1」 when the row has no Chinese block; blank when it is not a blocked building. */
@@ -208,6 +218,7 @@ export function parseAlsJson(value) {
       street: field(inner(chi, 'ChiStreet'), 'StreetName') || field(inner(eng, 'EngStreet'), 'StreetName'),
       engStreet: field(inner(eng, 'EngStreet'), 'StreetName'),
       number: field(inner(chi, 'ChiStreet'), 'BuildingNoFrom') || field(inner(eng, 'EngStreet'), 'BuildingNoFrom'),
+      numberTo: field(inner(chi, 'ChiStreet'), 'BuildingNoTo') || field(inner(eng, 'EngStreet'), 'BuildingNoTo'),
       block: alsBlock(
         field(inner(chi, 'ChiBlock'), 'BlockNo'), field(inner(chi, 'ChiBlock'), 'BlockDescriptor'),
         field(inner(eng, 'EngBlock'), 'BlockNo'),
@@ -245,6 +256,7 @@ export function parseAlsXml(text) {
       street: one(chi, 'StreetName') || one(eng, 'StreetName'),
       engStreet: one(eng, 'StreetName'),
       number: one(chi, 'BuildingNoFrom') || one(eng, 'BuildingNoFrom'),
+      numberTo: one(chi, 'BuildingNoTo') || one(eng, 'BuildingNoTo'),
       block: alsBlock(
         one(textOf(chi, 'ChiBlock'), 'BlockNo'), one(textOf(chi, 'ChiBlock'), 'BlockDescriptor'),
         one(textOf(eng, 'EngBlock'), 'BlockNo'),
@@ -332,6 +344,17 @@ export function parseHaRows(text) {
 
 /** Matching ignores case, width and every kind of space: the live list suffixes some names with U+3000. */
 const fold = text => String(text ?? '').normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+
+/** Display dedupe only: never merge workspace buildings or discard distinct full addresses. */
+function sameSuggestion(a, b) {
+  if (fold(a.name) !== fold(b.name) || fold(a.address) !== fold(b.address)) return false;
+  if (a.lng === b.lng && a.lat === b.lat) return true;
+  if (!a.address) return false;
+  // ALS may supply a survey point and an entrance a few metres apart for the same address.
+  const east = (a.lng - b.lng) * 111_320 * Math.cos((a.lat + b.lat) * Math.PI / 360);
+  const north = (a.lat - b.lat) * 111_320;
+  return Math.hypot(east, north) <= 5;
+}
 
 /**
  * A number and whatever word says what the number is: 「3 號」 is a street number, 「1 座」 a
@@ -440,8 +463,9 @@ export function createPlaceSearch({ fetcher = fetch, env = process.env, now = Da
    * meant. Only when nothing fits the number are the rows offered anyway — each one shows its
    * real door number, so the person can see what they are being offered.
    *
-   * Last, one entry per name-and-place: the same building can come back twice at one position,
-   * and a person picking a building does not need it listed twice.
+   * Match the street/name first, then narrow its door numbers; a near-miss street must not
+   * displace the correct street just because its door number matches. Last, collapse only
+   * identical named addresses at nearly the same position, keeping distinct ranges visible.
    */
   function rank(parsed, rawQuery) {
     const wanted = readQuery(rawQuery);
@@ -456,18 +480,16 @@ export function createPlaceSearch({ fetcher = fetch, env = process.env, now = Da
         if (same < leastFound(wanted.text)) continue;
         score = same / wanted.text.length;
       }
-      rows.push({ item, score, numbered: wanted.numbers.every(number => item.numbers.includes(number)) });
+      rows.push({ item, score, numbered: wanted.numbers.every(number => item.numbers.includes(number)
+        || (item.numberRange && Number(number) >= item.numberRange[0] && Number(number) <= item.numberRange[1])) });
     }
-    const narrowed = wanted.numbers.length > 0 && rows.some(row => row.numbered);
-    const fitting = narrowed ? rows.filter(row => row.numbered) : rows;
-    const best = Math.max(0, ...fitting.map(row => row.score));
-    const seen = new Set();
+    const best = Math.max(0, ...rows.map(row => row.score));
+    const closest = rows.filter(row => row.score === best);
+    const narrowed = wanted.numbers.length > 0 && closest.some(row => row.numbered);
+    const fitting = narrowed ? closest.filter(row => row.numbered) : closest;
     const kept = [];
-    for (const { item, score } of fitting) {
-      if (score < best) continue;
-      const key = `${fold(item.name)}|${item.lng}|${item.lat}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
+    for (const { item } of fitting) {
+      if (kept.some(previous => sameSuggestion(previous, item))) continue;
       kept.push({ id: item.id, name: item.name, address: item.address, lng: item.lng, lat: item.lat });
     }
     return kept;
