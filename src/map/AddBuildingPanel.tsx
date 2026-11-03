@@ -8,7 +8,7 @@ import { footprintEditorColors } from '../domain/presentation';
 import type { NewBuildingInput } from '../data/newBuilding';
 import { area, type Origin } from './footprintGeometry';
 import { findOsmFootprint, type FootprintMatch } from './osmFootprint';
-import { addressFromTab, buildingInput, seedRing, shapeNote, type AddBuildingForm, type Picked } from './addBuildingDraft';
+import { addressFromTab, buildingInput, fillFromPlace, seedRing, shapeNote, type AddBuildingForm, type Picked } from './addBuildingDraft';
 import { suggestNearbyAddress, type KnownBuilding } from './nearbyAddress';
 import { nearbyBuilding, type PlaceResult } from './placeSearch';
 import { useFootprintShape } from './useFootprintShape';
@@ -145,10 +145,13 @@ export function AddBuildingPanel({ map, neighbours, buildings, onSelectBuilding,
     }
   };
 
-  /** A result is a place to look at, not a record: it moves the pick and pre-fills the two fields. */
+  /**
+   * A result is a place to look at, not a record: it moves the pick and fills the two fields.
+   * The name is filled even over one already typed — searching again is the later answer.
+   */
   const choosePlace = (result: PlaceResult) => {
     setResults([]); setSearchProblem(undefined); setChosenBySearch(true);
-    setForm(current => ({ ...current, name: current.name.trim() ? current.name : result.name, address: result.address || current.address }));
+    setForm(current => fillFromPlace(current, result));
     pickAt({ lng: result.lng, lat: result.lat }, false);
   };
 

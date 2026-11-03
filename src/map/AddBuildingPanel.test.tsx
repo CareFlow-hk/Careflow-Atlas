@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { Map as LibreMap } from 'maplibre-gl';
 import { AddBuildingPanel } from './AddBuildingPanel';
-import { addressFromTab, buildingInput, seedRing, shapeNote } from './addBuildingDraft';
+import { addressFromTab, buildingInput, fillFromPlace, seedRing, shapeNote } from './addBuildingDraft';
 import { defaultFootprintRing } from './mapModel';
 import type { FootprintMatch } from './osmFootprint';
 
@@ -84,6 +84,15 @@ describe('adding a building on the map', () => {
     expect(addressFromTab('address', '第三街 88 號', suggestion)).toBeUndefined();
     expect(addressFromTab('other', '', suggestion)).toBeUndefined();
     expect(addressFromTab('name', '', undefined)).toBeUndefined();
+  });
+
+  it('takes a chosen search result over a name already typed', () => {
+    const place = { name: '福滿大廈', address: '香港 · 中西區 · 第三街 56', lng: 114.14196, lat: 22.28554 };
+    // A search after typing is the later answer, so the result wins both fields.
+    expect(fillFromPlace({ name: '我打的大廈', address: '第三街 88 號' }, place)).toEqual({ name: '福滿大廈', address: '香港 · 中西區 · 第三街 56' });
+    expect(fillFromPlace({ name: '  ', address: '' }, place)).toEqual({ name: '福滿大廈', address: '香港 · 中西區 · 第三街 56' });
+    // A result that knows no address does not wipe one that was typed.
+    expect(fillFromPlace({ name: '舊名', address: '第三街 88 號' }, { ...place, address: '' }).address).toBe('第三街 88 號');
   });
 
   it('offers the name-and-address search only when the server has the switch on', () => {

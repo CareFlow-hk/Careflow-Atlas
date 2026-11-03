@@ -60,6 +60,17 @@ export function addressFromTab(from: 'name' | 'address' | 'other', address: stri
   return from !== 'other' && !address.trim() ? suggestion?.text : undefined;
 }
 
+/**
+ * What choosing a search result puts in the two fields. The name is taken even when the
+ * person has already typed one: they searched for this place after typing, so the result is
+ * the later answer and the earlier words should not win (2026-11-03). The address is taken
+ * when the result has one, and a result that knows no address leaves what was typed alone —
+ * a blank search result is not a reason to delete someone's work.
+ */
+export function fillFromPlace(form: AddBuildingForm, place: { name: string; address: string }): AddBuildingForm {
+  return { name: place.name.trim() || form.name, address: place.address.trim() || form.address };
+}
+
 /** Which shape will be stored, said plainly, so a placeholder is never mistaken for a survey. */
 export function shapeNote(picked: Picked) {
   if (picked.manual) return { text: '這裡當作底圖上沒有的新建築：先用預設方塊定位，座標就是你右鍵的位置。可以直接在地圖上拖動形狀。', check: true };

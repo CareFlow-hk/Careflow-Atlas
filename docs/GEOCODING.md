@@ -213,7 +213,7 @@ lang:     en | tc | sc
 ```
 
 - 搜索框放在 `AddBuildingPanel` 顶部（`src/map/AddBuildingPanel.tsx`），在「在地圖上點一下」提示之前。
-- 搜到的**地址默认填进「地址」栏**；名称同样预填，两个字段都可改。
+- 选中一条结果后，**名称和地址都填进表单**（名称覆盖已打的字），两个字段之后都可改。
 - 选中后复用现有的 `picked` 状态与 `seedRing` / `buildingInput` 逻辑，不新建第二条写入路径。
 
 ### 3.4 决策：Google 先不接，槽位留着（2026-11-01）
@@ -298,7 +298,7 @@ lang:     en | tc | sc
 | `server/features.mjs` | `placeSearch`：`scope: 'org'`、`who: 'platform'`、默认关闭 |
 | `src/map/placeSearch.ts` | 浏览器侧：`readPlaces` 边界复检、`nearbyBuilding`（15 米）、`searchPlaces` |
 | `src/map/placeSearch.test.ts` | 16 项：保留 / 丢弃、名称回退、重复判定、查询编码、短查询不打扰服务器、失败不被吞成「找不到」 |
-| `src/map/AddBuildingPanel.tsx` | 面板顶部搜索框、结果列表、选中后 `pickAt` + 预填名称与地址、疑似重复提示与跳转 |
+| `src/map/AddBuildingPanel.tsx` | 面板顶部搜索框、结果列表、选中后 `pickAt` + 以结果填入名称与地址、疑似重复提示与跳转 |
 | `src/map/MapScene.tsx` / `src/app/App.tsx` | 按 `account.features.placeSearch` 决定是否把搜索能力交给面板 |
 | `src/auth/AccountPanel.tsx` / `accountContext.ts` | 开关文案；平台管理员可切换，机构管理员只看到「已開啟的功能」 |
 | `.env.example` | `PLACE_PROVIDER`（默认 `als`）／`ALS_ENDPOINT`／`ALS_API_KEY`（可留空）／HA 的 `HA_BASE`、`HA_RESOURCES` |
@@ -306,7 +306,7 @@ lang:     en | tc | sc
 ### 9.2 行为口径
 
 - 选中结果 = 一次「在地图上点位置」：`pickAt` 复用同一套 `picked` / `seedRing` / `buildingInput`，不新建写入路径；轮廓仍由 `findOsmFootprint` 从底图匹配。
-- 预填规则：**地址**取结果里的地址；**名称**只在名称为空时填入，不覆盖人已经打的字。
+- 预填规则（2026-11-03 改）：**名称和地址都取选中的那条结果**，名称即使已经打过字也覆盖——打过字之后再搜、再选，结果就是较后的那个答案。结果自己没有地址时不动已填的地址，不拿空白删掉人打的字。
 - 15 米内已有大厦 → 黄色提示「這個位置已有「××」，可能是同一幢大廈」＋「前往該大廈」；这是提示，不是阻止，能否新增仍由现有重叠检查决定。
 - 失败一定说出来：上游连不上、超时、拒绝、格式认不出，面板显示服务器给的原因，并能继续用「在地圖上點選」。
 
