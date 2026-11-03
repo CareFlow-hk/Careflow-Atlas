@@ -1,6 +1,6 @@
 import { overlappingBuildings, type SpatialBuilding } from './buildingOverlaps';
 import { OverlapNotice } from './OverlapNotice';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type { GeoJSONSource, Map as LibreMap, MapMouseEvent } from 'maplibre-gl';
 import type { FeatureCollection } from 'geojson';
 import { CornerDownLeft, MapPin, Trash2, Undo2, X } from 'lucide-react';
@@ -11,6 +11,7 @@ import { findOsmFootprint, type FootprintMatch } from './osmFootprint';
 import { addressFromTab, buildingInput, fillFromPlace, seedRing, shapeNote, type AddBuildingForm, type Picked } from './addBuildingDraft';
 import { suggestNearbyAddress, type KnownBuilding } from './nearbyAddress';
 import { nearbyBuilding, type PlaceResult } from './placeSearch';
+import { CLOSED, searchBox, showsNothing } from './searchBox';
 import { useFootprintShape } from './useFootprintShape';
 
 interface Props {
@@ -41,11 +42,8 @@ export function AddBuildingPanel({ map, neighbours, buildings, onSelectBuilding,
   const [drawn, setDrawn] = useState<number[][]>();
   /** Why the outline would not take the last shape edit, in the editor's words. */
   const [shapeRefusal, setShapeRefusal] = useState<string>();
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<PlaceResult[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [searched, setSearched] = useState(false);
-  const [searchProblem, setSearchProblem] = useState<string>();
+  // The whole search box in one place, so 「找不到」 cannot outlive the search it was about.
+  const [box, send] = useReducer(searchBox, CLOSED);
   /** The spot came from a search result, so only that pick raises 「可能重複」. */
   const [chosenBySearch, setChosenBySearch] = useState(false);
   const searchTicket = useRef(0);
@@ -127,30 +125,28 @@ export function AddBuildingPanel({ map, neighbours, buildings, onSelectBuilding,
 
   const submitSearch = async (e: React.FormEvent) => {
     e.preventDefault();
-    const words = query.trim();
-    if (!search || words.length < 2 || searching) return;
+    const words = box.query.trim();
+    if (!search || words.length < 2 || box.searching) return;
     const ticket = ++searchTicket.current;
-    setSearching(true); setSearchProblem(undefined);
+    send({ kind: 'asked' });
     try {
       const found = await search(words);
-      if (ticket !== searchTicket.current) return;
-      setResults(found); setSearched(true);
+      if (ticket === searchTicket.current) send({ kind: 'found', results: found });
     } catch (error) {
-      if (ticket !== searchTicket.current) return;
-      // A failure is said out loud: an empty list would read as 「沒有這幢大廈」, which is a different thing.
-      setResults([]); setSearched(true);
-      setSearchProblem(error instanceof Error ? error.message : '搜尋未成功，請再試一次。');
-    } finally {
-      if (ticket === searchTicket.current) setSearching(false);
+      if (ticket === searchTicket.current) send({ kind: 'failed', message: error instanceof Error ? error.message : '搜尋未成功，請再試一次。' });
     }
   };
 
   /**
    * A result is a place to look at, not a record: it moves the pick and fills the two fields.
    * The name is filled even over one already typed — searching again is the later answer.
+   *
+   * Clearing the list is the end of this search, so the flag that says a search came back
+   * empty goes with it; otherwise the panel tells the person 「找不到」 about the result they
+   * have just chosen, one line under it.
    */
   const choosePlace = (result: PlaceResult) => {
-    setResults([]); setSearchProblem(undefined); setChosenBySearch(true);
+    send({ kind: 'chosen' }); setChosenBySearch(true);
     setForm(current => fillFromPlace(current, result));
     pickAt({ lng: result.lng, lat: result.lat }, false);
   };
@@ -185,19 +181,19 @@ export function AddBuildingPanel({ map, neighbours, buildings, onSelectBuilding,
         <button type="button" className="add-building__close" aria-label="取消新增大廈" onClick={onCancel}><X size={16} /></button>
       </div>
       {search && <form className="add-building__search" role="search" onSubmit={submitSearch}>
-        <label>大廈名稱或地址<input value={query} onChange={e => setQuery(e.target.value)} placeholder="例如：福滿大廈、下鄉道 3 號" aria-label="大廈名稱或地址" /></label>
-        <button type="submit" disabled={searching || query.trim().length < 2}>{searching ? '搜尋中…' : '搜尋'}</button>
+        <label>大廈名稱或地址<input value={box.query} onChange={e => send({ kind: 'typed', words: e.target.value })} placeholder="例如：福滿大廈、下鄉道 3 號" aria-label="大廈名稱或地址" /></label>
+        <button type="submit" disabled={box.searching || box.query.trim().length < 2}>{box.searching ? '搜尋中…' : '搜尋'}</button>
       </form>}
-      {searchProblem && <p className="fp-editor__note is-problem" role="status">{searchProblem}</p>}
-      {results.length > 0 && <ul className="add-building__results" aria-label="搜尋結果">
-        {results.map(result => <li key={result.id}>
+      {box.problem && <p className="fp-editor__note is-problem" role="status">{box.problem}</p>}
+      {box.results.length > 0 && <ul className="add-building__results" aria-label="搜尋結果">
+        {box.results.map(result => <li key={result.id}>
           <button type="button" onClick={() => choosePlace(result)}>
             <span className="add-building__result-name">{result.name}</span>
             {result.address && result.address !== result.name && <small>{result.address}</small>}
           </button>
         </li>)}
       </ul>}
-      {searched && !searching && !searchProblem && results.length === 0 && <p className="fp-editor__note" role="status">找不到「{query.trim()}」，可換個名稱再試，或直接在地圖上點位置。</p>}
+      {showsNothing(box) && <p className="fp-editor__note" role="status">找不到「{box.query.trim()}」，可換個名稱再試，或直接在地圖上點位置。</p>}
       {occupied && <p className="add-building__duplicate" role="status">
         這個位置已有「{occupied.name.trim() || '未命名大廈'}」，可能是同一幢大廈。
         <button type="button" onClick={() => onSelectBuilding(occupied.id)}>前往該大廈</button>
