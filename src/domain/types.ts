@@ -416,6 +416,17 @@ export function getCoverageStatus(snapshot: OutreachSnapshot, buildingId: string
 }
 
 export interface CoverageSummary { total?: number; recorded: number; completed: number; followUps: number; status: CoverageStatus; }
+
+/**
+ * The units that currently occupy a visitable slot. A split parent is only a container;
+ * its leaf rooms replace it. This filters structure, never observations: each room still
+ * inherits the parent's records through `latestForUnit` / `latestCoverageForUnit`.
+ */
+export function currentVisitableUnits(snapshot: OutreachSnapshot, buildingId: string, floorId?: string): Unit[] {
+  const splitIds = new Set(snapshot.units.map((unit) => unit.parentUnitId).filter((id): id is string => id !== undefined));
+  return snapshot.units.filter((unit) => unit.buildingId === buildingId && (!floorId || unit.floorId === floorId) && !splitIds.has(unit.id));
+}
+
 /**
  * Counting and the paper/Excel 覆蓋概況 column only. `status` is the older seven-value
  * vocabulary and is deliberately kept: the workbook round-trip and the W0 recognition
@@ -433,8 +444,7 @@ export function getCoverageSummary(snapshot: OutreachSnapshot, buildingId: strin
    * unit's records as its starting point — the same reading the colour uses. Without this
    * the figures would count a place that is no longer drawn and miss the rooms that are.
    */
-  const splitIds = new Set(snapshot.units.map((unit) => unit.parentUnitId).filter((id): id is string => id !== undefined));
-  const scopeUnits = snapshot.units.filter((unit) => unit.buildingId === buildingId && (!floorId || unit.floorId === floorId) && !splitIds.has(unit.id));
+  const scopeUnits = currentVisitableUnits(snapshot, buildingId, floorId);
   const scopedRecords = effectiveObservations(snapshot).filter((item) => item.buildingId === buildingId && (!floorId || item.floorId === floorId));
   /*
    * Two answers per unit, deliberately read apart: which units were visited at all (the
@@ -692,7 +702,7 @@ export function unitState(snapshot: OutreachSnapshot, buildingId: string, unitId
  * floor-level event, if one exists, is history only and never decides the colour.
  */
 export function floorState(snapshot: OutreachSnapshot, buildingId: string, floorId: string): State {
-  const childStates = snapshot.units.filter(unit => unit.floorId === floorId).map(unit => unitState(snapshot, buildingId, unit.id));
+  const childStates = currentVisitableUnits(snapshot, buildingId, floorId).map(unit => unitState(snapshot, buildingId, unit.id));
   return withOpenTasks(aggregate(childStates) ?? "GRAY", openFollowUpsInScope(snapshot, { buildingId, floorId }).length > 0);
 }
 

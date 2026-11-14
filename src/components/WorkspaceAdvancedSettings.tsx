@@ -29,7 +29,9 @@ export function WorkspaceAdvancedSettings({ role }: { role: Role }) {
 function ClearWorkspace({ role }: { role: Role }) {
   const snapshot = useWorkspace(state => state.snapshot);
   const clearWorkspace = useWorkspace(state => state.clearWorkspace);
+  const syncMode = useWorkspace(state => state.syncMode);
   const [confirming, setConfirming] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [attempt, setAttempt] = useState<BackupAttempt>('IDLE');
   const [message, setMessage] = useState('');
   const gate = deleteGate(attempt);
@@ -56,11 +58,21 @@ function ClearWorkspace({ role }: { role: Role }) {
       return true;
     } catch { setMessage('Excel 匯出失敗，請重試。'); setAttempt('FAILED'); return false; }
   };
-  const clear = () => {
+  const clear = async () => {
     // The gate is enforced here too: a keyboard path must not skip the backup.
-    if (!gate.allowed) return;
-    try { clearWorkspace(); setConfirming(false); setAttempt('IDLE'); setMessage('已清空機構工作區（包括帳號端的副本）。所有同事重新整理後都會看到空白工作區。'); }
-    catch (error) { setMessage(error instanceof Error ? error.message : '未能清空，原有記錄仍保留。'); }
+    if (!gate.allowed || clearing) return;
+    setClearing(true); setMessage(syncMode === 'SHARED' ? '本機已清空，正在等待帳號端確認…' : '正在清空這部裝置的工作區…');
+    try {
+      await clearWorkspace();
+      setConfirming(false); setAttempt('IDLE');
+      setMessage(syncMode === 'SHARED'
+        ? '帳號端已確認清空。其他裝置會在下次拉取後看到空白工作區。'
+        : '已清空這部裝置的工作區；同步沒有開啟，其他裝置不受影響。');
+    } catch (error) {
+      setMessage(syncMode === 'SHARED'
+        ? `本機已清空，但帳號端未確認清空，不能當作全端成功。${error instanceof Error ? ` ${error.message}` : ''}`
+        : error instanceof Error ? error.message : '未能清空，請重試。');
+    } finally { setClearing(false); }
   };
   return (
     <section className="cf-settings-advanced">
@@ -70,7 +82,7 @@ function ClearWorkspace({ role }: { role: Role }) {
         ? <div className="cf-clear-actions"><button type="button" onClick={() => void exportExcel()}>先匯出 Excel</button><button type="button" onClick={() => { setMessage(''); setAttempt('IDLE'); setConfirming(true); }}>清空工作區…</button></div>
         : <div className="cf-clear-confirm" role="alert">
             <p>確定清空？將刪除 {counts}，包括帳號端的副本，不能復原。</p>
-            <div className="cf-clear-actions"><button type="button" onClick={() => void exportExcel()} disabled={attempt === 'WORKING'}>下載當前 Excel 備份</button><button type="button" className="cf-danger" disabled={!gate.allowed} onClick={clear}>確定清空</button><button type="button" onClick={() => setConfirming(false)}>取消</button></div>
+            <div className="cf-clear-actions"><button type="button" onClick={() => void exportExcel()} disabled={attempt === 'WORKING'}>下載當前 Excel 備份</button><button type="button" className="cf-danger" disabled={!gate.allowed || clearing} onClick={() => void clear()}>{clearing ? '等待帳號端確認…' : '確定清空'}</button><button type="button" disabled={clearing} onClick={() => setConfirming(false)}>取消</button></div>
             <p className={`cf-structure__gate${gate.allowed ? ' is-ready' : ''}`} role={attempt === 'FAILED' ? 'alert' : undefined}>{gate.note}</p>
           </div>}
       {message && <p className="cf-custom-options__note" role="status">{message}</p>}

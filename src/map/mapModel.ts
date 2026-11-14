@@ -45,13 +45,13 @@ export interface MarkerLabel {
  * the dot says how the visit went, the tag says whether anything is left to do, and a
  * green building with a task on it therefore shows both.
  */
-export function markerLabel(building: MapBuilding, selected: boolean, possibleDuplicate = false): MarkerLabel {
+export function markerLabel(building: MapBuilding, selected: boolean, possibleDuplicate = false, searchMatch = false): MarkerLabel {
   const task = building.followUps > 0 ? '待跟進' : undefined;
   const state = stateLabels[building.state];
   const lead = selected ? `正在查看${building.name}` : `在地圖選擇${building.name}`;
   const tag = (building.tagged ? ` · ${nodeTagLabel}` : '') + (possibleDuplicate ? ' · 可能重複' : '');
   return {
-    className: `building-map-marker${selected ? ' is-selected' : ''}${task ? ' has-followup' : ''}${building.tagged ? ' is-tagged' : ''}`,
+    className: `building-map-marker${selected ? ' is-selected' : ''}${searchMatch ? ' is-search-match' : ''}${task ? ' has-followup' : ''}${building.tagged ? ' is-tagged' : ''}`,
     ariaLabel: `${lead} · ${state}${task ? ` · ${building.followUps} 項待跟進` : ''}${tag}`,
     title: `${building.name} · ${state}${task ? ` · ${building.followUps} 項待跟進` : ''}${tag}`,
     // The declared width feeds label collision, so the tag and the mark are counted in it.

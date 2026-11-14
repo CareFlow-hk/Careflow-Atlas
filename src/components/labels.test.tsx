@@ -108,6 +108,16 @@ describe('history chips keep every axis', () => {
     }
   });
 
+  it('distinguishes an explicit unknown judgement from no indication in history', () => {
+    const unknown = renderHistory(scene([observation({ id: 'o1', assessment: 'UNKNOWN' })]));
+    const noIndication = renderHistory(scene([observation({ id: 'o1', assessment: 'NO_INDICATION' })]));
+    expect(unknown).toContain(assessmentLabels.UNKNOWN);
+    expect(unknown).not.toContain(assessmentLabels.NO_INDICATION);
+    expect(unknown).not.toContain('今次未能判斷住房情況');
+    expect(noIndication).toContain(assessmentLabels.NO_INDICATION);
+    expect(noIndication).not.toContain(assessmentLabels.UNKNOWN);
+  });
+
   it('shows a source chip when a source was recorded', () => {
     const markup = renderHistory(scene([observation({ id: 'o1', sourceType: 'RESIDENT_REPORT' })]));
     expect(markup).toContain(sourceLabels.RESIDENT_REPORT);
@@ -179,11 +189,12 @@ describe('the housing mark and the housing words are the same statement', () => 
   const editor = renderToStaticMarkup(<ObservationEditor open targetLabel="合成大廈 · A室" subjectId="u1" onClose={noop} onSubmit={noop} />);
   const cell = (item: Observation) => cellMarkup(renderDetail(scene([item])));
 
-  it('names the same words on the entry form and in the elevation key', () => {
+  it('offers every housing answer and keeps shared labels aligned with the elevation key', () => {
     const key = keyLine(renderDetail(scene([observation({ id: 'o1' })])));
     for (const option of assessmentOptions) {
       expect(editor).toContain(option.label);
-      expect(key).toContain(option.label);
+      // UNKNOWN has visit-specific entry wording; its historical chip is tested above.
+      if (option.value !== 'UNKNOWN') expect(key).toContain(option.label);
       // Where there is a mark, the key shows the mark the block shows, beside that word.
       if (assessmentMarks[option.value]) expect(key).toContain(`${assessmentMarks[option.value]} ${option.label}`);
     }
@@ -283,6 +294,11 @@ describe('the editor offers the shared option tables', () => {
     expect(markup).toContain('未分類');
     for (const option of assessmentOptions) expect(markup).toContain(option.label);
     for (const option of sourceOptions) expect(markup).toContain(option.label);
+    const housingRadios = [...markup.matchAll(/<input[^>]*name="housingAssessment"[^>]*>/g)].map(match => match[0]);
+    const unknown = housingRadios.find(tag => tag.includes('value="UNKNOWN"'));
+    expect(unknown).toBeDefined();
+    expect(unknown).toContain('required');
+    expect(unknown).not.toContain('checked');
   });
 
   it('carries no second copy of a label table', () => {

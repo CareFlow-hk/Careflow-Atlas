@@ -1,10 +1,11 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import postcss from 'postcss';
 import { describe, expect, it } from 'vitest';
 
 const files = (directory: string): string[] => readdirSync(directory, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? files(join(directory, entry.name)) : [join(directory, entry.name)]);
-const source = files(new URL('.', import.meta.url).pathname);
+const source = files(fileURLToPath(new URL('.', import.meta.url)));
 const circles = new Set(['.demo-badge>span', '.status-pill i', '.app-statusbar i', '.help-legend i', '.building-row__name i', '.cf-plate__state i', '.cf-room-list__pick i', '.cf-event__rail span', '.cf-state-mark i', '.cf-floor-state', '.cf-choice__dot', '.loading-orbit', '.building-map-marker.is-compact', '.building-map-marker span', '.legend-swatch', '.floor-map-label__breakdown b', '.photo-service i']);
 
 describe('the shared radius and stripe rules', () => {

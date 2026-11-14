@@ -34,6 +34,9 @@ interface MapSceneProps {
   selectedFloorId?: string;
   expanded: boolean;
   onSelectBuilding: (id: string) => void;
+  onBlankClick?: () => void;
+  /** Local-list search is active: every supplied marker is a match and gets a visual outline. */
+  searchActive?: boolean;
   onSelectFloor: (id: string) => void;
   onToggleExpanded: () => void;
   onOverview: () => void;
@@ -208,6 +211,9 @@ export default function MapScene(props: MapSceneProps) {
         if (hits[0]) { current.current.onSelectBuilding(String(hits[0].properties.id)); return; }
         if (map.getLayer('building') && map.queryRenderedFeatures(e.point, { layers: ['building'] }).length) {
           setNotice(current.current.onAddBuilding ? '這幢大廈未加入外展名單。可用右邊的「＋」按鈕在地圖上新增。' : '這幢大廈暫無示範記錄。請選擇有標記的大廈。');
+        } else {
+          setNotice('');
+          current.current.onBlankClick?.();
         }
       };
       map.on('click', onClick);
@@ -263,7 +269,7 @@ export default function MapScene(props: MapSceneProps) {
     markers.current = visibleBuildings(props.buildings, props.selectedBuildingId).map(building => {
       // The wording and the class names come from `markerLabel`, so what a marker says
       // can be asserted without a browser; only the assembly happens here.
-      const label = markerLabel(building, building.id === props.selectedBuildingId, overlapPeers.has(building.id));
+      const label = markerLabel(building, building.id === props.selectedBuildingId, overlapPeers.has(building.id), props.searchActive);
       const button = document.createElement('button');
       button.className = label.className;
       button.setAttribute('aria-label', label.ariaLabel);
@@ -294,7 +300,7 @@ export default function MapScene(props: MapSceneProps) {
     map.setPaintProperty('focused-city', 'fill-extrusion-height', active ? focusHeight : overviewContextHeight);
     map.setPaintProperty('focused-city', 'fill-extrusion-opacity', (active ? .4 : .72) * Math.min(1, map.getPitch() / 45));
     map.setPaintProperty('focused-city', 'fill-extrusion-base', active ? ['min', ['get', 'base'], focusHeight] : overviewContextBase);
-  }, [props.buildings, props.selectedBuildingId, active, ready]);
+  }, [props.buildings, props.selectedBuildingId, props.searchActive, active, ready]);
 
   useEffect(() => {
     const map = mapRef.current;

@@ -29,6 +29,8 @@ let workspaceOrgId: string | undefined;
  */
 let server: RemoteWorkspaceRepository | undefined;
 let workspaceCipher: WorkspaceCipher | undefined;
+/** Rejects late responses from an account or institution that is no longer on screen. */
+let workspaceGeneration = 0;
 /** The version this tab last read from or wrote to the server. A write names it. */
 let serverVersion: number | undefined;
 /** Serialises pulls and writes: one in flight, in order, never two snapshots racing. */
@@ -57,6 +59,7 @@ export function setWorkspaceAccount(account?: string | WorkspaceAccount, name?: 
   // The operator travels with the account so a closed task names who closed it.
   useWorkspace.setState({ operator: id ? { accountId: id, name: fullName ?? id } : undefined, role, orgId });
   if (id === accountId && cipher === workspaceCipher && orgId === workspaceOrgId) return;
+  workspaceGeneration += 1;
   accountId = id;
   workspaceOrgId = orgId;
   workspaceCipher = id ? cipher : undefined;
@@ -76,7 +79,15 @@ export function setWorkspaceAccount(account?: string | WorkspaceAccount, name?: 
   }
   server = id && cipher ? new RemoteWorkspaceRepository(cipher) : undefined;
   serverVersion = undefined; confirmed = ''; savedBase = ''; writes = Promise.resolve();
-  useWorkspace.setState({ snapshot: undefined, loading: false, storageError: undefined, pendingConflicts: [], conflictsOpen: false, syncBlocked: false, selectedBuildingId: undefined, selectedFloorId: undefined, selectedUnitId: undefined, expanded: false, optionPrefs: prefsRepository.get() });
+  useWorkspace.setState({
+    snapshot: undefined, loading: false, storageError: undefined, pendingConflicts: [], conflictsOpen: false, syncBlocked: false,
+    selectedBuildingId: undefined, selectedFloorId: undefined, selectedUnitId: undefined, expanded: false, optionPrefs: prefsRepository.get(),
+    syncMode: server ? 'SHARED' : 'LOCAL_ONLY', syncStatus: server ? 'PENDING' : 'LOCAL_ONLY',
+    localRevision: 0, confirmedRevision: 0, lastSyncedAt: undefined,
+  });
+}
+function isCurrentWorkspace(target: RemoteWorkspaceRepository, generation: number): boolean {
+  return target === server && generation === workspaceGeneration;
 }
 /** A stored copy, or nothing: an unreadable store is never overwritten by this migration. */
 function readRaw(key: string): string | null {
@@ -105,18 +116,21 @@ function rememberBase(snapshot: OutreachSnapshot) {
  * already validated, so the local copy stays a valid one; if it cannot be written, the
  * banner has already said the change was refused and nothing more is lost.
  */
-function restoreConfirmed() {
-  if (!confirmed) return;
+function restoreConfirmed(): number | undefined {
+  if (!confirmed) return undefined;
   try {
     const restored = repository.replaceSnapshot(JSON.parse(confirmed));
     rememberBase(restored);
     const { selectedUnitId, selectedFloorId } = useWorkspace.getState();
+    const localWrite = localWritePartial();
     useWorkspace.setState({
       snapshot: restored,
+      ...localWrite,
       ...(selectedUnitId && !restored.units.some(item => item.id === selectedUnitId) ? { selectedUnitId: undefined } : {}),
       ...(selectedFloorId && !restored.floors.some(item => item.id === selectedFloorId) ? { selectedFloorId: undefined, selectedUnitId: undefined } : {}),
     });
-  } catch { /* the working copy stays as it was; the refusal is already on screen */ }
+    return localWrite.localRevision;
+  } catch { /* the working copy stays as it was; the refusal is already on screen */ return undefined; }
 }
 /**
  * Rows arriving from an import belong to whoever imported them, so they can be withdrawn
@@ -139,10 +153,28 @@ const conflictMessage = (count: number) =>
   `這個帳號的資料已在其他裝置更新，其中 ${count} 筆記錄兩邊都改過，未有自動決定。本機的版本仍留在這部電腦；請在視窗逐筆選擇保留哪一份，選好之前不會寫上帳號端。`;
 const blockedMessage = '這個帳號的資料已在其他裝置更新，但兩邊的改動在關聯上對不上，未能自動合併。本機版本仍然保留，未寫上帳號端；請先匯出 Excel 核對。';
 
+/** A repository write has succeeded; only now may the local revision move forward. */
+function localWritePartial(): Pick<WorkspaceState, 'localRevision' | 'syncStatus'> {
+  return { localRevision: useWorkspace.getState().localRevision + 1, syncStatus: server ? 'PENDING' : 'LOCAL_ONLY' };
+}
+/** Mark only the revision whose exact JSON the server has confirmed. */
+function confirmRevision(target: RemoteWorkspaceRepository, generation: number, revision: number) {
+  if (!isCurrentWorkspace(target, generation)) return;
+  const state = useWorkspace.getState();
+  useWorkspace.setState({
+    confirmedRevision: Math.max(state.confirmedRevision, revision),
+    lastSyncedAt: new Date().toISOString(),
+    // A save for A finishing after edit B says nothing about B. Its queued push still has to finish.
+    syncStatus: state.localRevision === revision ? 'SYNCED' : 'PENDING',
+  });
+}
 /** Publish a snapshot the account端 has not been told about yet, then tell it. */
 function publish(set: (partial: Partial<WorkspaceState>) => void, snapshot: OutreachSnapshot) {
   // An unresolved record conflict keeps its banner: the edit does not settle it.
-  set(useWorkspace.getState().pendingConflicts.length ? { snapshot } : { snapshot, storageError: undefined });
+  const localWrite = localWritePartial();
+  set(useWorkspace.getState().pendingConflicts.length
+    ? { snapshot, ...localWrite }
+    : { snapshot, ...localWrite, storageError: undefined });
   scheduleSync();
 }
 /**
@@ -152,7 +184,8 @@ function publish(set: (partial: Partial<WorkspaceState>) => void, snapshot: Outr
 function scheduleSync() {
   const target = server;
   if (!target) return;
-  writes = writes.then(() => push(target));
+  const generation = workspaceGeneration;
+  writes = writes.then(() => push(target, generation));
 }
 /** Set while a background pull is asking the server; one at a time is enough. */
 let pulling = false;
@@ -167,12 +200,14 @@ let pulling = false;
 export async function pullWorkspace(): Promise<void> {
   const target = server;
   if (!target || pulling) return;
+  const generation = workspaceGeneration;
   pulling = true;
   try {
     const version = await target.version();
-    if (target !== server || version === serverVersion) return;
+    if (!isCurrentWorkspace(target, generation) || version === serverVersion) return;
     scheduleSync();
-    await writes;
+    const queued = writes; // an account switch must not make this pull wait on the new queue
+    await queued;
   } catch { /* reported by the next write */ } finally { pulling = false; }
 }
 /**
@@ -181,9 +216,9 @@ export async function pullWorkspace(): Promise<void> {
  * Returns `conflict` when the two sides changed the same record differently; the caller must
  * then leave the working copy alone and ask. Nothing is ever written here.
  */
-async function reconcile(target: RemoteWorkspaceRepository): Promise<'ok' | 'conflict' | 'blocked'> {
+async function reconcile(target: RemoteWorkspaceRepository, generation: number): Promise<'ok' | 'conflict' | 'blocked'> {
   const record = await target.load();
-  if (target !== server) return 'ok';
+  if (!isCurrentWorkspace(target, generation)) return 'ok';
   if (!record) {
     // Nothing on the account端: this browser's copy is the first one, and there is no
     // common ancestor to compare a future write against.
@@ -199,24 +234,24 @@ async function reconcile(target: RemoteWorkspaceRepository): Promise<'ok' | 'con
   if (!local) {
     const stored = repository.replaceSnapshot(remoteStored);
     rememberBase(stored);
-    useWorkspace.setState({ snapshot: stored });
+    useWorkspace.setState({ snapshot: stored, ...localWritePartial() });
     return 'ok';
   }
   const result = mergeSync(remoteStored, local, readBase());
   if (!result.snapshot) {
-    useWorkspace.setState({ storageError: blockedMessage, pendingConflicts: [], conflictsOpen: false, syncBlocked: true });
+    useWorkspace.setState({ storageError: blockedMessage, pendingConflicts: [], conflictsOpen: false, syncBlocked: true, syncStatus: 'ERROR' });
     return 'blocked';
   }
   if (result.conflicts.length) {
     // The local copy is the only place the local version exists, so it stays exactly as
     // it is until the person has chosen; the account端 version is not adopted here.
-    useWorkspace.setState({ snapshot: local, pendingConflicts: result.conflicts, conflictsOpen: true, storageError: conflictMessage(result.conflicts.length), syncBlocked: false });
+    useWorkspace.setState({ snapshot: local, pendingConflicts: result.conflicts, conflictsOpen: true, storageError: conflictMessage(result.conflicts.length), syncBlocked: false, syncStatus: 'ERROR' });
     return 'conflict';
   }
   const stored = repository.replaceSnapshot(result.snapshot);
   // From now on the local changes are relative to what the account端 holds.
   rememberBase(remoteStored);
-  useWorkspace.setState({ snapshot: stored, pendingConflicts: [], conflictsOpen: false, syncBlocked: false, ...afterRenames(result.renamed), ...(result.keptBoth
+  useWorkspace.setState({ snapshot: stored, ...localWritePartial(), pendingConflicts: [], conflictsOpen: false, syncBlocked: false, ...afterRenames(result.renamed), ...(result.keptBoth
     ? { storageError: '這個帳號的資料已在其他裝置更新。兩邊的樓層／單位改動對不上，為免刪錯，已保留兩邊的資料（帳號端刪除的結構可能重新出現），請核對。' }
     : {}) });
   return 'ok';
@@ -236,43 +271,53 @@ function afterRenames(renamed?: { from: string; to: string; name: string }[]): P
  * and our write, so the loop pulls again and folds the two copies together instead of
  * forcing this one through.
  */
-async function push(target: RemoteWorkspaceRepository) {
-  if (target !== server) return;
+async function push(target: RemoteWorkspaceRepository, generation: number) {
+  if (!isCurrentWorkspace(target, generation)) return;
+  useWorkspace.setState({ syncStatus: 'SYNCING' });
   try {
     for (let attempt = 0; attempt < 3; attempt++) {
-      const outcome = await reconcile(target);
-      if (target !== server) return;
+      const outcome = await reconcile(target, generation);
+      if (!isCurrentWorkspace(target, generation)) return;
       const awaitingChoice = useWorkspace.getState().pendingConflicts.length;
       if (awaitingChoice) {
         // Still undecided: pull again so a newer account端 version updates the question,
         // but never write a copy the person has not settled.
-        useWorkspace.setState({ conflictsOpen: true, storageError: conflictMessage(awaitingChoice) });
+        useWorkspace.setState({ conflictsOpen: true, storageError: conflictMessage(awaitingChoice), syncStatus: 'ERROR' });
         return;
       }
       if (outcome !== 'ok') return;
-      const merged = workingSnapshot();
-      if (!merged) return;
+      // Read through the persistence adapter so a failed local read cannot be treated as an empty, synced copy.
+      const merged = repository.getSnapshot();
+      const revision = useWorkspace.getState().localRevision;
+      if (!merged) {
+        if (!confirmed) confirmRevision(target, generation, revision);
+        return;
+      }
       const json = JSON.stringify(merged);
       if (json === confirmed) {
+        confirmRevision(target, generation, revision);
         if (useWorkspace.getState().storageError) useWorkspace.setState({ storageError: undefined });
         return;
       }
       try {
+        // `revision` and `json` describe the same read; a later publish gets its own queued push.
+        useWorkspace.setState({ syncStatus: 'SYNCING' });
         const version = await target.save(merged, serverVersion);
-        if (target !== server) return;
+        if (!isCurrentWorkspace(target, generation)) return;
         serverVersion = version; confirmed = json;
         rememberBase(merged);
+        confirmRevision(target, generation, revision);
         if (useWorkspace.getState().storageError) useWorkspace.setState({ storageError: undefined });
         return;
       } catch (error) {
-        if (target !== server) return;
+        if (!isCurrentWorkspace(target, generation)) return;
         if (error instanceof ApiError && error.status === 409) continue;
         throw error;
       }
     }
     throw new ApiError(409, '工作區同時被其他裝置更新。');
   } catch (error) {
-    if (target !== server) return;
+    if (!isCurrentWorkspace(target, generation)) return;
     /*
      * A 403 is the server refusing the change itself, not a lost connection. Keeping that
      * copy here would leave the browser holding something the server will never accept, and
@@ -281,20 +326,27 @@ async function push(target: RemoteWorkspaceRepository) {
      * instead of sending people to check their network (2026-10-19 review).
      */
     if (error instanceof ApiError && error.status === 403) {
-      restoreConfirmed();
-      useWorkspace.setState({ storageError: error.message || MEMBER_NO_STRUCTURE_DELETE });
+      const restoredRevision = restoreConfirmed();
+      useWorkspace.setState({
+        ...(restoredRevision === undefined ? {} : { confirmedRevision: restoredRevision, lastSyncedAt: new Date().toISOString() }),
+        storageError: error.message || MEMBER_NO_STRUCTURE_DELETE,
+        syncStatus: 'ERROR',
+      });
       return;
     }
     // Only a request that got no answer is a network problem; any status the server or its
     // proxy sent is named, so nobody goes checking their wifi over a refused write.
     const status = error instanceof ApiError ? error.status : undefined;
-    useWorkspace.setState({ storageError: status === 409
-      ? '這個帳號的資料不斷被其他裝置更新，本次改動未寫上帳號端。本機副本仍然保留，請稍後再試。'
-      : status === 413
-        ? '本次改動已儲存在本機，但工作區資料超過帳號服務接受的大小（HTTP 413），未能同步到帳號端。本機副本仍然保留；請通知負責部署的同事。'
-        : status
-          ? `本次改動已儲存在本機，但帳號服務未能接收（HTTP ${status}），未能同步到帳號端。本機副本仍然保留，稍後可再儲存。`
-          : '本次改動已儲存在本機，但未能同步到帳號端。請檢查網絡；本機副本仍然保留，稍後可再儲存。' });
+    useWorkspace.setState({
+      syncStatus: 'ERROR',
+      storageError: error instanceof PersistenceError ? error.message : status === 409
+        ? '這個帳號的資料不斷被其他裝置更新，本次改動未寫上帳號端。本機副本仍然保留，請稍後再試。'
+        : status === 413
+          ? '本次改動已儲存在本機，但工作區資料超過帳號服務接受的大小（HTTP 413），未能同步到帳號端。本機副本仍然保留；請通知負責部署的同事。'
+          : status
+            ? `本次改動已儲存在本機，但帳號服務未能接收（HTTP ${status}），未能同步到帳號端。本機副本仍然保留，稍後可再儲存。`
+            : '本次改動已儲存在本機，但未能同步到帳號端。請檢查網絡；本機副本仍然保留，稍後可再儲存。',
+    });
   }
 }
 /**
@@ -303,17 +355,17 @@ async function push(target: RemoteWorkspaceRepository) {
  * Two copies that differ are merged record by record (see data/syncMerge.ts). Only a record
  * both sides changed differently stops the merge and asks; nothing is silently dropped.
  */
-async function loadRemote(target: RemoteWorkspaceRepository) {
+async function loadRemote(target: RemoteWorkspaceRepository, generation: number) {
   const local = workingSnapshot();
   try {
-    const outcome = await reconcile(target);
-    if (target !== server) return;
+    const outcome = await reconcile(target, generation);
+    if (!isCurrentWorkspace(target, generation)) return;
     // A fresh account端 copy, or a local copy whose changes were merged in, is still
     // something the account端 does not hold. Sending an unchanged copy costs no write.
     if (outcome === 'ok') scheduleSync();
     useWorkspace.setState({ loading: false, ...(outcome === 'ok' ? { storageError: undefined } : {}) });
   } catch (error) {
-    if (target !== server) return;
+    if (!isCurrentWorkspace(target, generation)) return;
     /*
      * Name what actually failed. A 404 is not a network problem: it means the running
      * account service predates this interface (a process started before the upgrade, or a
@@ -328,13 +380,23 @@ async function loadRemote(target: RemoteWorkspaceRepository) {
       : error instanceof Error && error.name === 'ZodError'
         ? '帳號端的資料格式不完整，未有載入。目前顯示的是本機副本；請先匯出 Excel 核對。'
         : '未能連接帳號服務，目前顯示的是本機副本。恢復連線後請重新整理。';
-    useWorkspace.setState({ loading: false, snapshot: local, storageError: message });
+    useWorkspace.setState({ loading: false, snapshot: local, storageError: message, syncStatus: 'ERROR' });
   }
 }
 interface WorkspaceState {
   snapshot?: OutreachSnapshot;
   /** True while the account端 copy is being read, so an empty start screen cannot be mistaken for an empty workspace. */
   loading: boolean;
+  /** SHARED only when a real remote repository exists; LOCAL_ONLY never means server-visible. */
+  syncMode: 'LOCAL_ONLY' | 'SHARED';
+  /** LOCAL_ONLY saves are not uploads. SHARED distinguishes unsent, in-flight, confirmed and failed work. */
+  syncStatus: 'LOCAL_ONLY' | 'PENDING' | 'SYNCING' | 'SYNCED' | 'ERROR';
+  /** Advances only after this browser's working repository successfully writes a new revision. */
+  localRevision: number;
+  /** The latest local revision whose exact contents (or empty workspace) the server confirmed. */
+  confirmedRevision: number;
+  /** When that server confirmation arrived; not a promise that another device has pulled it yet. */
+  lastSyncedAt?: string;
   storageError?: string;
   /** Records the account端 and this browser both changed; nothing is written until they are settled. */
   pendingConflicts: SyncConflict[];
@@ -374,8 +436,8 @@ interface WorkspaceState {
   initialize: () => Promise<void>;
   importSnapshot: (snapshot: OutreachSnapshot) => void;
   mergeSnapshot: (snapshot: OutreachSnapshot, baseline?: OutreachSnapshot) => void;
-  /** Empty this account's workspace in this browser. Options and the account are kept. */
-  clearWorkspace: () => void;
+  /** Clear locally at once, then resolve only after the shared DELETE succeeds (or reject after it fails). */
+  clearWorkspace: () => Promise<void>;
   /** Replace a building's outline drawn on the map. Records stay attached; only the shape and its centre move. */
   setFootprint: (buildingId: string, ring: number[][]) => void;
   /** Add a building placed on the map. An empty workspace starts from the blank template. Returns the refusal, if any. */
@@ -404,13 +466,23 @@ interface WorkspaceState {
 export const useWorkspace = create<WorkspaceState>((set, get) => ({
   expanded: false,
   loading: false,
+  syncMode: 'LOCAL_ONLY',
+  syncStatus: 'LOCAL_ONLY',
+  localRevision: 0,
+  confirmedRevision: 0,
+  lastSyncedAt: undefined,
   optionPrefs: {},
   pendingConflicts: [],
   conflictsOpen: false,
   syncBlocked: false,
   initialize: () => {
-    if (server) { set({ loading: true, storageError: undefined }); return loadRemote(server); }
-    try { set({ snapshot: repository.getSnapshot(), storageError: undefined }); }
+    const target = server;
+    if (target) {
+      const generation = workspaceGeneration;
+      set({ loading: true, storageError: undefined, syncStatus: 'PENDING' });
+      return loadRemote(target, generation);
+    }
+    try { set({ snapshot: repository.getSnapshot(), storageError: undefined, syncStatus: 'LOCAL_ONLY' }); }
     catch { set({ storageError: '本機資料未能讀取。原有資料保留；你可以重新匯入合成資料。' }); }
     return Promise.resolve();
   },
@@ -419,18 +491,20 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   deferConflicts: () => set(state => ({ conflictsOpen: false, ...(state.pendingConflicts.length ? { storageError: conflictMessage(state.pendingConflicts.length) } : {}) })),
   resolveConflicts: choices => {
     const target = server;
-    const local = workingSnapshot();
-    if (!target || !local) return;
+    if (!target || !workingSnapshot()) return;
+    const generation = workspaceGeneration;
     writes = writes.then(async () => {
-      if (target !== server) return;
+      if (!isCurrentWorkspace(target, generation)) return;
+      const local = workingSnapshot();
+      if (!local) return;
       try {
         const record = await target.load();
-        if (target !== server) return;
+        if (!isCurrentWorkspace(target, generation)) return;
         if (!record) {
           // Nothing left on the account端: this browser's copy can be written as the first one.
           const stored = repository.replaceSnapshot(local);
           serverVersion = undefined; confirmed = ''; savedBase = '';
-          set({ snapshot: stored, pendingConflicts: [], conflictsOpen: false, syncBlocked: false, storageError: undefined });
+          set({ snapshot: stored, ...localWritePartial(), pendingConflicts: [], conflictsOpen: false, syncBlocked: false, storageError: undefined });
           scheduleSync();
           return;
         }
@@ -438,21 +512,24 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
         const result = mergeSync(remoteStored, local, readBase(), choices);
         serverVersion = record.version;
         confirmed = JSON.stringify(remoteStored);
-        if (!result.snapshot) { set({ pendingConflicts: [], conflictsOpen: false, syncBlocked: true, storageError: blockedMessage }); return; }
+        if (!result.snapshot) { set({ pendingConflicts: [], conflictsOpen: false, syncBlocked: true, storageError: blockedMessage, syncStatus: 'ERROR' }); return; }
         if (result.conflicts.length) {
           // The account端 moved again while the question was open; ask about the new pair.
-          set({ pendingConflicts: result.conflicts, conflictsOpen: true, storageError: conflictMessage(result.conflicts.length) });
+          set({ pendingConflicts: result.conflicts, conflictsOpen: true, storageError: conflictMessage(result.conflicts.length), syncStatus: 'ERROR' });
           return;
         }
         const stored = repository.replaceSnapshot(result.snapshot);
         rememberBase(remoteStored);
-        set({ snapshot: stored, pendingConflicts: [], conflictsOpen: false, syncBlocked: false, storageError: undefined, ...afterRenames(result.renamed) });
+        set({ snapshot: stored, ...localWritePartial(), pendingConflicts: [], conflictsOpen: false, syncBlocked: false, storageError: undefined, ...afterRenames(result.renamed) });
         scheduleSync();
       } catch (error) {
-        if (target !== server) return;
-        set({ storageError: error instanceof ApiError && error.status === 401
-          ? '登入已過期，未能把選擇寫上帳號端。本機副本仍然保留。'
-          : '未能讀取帳號端的資料，選擇未寫上。本機副本仍然保留，請檢查網絡後再試。' });
+        if (!isCurrentWorkspace(target, generation)) return;
+        set({
+          syncStatus: 'ERROR',
+          storageError: error instanceof PersistenceError ? error.message : error instanceof ApiError && error.status === 401
+            ? '登入已過期，未能把選擇寫上帳號端。本機副本仍然保留。'
+            : '未能讀取帳號端的資料，選擇未寫上。本機副本仍然保留，請檢查網絡後再試。',
+        });
       }
     });
   },
@@ -464,40 +541,52 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   adoptRemote: () => {
     const target = server;
     if (!target) return;
+    const generation = workspaceGeneration;
     writes = writes.then(async () => {
-      if (target !== server) return;
+      if (!isCurrentWorkspace(target, generation)) return;
+      set({ syncStatus: 'SYNCING' });
       try {
         const record = await target.load();
-        if (target !== server || !record) return;
+        if (!isCurrentWorkspace(target, generation)) return;
+        if (!record) {
+          set({ storageError: '帳號端目前沒有工作區副本可採用。本機版本仍然保留。', syncStatus: 'ERROR' });
+          return;
+        }
         const remoteStored = repository.prepare(record.snapshot);
         const stored = repository.replaceSnapshot(remoteStored);
         serverVersion = record.version; confirmed = JSON.stringify(remoteStored);
         rememberBase(stored);
-        set({ snapshot: stored, storageError: undefined, syncBlocked: false, pendingConflicts: [], conflictsOpen: false, selectedBuildingId: undefined, selectedFloorId: undefined, selectedUnitId: undefined });
-      } catch {
-        if (target !== server) return;
-        set({ storageError: '未能讀取帳號端的資料，本機版本仍然保留。請檢查網絡後再試。' });
+        const localWrite = localWritePartial();
+        set({ snapshot: stored, ...localWrite, storageError: undefined, syncBlocked: false, pendingConflicts: [], conflictsOpen: false, selectedBuildingId: undefined, selectedFloorId: undefined, selectedUnitId: undefined });
+        confirmRevision(target, generation, localWrite.localRevision);
+      } catch (error) {
+        if (!isCurrentWorkspace(target, generation)) return;
+        set({ storageError: error instanceof PersistenceError ? error.message : '未能讀取帳號端的資料，本機版本仍然保留。請檢查網絡後再試。', syncStatus: 'ERROR' });
       }
     });
   },
   forcePushLocal: () => {
     const target = server;
     if (!target) return;
+    const generation = workspaceGeneration;
     writes = writes.then(async () => {
-      if (target !== server) return;
+      if (!isCurrentWorkspace(target, generation)) return;
+      set({ syncStatus: 'SYNCING' });
       try {
         const record = await target.load();
-        if (target !== server) return;
-        const local = workingSnapshot();
+        if (!isCurrentWorkspace(target, generation)) return;
+        const local = repository.getSnapshot();
+        const revision = get().localRevision;
         if (!local) return;
         const version = await target.save(local, record?.version);
-        if (target !== server) return;
+        if (!isCurrentWorkspace(target, generation)) return;
         serverVersion = version; confirmed = JSON.stringify(local);
         rememberBase(local);
         set({ storageError: undefined, syncBlocked: false, pendingConflicts: [], conflictsOpen: false });
-      } catch {
-        if (target !== server) return;
-        set({ storageError: '未能以本機版本寫上帳號端。本機副本仍然保留，請檢查網絡後重試。' });
+        confirmRevision(target, generation, revision);
+      } catch (error) {
+        if (!isCurrentWorkspace(target, generation)) return;
+        set({ storageError: error instanceof PersistenceError ? error.message : '未能以本機版本寫上帳號端。本機副本仍然保留，請檢查網絡後重試。', syncStatus: 'ERROR' });
       }
     });
   },
@@ -552,31 +641,41 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     publish(set, saved);
     return { unitId: result.unitId, snapshot: saved };
   },
-  clearWorkspace: () => {
+  clearWorkspace: async () => {
     repository.clear();
     savedBase = '';
     try { baseRepository.clear(); } catch { /* an unreadable baseline only costs a conservative merge */ }
     const target = server;
+    const generation = workspaceGeneration;
+    const localWrite = localWritePartial();
+    serverVersion = target ? serverVersion : undefined;
+    confirmed = target ? confirmed : '';
+    set({
+      snapshot: undefined, ...localWrite,
+      storageError: undefined, pendingConflicts: [], conflictsOpen: false, syncBlocked: false,
+      selectedBuildingId: undefined, selectedFloorId: undefined, selectedUnitId: undefined, expanded: false,
+    });
+    if (!target) return;
     /*
      * Queue behind any write still in flight, so a late PUT cannot restore what was
-     * cleared. The version is reset only once the delete has gone through: resetting it
-     * earlier would make the write queued ahead of it name a version the server no longer
-     * accepts, and report a conflict for a change that was in fact saved.
+     * cleared. Resolve the caller only after DELETE succeeds. The queued chain itself
+     * recovers from the rejection so a later save can still be attempted.
      */
-    if (target) writes = writes.then(async () => {
-      if (target !== server) return;
-      // The server keeps an empty version; remembering it keeps this browser's next write
-      // from looking like a first write that would race every other colleague's copy.
+    const operation = writes.then(async () => {
+      if (!isCurrentWorkspace(target, generation)) return;
+      set({ syncStatus: 'SYNCING' });
+      // The server keeps an empty version, never deletes the org_workspaces row.
       const version = await target.clear();
-      if (target !== server) return;
+      if (!isCurrentWorkspace(target, generation)) return;
       serverVersion = version; confirmed = '';
-      if (useWorkspace.getState().storageError) useWorkspace.setState({ storageError: undefined });
-    }).catch(() => {
-      if (target !== server) return;
-      useWorkspace.setState({ storageError: '本機工作區已清空，但未能清空帳號端的副本。請檢查網絡後重試。' });
+      set({ storageError: undefined });
+      confirmRevision(target, generation, localWrite.localRevision);
     });
-    else { serverVersion = undefined; confirmed = ''; }
-    set({ snapshot: undefined, storageError: undefined, pendingConflicts: [], conflictsOpen: false, syncBlocked: false, selectedBuildingId: undefined, selectedFloorId: undefined, selectedUnitId: undefined, expanded: false });
+    writes = operation.catch(() => {
+      if (!isCurrentWorkspace(target, generation)) return;
+      set({ storageError: '本機工作區已清空，但未能清空帳號端的副本。請檢查網絡後重試。', syncStatus: 'ERROR' });
+    });
+    await operation;
   },
   mergeSnapshot: (incoming, baseline) => {
     const current = repository.getSnapshot();

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { demoSnapshot } from "../data/demoFixture";
-import { canWithdrawObservation, currentAssessment, effectiveObservations, floorState, getCorrectionConflicts, getCoverageStatus, getCoverageSummary, getOpenFollowUps, latestForUnit, subjectUnitIds, supersededObservationIds, unitState, withdrawObservation, type Observation, type OutreachSnapshot } from "./types";
+import { buildingState, canWithdrawObservation, currentAssessment, currentVisitableUnits, effectiveObservations, floorState, getCorrectionConflicts, getCoverageStatus, getCoverageSummary, getOpenFollowUps, latestForUnit, stateBreakdown, subjectUnitIds, supersededObservationIds, unitState, withdrawObservation, type Observation, type OutreachSnapshot } from "./types";
 
 describe("coverage summaries", () => {
   it("does not promote one unit result to an entire building", () => {
@@ -119,6 +119,51 @@ describe("a 劏房 room reads the unit it was split from", () => {
     blank.units.push({ isSynthetic: true, provisional: true, id: "r1", buildingId: "b1", floorId: "f1", label: "A1", parentUnitId: "u1" });
     expect(latestForUnit(blank, "r1")).toBeUndefined();
     expect(unitState(blank, "b1", "r1")).toBe("GRAY");
+  });
+});
+
+describe("current visitable units", () => {
+  const splitAbc = (observations: Observation[]): OutreachSnapshot => {
+    const snapshot = subject(observations);
+    const original = snapshot.units[0]!;
+    snapshot.units = [
+      { ...original, id: "a", label: "A" },
+      { ...original, id: "b", label: "B" },
+      { ...original, id: "c", label: "C" },
+      { ...original, id: "a1", label: "A1", parentUnitId: "a" },
+      { ...original, id: "a2", label: "A2", parentUnitId: "a" },
+    ];
+    return snapshot;
+  };
+
+  it("counts A/B/C with A split into A1/A2 as four current units, not five", () => {
+    const parentHistory = event({ id: "a-before-split", unitId: "a", occurredAt: "2026-09-01T10:00:00+08:00", recordedAt: "2026-09-01T12:00:00+08:00", coverage: "UNVISITED" });
+    const a1Completed = event({ id: "a1-completed", unitId: "a1", coverage: "VISITED_NO_FINDING" });
+    const snapshot = splitAbc([parentHistory, a1Completed]);
+    const current = currentVisitableUnits(snapshot, "b1", "f1");
+
+    expect(current.map(unit => unit.id).sort()).toEqual(["a1", "a2", "b", "c"]);
+    expect(getCoverageSummary(snapshot, "b1", "f1")).toMatchObject({ total: 4, recorded: 2, completed: 1, status: "PARTIAL" });
+    expect(stateBreakdown(current.map(unit => unitState(snapshot, "b1", unit.id)))).toEqual({ GREEN: 1, YELLOW: 0, RED: 0, GRAY: 3 });
+    expect(floorState(snapshot, "b1", "f1")).toBe("YELLOW");
+    expect(buildingState(snapshot, "b1")).toBe("YELLOW");
+
+    // The container keeps its history, and A2 still inherits it; only the extra slot goes away.
+    expect(snapshot.observations.map(item => item.id)).toEqual(["a-before-split", "a1-completed"]);
+    expect(latestForUnit(snapshot, "a")?.id).toBe("a-before-split");
+    expect(latestForUnit(snapshot, "a2")?.id).toBe("a-before-split");
+  });
+
+  it("does not let a stale parent colour add a map cell or repaint its floor", () => {
+    const parentHistory = event({ id: "a-old-green", unitId: "a", occurredAt: "2026-09-01T10:00:00+08:00", recordedAt: "2026-09-01T12:00:00+08:00", coverage: "VISITED_NO_FINDING" });
+    const currentAttempts = ["a1", "a2", "b", "c"].map(unitId => event({ id: `${unitId}-current`, unitId, occurredAt: "2026-09-11T10:00:00+08:00", recordedAt: "2026-09-11T12:00:00+08:00", coverage: "ATTEMPTED" }));
+    const snapshot = splitAbc([parentHistory, ...currentAttempts]);
+    const current = currentVisitableUnits(snapshot, "b1", "f1");
+
+    expect(stateBreakdown(current.map(unit => unitState(snapshot, "b1", unit.id)))).toEqual({ GREEN: 0, YELLOW: 0, RED: 4, GRAY: 0 });
+    expect(floorState(snapshot, "b1", "f1")).toBe("RED");
+    expect(buildingState(snapshot, "b1")).toBe("RED");
+    expect(latestForUnit(snapshot, "a")?.id).toBe("a-old-green");
   });
 });
 

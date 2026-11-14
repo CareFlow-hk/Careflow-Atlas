@@ -311,6 +311,21 @@ describe('recording the same result at several units', () => {
   });
 });
 
+describe('local-only save confirmation', () => {
+  it('says the record is on this device and never claims a server confirmation', async () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value), removeItem: (key: string) => values.delete(key) });
+    try {
+      setWorkspaceAccount('account-a', '合成操作員');
+      await useWorkspace.getState().initialize();
+      useWorkspace.getState().importSnapshot(demoSnapshot);
+      expect(useWorkspace.getState()).toMatchObject({ syncMode: 'LOCAL_ONLY', syncStatus: 'LOCAL_ONLY', confirmedRevision: 0, lastSyncedAt: undefined });
+      expect(useWorkspace.getState().localRevision).toBeGreaterThan(0);
+      expect(values.get('careflow-atlas.account.account-a.demo')).toBeTruthy();
+    } finally { setWorkspaceAccount(); vi.unstubAllGlobals(); }
+  });
+});
+
 /*
  * The account端 copy. A signed-in account reads and writes the server's snapshot; a write
  * that never reached it is reported in the banner rather than shown as saved, and a copy
@@ -539,6 +554,77 @@ describe('the workspace the account端 holds', () => {
     expect((server.record!.snapshot as typeof demoSnapshot).people[0].phone).toBe('12345678');
     expect(useWorkspace.getState().pendingConflicts).toHaveLength(0);
     expect(useWorkspace.getState().conflictsOpen).toBe(false);
+  });
+
+  it('marks only the revision the server actually confirmed, not a later save', async () => {
+    const server = serverStub();
+    server.record = { snapshot: demoSnapshot, version: 3 };
+    await start(server);
+    const originalFetch = server.fetch;
+    const releases: (() => void)[] = [];
+    server.fetch = async (url: string, init?: RequestInit) => {
+      if (init?.method === 'PUT') {
+        let release!: () => void;
+        const gate = new Promise<void>(resolve => { release = resolve; });
+        releases.push(release);
+        await gate;
+      }
+      return originalFetch(url, init);
+    };
+    vi.stubGlobal('fetch', server.fetch);
+    const first = structuredClone(demoSnapshot); first.people[0].phone = '11111111';
+    const second = structuredClone(first); second.people[1].phone = '22222222';
+    useWorkspace.getState().importSnapshot(first);
+    await vi.waitFor(() => expect(releases).toHaveLength(1));
+    useWorkspace.getState().importSnapshot(second);
+    releases[0]();
+    // B is already local while A's response has arrived and B's own PUT is still waiting.
+    await vi.waitFor(() => expect(releases).toHaveLength(2));
+    expect(useWorkspace.getState().confirmedRevision).toBeLessThan(useWorkspace.getState().localRevision);
+    expect(useWorkspace.getState().syncStatus).not.toBe('SYNCED');
+    releases[1]();
+    await vi.waitFor(() => expect(useWorkspace.getState().syncStatus).toBe('SYNCED'));
+    expect(useWorkspace.getState().confirmedRevision).toBe(useWorkspace.getState().localRevision);
+    expect((server.record!.snapshot as typeof demoSnapshot).people[1].phone).toBe('22222222');
+  });
+
+  it('does not report clearing the account copy before DELETE succeeds', async () => {
+    const server = serverStub();
+    server.record = { snapshot: demoSnapshot, version: 3 };
+    await start(server);
+    const originalFetch = server.fetch;
+    let release!: () => void;
+    let deleteStarted = false;
+    server.fetch = async (url: string, init?: RequestInit) => {
+      if (init?.method === 'DELETE') {
+        deleteStarted = true;
+        await new Promise<void>(resolve => { release = resolve; });
+      }
+      return originalFetch(url, init);
+    };
+    vi.stubGlobal('fetch', server.fetch);
+    let settled = false;
+    const clearing = useWorkspace.getState().clearWorkspace().then(() => { settled = true; });
+    expect(useWorkspace.getState().snapshot).toBeUndefined();
+    await vi.waitFor(() => expect(deleteStarted).toBe(true));
+    expect(useWorkspace.getState().syncStatus).toBe('SYNCING');
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    release();
+    await clearing;
+    expect(useWorkspace.getState().syncStatus).toBe('SYNCED');
+    expect(useWorkspace.getState().confirmedRevision).toBe(useWorkspace.getState().localRevision);
+  });
+
+  it('keeps a failed account-side clear visible as an error and rejects the operation', async () => {
+    const server = serverStub();
+    server.record = { snapshot: demoSnapshot, version: 3 };
+    await start(server);
+    server.fail(500);
+    await expect(useWorkspace.getState().clearWorkspace()).rejects.toThrow();
+    expect(useWorkspace.getState().snapshot).toBeUndefined();
+    expect(useWorkspace.getState().syncStatus).toBe('ERROR');
+    expect(useWorkspace.getState().storageError).toContain('本機工作區已清空');
   });
 
   it('lets the person close the banner', async () => {

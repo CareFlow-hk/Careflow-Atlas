@@ -69,6 +69,12 @@ export interface ObservationEditorProps {
    * anyone asking for that.
    */
   batch?: { units: number };
+  /** On a phone the same picked set is named inside the sticky context, one removable chip per unit. */
+  selectedUnits?: readonly { id: string; label: string }[];
+  onRemoveUnit?: (unitId: string) => void;
+  /** Sheet keeps the draft alive while the recorder goes back to choose another unit. */
+  variant?: 'dialog' | 'sheet';
+  onChangeContext?: () => void;
   /** This account's self-defined choices. They are managed under 設定 › 高級設定. */
   optionPrefs?: CustomOptions;
   /**
@@ -129,7 +135,7 @@ const seedFields = (defaultCoverage?: CoverageStatus, defaultAssessment?: Housin
  * one — and there is nothing to carry over for a room with no record, so it opens blank.
  * The recorder replaces either with one tap.
  */
-export function ObservationEditor({ open, targetLabel, subjectId, batch, optionPrefs = {}, defaultAssessment, defaultCoverage, onClose, onSubmit }: ObservationEditorProps) {
+export function ObservationEditor({ open, targetLabel, subjectId, batch, selectedUnits, onRemoveUnit, variant = 'dialog', onChangeContext, optionPrefs = {}, defaultAssessment, defaultCoverage, onClose, onSubmit }: ObservationEditorProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
   const [saving, setSaving] = useState(false);
@@ -143,12 +149,12 @@ export function ObservationEditor({ open, targetLabel, subjectId, batch, optionP
 
   useEffect(() => {
     const dialog = dialogRef.current;
-    if (!dialog) return;
+    if (!dialog || variant !== 'dialog') return;
     if (open && !dialog.open) {
       triggerRef.current = document.activeElement as HTMLElement;
       dialog.showModal();
     } else if (!open && dialog.open) dialog.close();
-  }, [open]);
+  }, [open, variant]);
 
   useEffect(() => {
     if (!open) return;
@@ -161,7 +167,7 @@ export function ObservationEditor({ open, targetLabel, subjectId, batch, optionP
     if (saving) return;
     dialogRef.current?.close();
     onClose();
-    requestAnimationFrame(() => triggerRef.current?.focus());
+    if (variant === 'dialog') requestAnimationFrame(() => triggerRef.current?.focus());
   };
 
   /*
@@ -210,10 +216,9 @@ export function ObservationEditor({ open, targetLabel, subjectId, batch, optionP
     } finally { setSaving(false); }
   };
 
-  return (
-    <dialog aria-labelledby="observation-title" ref={dialogRef} className="cf-dialog" onCancel={(event) => { event.preventDefault(); close(); }} onClose={() => { if (open && !saving) onClose(); }}>
-      <form className="cf-editor" onSubmit={submit}>
-        <header className="cf-dialog__header"><div><span className="cf-eyebrow">記錄今次結果</span><h2 id="observation-title">{targetLabel}</h2></div><button type="button" className="cf-icon-button" onClick={close} aria-label="關閉"><X /></button></header>
+  const form = (
+      <form className={`cf-editor${variant === 'sheet' ? ' cf-editor--sheet' : ''}`} onSubmit={submit}>
+        <header className={`cf-dialog__header${variant === 'sheet' ? ' cf-editor__context' : ''}`}><div><span className="cf-eyebrow">記錄今次結果</span><div className="cf-editor__target"><h2 id="observation-title">{targetLabel}</h2>{variant === 'sheet' && onChangeContext && <button type="button" className="cf-editor__change" onClick={onChangeContext}>更改</button>}</div>{variant === 'sheet' && selectedUnits && <ul className="cf-editor__selected" aria-label="本次已選單位">{selectedUnits.map(unit => <li key={unit.id}><span>{unit.label}</span>{onRemoveUnit && <button type="button" aria-label={`取消本次 ${unit.label}`} onClick={() => onRemoveUnit(unit.id)}><X size={14} /></button>}</li>)}</ul>}</div><button type="button" className="cf-icon-button" onClick={close} aria-label="關閉"><X /></button></header>
         {/* One batch writes the same result to every picked unit; the follow-up blocks are gone
             because a follow-up is one place needing one thing done. */}
         {batch ? <p className="cf-editor__batch">會為已選的 {batch.units} 個單位各寫入一筆相同的記錄。</p> : null}
@@ -266,6 +271,7 @@ export function ObservationEditor({ open, targetLabel, subjectId, batch, optionP
         {error && <p role="alert" className="cf-error"><AlertCircle size={17} />{error}</p>}
         <footer className="cf-dialog__footer"><span>儲存後舊記錄仍會保留。</span><div><button type="button" className="cf-button cf-button--ghost" onClick={close}>取消</button><button className="cf-button cf-button--primary" disabled={saving}><Save size={17} />{saving ? "儲存中…" : "儲存記錄"}</button></div></footer>
       </form>
-    </dialog>
   );
+  if (variant === 'sheet') return <section className="cf-observation-sheet" aria-labelledby="observation-title">{form}</section>;
+  return <dialog aria-labelledby="observation-title" ref={dialogRef} className="cf-dialog" onCancel={(event) => { event.preventDefault(); close(); }} onClose={() => { if (open && !saving) onClose(); }}>{form}</dialog>;
 }

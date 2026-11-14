@@ -1,0 +1,118 @@
+/* Phone field workspace: the map stays mounted while one bottom sheet owns navigation. */
+@media (max-width: 760px) {
+  html, body, #root { height: 100%; overflow: hidden; }
+  .app-shell { height: 100dvh; min-height: 0; overflow: hidden; }
+  .app-header { height: 76px; min-height: 76px; padding: 6px 12px; display: flex; flex-wrap: wrap; align-content: center; gap: 2px 4px; }
+  .app-header .brand { order: 1; flex: 1; min-width: 120px; }
+  .app-header .demo-badge { order: 6; flex: 1 0 100%; width: auto; margin: 0; padding: 0; border: 0; background: transparent; font-size: 11px; }
+  .app-header .help-button { order: 2; margin: 0; min-width: 40px; min-height: 40px; }
+  .app-header .account-menu { order: 3; }
+  .app-header .photo-entry { order: 4; width: 40px; min-height: 40px; padding: 0; font-size: 0; }
+  .app-header .account-menu > summary { min-height: 40px; padding: 4px; }
+  .app-header__place { display: none; }
+
+  .workspace, .workspace.has-selection { position: relative; display: block; flex: 1; min-height: 0; height: auto; overflow: hidden; }
+  .spatial-workspace, .has-selection .spatial-workspace { position: absolute; inset: 0; height: auto; min-height: 0; display: flex; flex-direction: column; }
+  .map-topbar { height: 44px; flex: 0 0 44px; padding-inline: 12px; }
+  .spatial-content { position: relative; flex: 1; min-height: 0; }
+  .map-scene { height: 100%; min-height: 0; }
+  .map-scene .map-tools { max-height: calc(100% - 96px); overflow-y: auto; }
+  .map-scene .building-map-marker.is-search-match { border-color: #126455; box-shadow: 0 0 0 3px #ffffff, 0 0 0 5px #126455, 0 5px 18px #29453938; z-index: 3; }
+  .map-scene .map-legend { bottom: 78px; }
+
+  .cf-mobile-sheet { position: absolute; z-index: 8; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; height: 52dvh; max-height: calc(100% - 8px); overflow: hidden; background: #fff; border: 1px solid #dce6df; border-bottom: 0; border-radius: var(--radius-md); box-shadow: 0 -8px 32px #173b241f; transition: height 240ms var(--ease-out, ease-out); }
+  .cf-mobile-sheet.is-collapsed { height: calc(64px + env(safe-area-inset-bottom)); }
+  .cf-mobile-sheet.is-half { height: min(52dvh, calc(100% - 44px)); }
+  .cf-mobile-sheet.is-expanded { height: 92%; }
+  .cf-mobile-sheet.is-dragging { transition: none; min-height: 64px; }
+  .cf-mobile-sheet.is-dragging.is-collapsed { height: calc(64px + env(safe-area-inset-bottom) - var(--sheet-drag-y)); }
+  .cf-mobile-sheet.is-dragging.is-half { height: calc(52dvh - var(--sheet-drag-y)); }
+  .cf-mobile-sheet.is-dragging.is-expanded { height: calc(92% - var(--sheet-drag-y)); }
+  .cf-mobile-sheet__handle { flex: 0 0 64px; min-height: 64px; padding: 6px 14px 8px; border: 0; border-bottom: 1px solid #edf1ee; background: #fff; color: var(--ink); display: grid; grid-template-columns: 1fr 28px; grid-template-rows: 12px 1fr; align-items: center; text-align: left; touch-action: none; user-select: none; cursor: grab; }
+  .cf-mobile-sheet__handle:active { cursor: grabbing; }
+  .cf-mobile-sheet__grip { grid-column: 1 / -1; justify-self: center; width: 42px; height: 5px; border-radius: var(--radius-sm); background: #c8d3cc; }
+  .cf-mobile-sheet__title { grid-column: 1; grid-row: 2; display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+  .cf-mobile-sheet__title strong { font-size: 15px; }
+  .cf-mobile-sheet__title small { color: #6d8175; font-size: 11px; white-space: nowrap; }
+  .cf-mobile-sheet__handle > svg { grid-column: 2; grid-row: 2; justify-self: end; color: var(--teal); }
+  .cf-mobile-sheet__panes { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+  .cf-mobile-sheet__pane { position: absolute; inset: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; touch-action: pan-y; }
+  .cf-mobile-sheet__pane--editor { overflow: hidden; }
+  .cf-mobile-sheet.is-collapsed .cf-mobile-sheet__panes { pointer-events: none; }
+  .cf-mobile-sheet__notice { flex: none; padding: 7px 10px 0; background: #fff; }
+  .cf-mobile-sheet__notice .toast { position: static; transform: none; width: 100%; max-width: none; padding: 9px 12px; font-size: 12px; line-height: 1.45; animation: none; }
+
+  .cf-mobile-sheet .district-sidebar { height: auto; min-height: 100%; border: 0; display: block; }
+  .cf-mobile-sheet .finder-bar, .cf-mobile-sheet .sidebar-heading { display: none; }
+  .cf-mobile-sheet .finder-body { display: block !important; }
+  .cf-mobile-sheet .workspace-tabs { padding-inline: 12px; }
+  .cf-mobile-sheet .workspace-tabs button { min-height: 44px; }
+  .cf-mobile-sheet .building-search { margin: 12px 14px 0; min-height: 46px; }
+  .cf-mobile-sheet .building-search input { font-size: 16px; }
+  .cf-mobile-sheet .search-clear { min-width: 40px; min-height: 40px; }
+  .cf-mobile-sheet .list-heading { margin: 14px 18px 8px; }
+  .cf-mobile-sheet .building-list { overflow: visible; padding: 0 10px 24px; }
+  .cf-mobile-sheet .building-row { min-height: 88px; }
+  .cf-mobile-sheet .sidebar-footer { padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+  .cf-mobile-sheet .sidebar-footer button { min-height: 44px; }
+
+  .cf-mobile-sheet .cf-building-panel { height: auto; max-height: none; overflow: visible; border: 0; animation: none; }
+  .cf-mobile-sheet .cf-plate__head { padding: 12px 14px 10px; flex-wrap: wrap; }
+  .cf-mobile-sheet .cf-building-content { overflow: visible; padding: 0 16px 18px; }
+  .cf-mobile-sheet .cf-plate__head .cf-plate__title h2 { font-size: 21px; }
+  .cf-mobile-sheet .cf-plate__head .cf-icon-button { min-width: 40px; min-height: 40px; }
+  .cf-mobile-sheet .cf-multiselect-toggle { min-height: 44px; }
+  .cf-mobile-sheet .cf-record-action, .cf-mobile-sheet .cf-pick { position: sticky; bottom: 0; padding: 10px 12px max(12px, env(safe-area-inset-bottom)); }
+  .cf-mobile-sheet .cf-pick__head { align-items: flex-start; }
+  .cf-mobile-sheet .cf-pick__units { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; padding: 0; list-style: none; }
+  .cf-mobile-sheet .cf-pick__units li { display: inline-flex; align-items: center; gap: 3px; max-width: 100%; min-height: 36px; padding-left: 10px; border: 1px solid #bcd4c6; border-radius: var(--radius-md); background: #f1f7f3; color: #245644; font-size: 12px; }
+  .cf-mobile-sheet .cf-pick__units li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cf-mobile-sheet .cf-pick__units button { width: 36px; height: 36px; padding: 0; border: 0; background: transparent; color: #315e4d; display: grid; place-items: center; }
+  .cf-mobile-sheet .cf-pick__acts button { min-height: 44px; }
+
+  .cf-observation-sheet, .cf-editor--sheet { height: 100%; min-height: 0; }
+  .cf-editor--sheet { overflow-y: auto; overscroll-behavior: contain; padding: 0 16px; }
+  .cf-editor--sheet .cf-editor__context { position: sticky; top: 0; z-index: 4; margin: 0 -16px; padding: 12px 16px 10px; background: #fffffff7; backdrop-filter: blur(12px); border-bottom: 1px solid #e2eae5; }
+  .cf-editor--sheet .cf-editor__context > div { min-width: 0; }
+  .cf-editor--sheet .cf-editor__target { display: flex; align-items: center; gap: 8px; }
+  .cf-editor--sheet .cf-editor__target h2 { margin: 3px 0 0; min-width: 0; font-size: 17px; line-height: 1.35; }
+  .cf-editor--sheet .cf-editor__change { flex: none; min-width: 52px; min-height: 40px; border: 1px solid #bdd2c5; border-radius: var(--radius-sm); background: #f2f7f4; color: var(--teal); }
+  .cf-editor--sheet .cf-editor__context .cf-icon-button { min-width: 40px; min-height: 40px; }
+  .cf-editor__selected { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; padding: 0; list-style: none; }
+  .cf-editor__selected li { display: inline-flex; align-items: center; max-width: 100%; min-height: 34px; padding-left: 9px; border: 1px solid #bfd4c7; border-radius: var(--radius-md); background: #f0f6f2; color: #285543; font-size: 12px; }
+  .cf-editor__selected li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cf-editor__selected button { width: 34px; height: 34px; border: 0; background: transparent; color: #315e4d; display: grid; place-items: center; }
+  .cf-editor--sheet .cf-editor__batch { margin: 10px 0; font-size: 12px; }
+  .cf-editor--sheet .cf-dialog__footer { position: sticky; bottom: 0; z-index: 4; margin: 16px -16px 0; padding: 10px 16px max(12px, env(safe-area-inset-bottom)); background: #fffffff7; backdrop-filter: blur(12px); border-top: 1px solid #dfe8e2; }
+  .cf-editor--sheet .cf-dialog__footer > span { font-size: 11px; }
+  .cf-editor--sheet .cf-dialog__footer .cf-button { min-height: 44px; }
+
+  /* Add/reselect stays above the sheet and scrolls inside the map at 360px. */
+  .fp-editor-dock { z-index: 12; left: 8px !important; right: 8px !important; bottom: max(8px, env(safe-area-inset-bottom)); max-height: calc(100% - 56px); overflow-y: auto; overscroll-behavior: contain; }
+  .fp-editor { width: 100%; max-height: none; padding: 12px; }
+  .add-building__close { width: 44px; height: 44px; }
+  .add-building__search { align-items: stretch; flex-wrap: wrap; }
+  .add-building__search label { flex-basis: 100%; }
+  .add-building__search input, .add-building__grid input { min-height: 44px; font-size: 16px; }
+  .add-building__search button, .add-building__shape-head button, .fp-editor__actions button { min-height: 44px; }
+  .add-building__results { max-height: 150px; }
+  .add-building__results button { min-height: 52px; }
+  .add-building__suggest { min-height: 44px; flex-wrap: wrap; }
+  .add-building__suggest small { margin-left: 0; flex-basis: 100%; }
+
+  .storage-banner { bottom: 12px; z-index: 20; }
+  .help-popover { position: fixed; top: 72px; right: 12px; left: 12px; width: auto; max-height: calc(100dvh - 88px); overflow-y: auto; }
+}
+
+@media (max-width: 380px) {
+  .app-header { padding-inline: 8px; }
+  .app-header .brand strong span { display: none; }
+  .cf-mobile-sheet__title small { font-size: 10px; }
+  .cf-editor--sheet .cf-dialog__footer > span { display: none; }
+  .cf-editor--sheet .cf-dialog__footer > div { width: 100%; }
+  .cf-editor--sheet .cf-dialog__footer .cf-button { flex: 1; }
+}
+
+@media (max-width: 760px) and (prefers-reduced-motion: reduce) {
+  .cf-mobile-sheet, .cf-mobile-sheet__handle > svg { transition: none; }
+}

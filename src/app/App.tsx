@@ -8,9 +8,12 @@ import { PhotoIntake } from '../photos/PhotoIntake';
 import { Camera } from 'lucide-react';
 import { registerWorkspaceTools } from './webmcp';
 import { createRecordId } from './recordId';
-import { OUTREACH_STATES, buildingState, canWithdrawObservation, floorState, getCoverageSummary, isTagged, stateBreakdown, unitState, type Observation, type OutreachSnapshot } from '../domain/types';
+import { OUTREACH_STATES, buildingState, canWithdrawObservation, currentVisitableUnits, floorState, getCoverageSummary, isTagged, stateBreakdown, unitState, type Observation, type OutreachSnapshot } from '../domain/types';
 import type { MapBuilding } from '../map/mapModel';
 import { BuildingCard } from '../components/BuildingCard';
+import { MobileSheet } from '../components/MobileSheet';
+import type { MobileSheetSnap } from '../components/mobileSheetState';
+import { filterBuildings } from '../domain/buildingSearch';
 import { BuildingDetail } from '../components/BuildingDetail';
 import { ObservationEditor, type ObservationDraft } from '../components/ObservationEditor';
 import { ImportDialog, type ImportReview } from '../components/ImportDialog';
@@ -30,6 +33,7 @@ import '../components/workflow.css';
 import '../styles.css';
 import '../refinement.css';
 import '../layout.css';
+import '../mobile.css';
 
 const MapScene = lazy(() => import('../map/MapScene'));
 /*
@@ -44,6 +48,8 @@ interface EditTarget {
   eventIds: string[];
   /** The picked units, when one result is being recorded at several of them at once. */
   unitIds?: string[];
+  onRemoveUnit?: (unitId: string) => void;
+  onComplete?: () => void;
 }
 
 /**
@@ -110,7 +116,8 @@ export default function App() {
   const [filter, setFilter] = useState<'ALL' | 'FOLLOWUP'>('ALL');
   const [toast, setToast] = useState('');
   const [helpOpen, setHelpOpen] = useState(false);
-  // Desktop floats the finder and the building panel over the map; phones stack them.
+  const [sheetSnap, setSheetSnap] = useState<MobileSheetSnap>('collapsed');
+  // Desktop floats independent cards; the phone keeps one three-stop map companion.
   const [floating, setFloating] = useState(() => typeof matchMedia === 'function' && matchMedia('(min-width: 761px)').matches);
   useEffect(() => {
     if (typeof matchMedia !== 'function') return;
@@ -119,10 +126,13 @@ export default function App() {
     query.addEventListener('change', change);
     return () => query.removeEventListener('change', change);
   }, []);
-  // Open while there is nothing to show; once data arrives the map comes first.
+  // The desktop finder closes once data arrives; a phone owns its drawer position instead.
   const [finderOpen, setFinderOpen] = useState(true);
   const hasSnapshot = Boolean(snapshot);
-  useEffect(() => { setFinderOpen(!hasSnapshot); }, [hasSnapshot]);
+  useEffect(() => { if (floating) setFinderOpen(!hasSnapshot); }, [hasSnapshot, floating]);
+  useEffect(() => {
+    if (!floating && selectedBuildingId && !editTarget) setSheetSnap('half');
+  }, [floating, selectedBuildingId, editTarget]);
   // Task questions are answered on this device, not on a server: the tasks are encrypted
   // there and never reach it in the clear. An employee is shown their own tasks only; an
   // administrator sees every open task. The same `today` is what the answer names, and it
@@ -136,6 +146,7 @@ export default function App() {
     if (task.unitId) workspace.selectUnit(task.unitId);
     else if (task.floorId) workspace.selectFloor(task.floorId);
     setFinderOpen(false);
+    setSheetSnap('half');
     setAiOpen(false);
   };
   /** What the floating cards cover, so the camera centres a building in the visible map.
@@ -173,7 +184,7 @@ export default function App() {
         return {
           id: floor.id, label: floor.label, level: floor.level, state: floorState(snapshot, building.id, floor.id),
           hasFollowUp: scoped.followUps > 0, recorded: scoped.recorded, total: scoped.total ?? 0,
-          breakdown: stateBreakdown(snapshot.units.filter(unit => unit.floorId === floor.id).map(unit => unitState(snapshot, building.id, unit.id))),
+          breakdown: stateBreakdown(currentVisitableUnits(snapshot, building.id, floor.id).map(unit => unitState(snapshot, building.id, unit.id))),
           tagged: features.nodeTags && isTagged(snapshot, { buildingId: building.id, floorId: floor.id }),
         };
       }),
@@ -182,7 +193,11 @@ export default function App() {
 
   const overlaps = useMemo(() => buildingOverlapGroups(mapBuildings), [mapBuildings]);
 
-  const buildings = snapshot?.buildings.filter(building => `${building.name} ${building.address}`.includes(query) && (filter === 'ALL' || getCoverageSummary(snapshot, building.id).followUps > 0)) ?? [];
+  const buildings = filterBuildings(snapshot?.buildings ?? [], query)
+    .filter(building => filter === 'ALL' || getCoverageSummary(snapshot!, building.id).followUps > 0);
+  // The list and the map consume this same result; searching never calls the address service.
+  const visibleBuildingIds = new Set(buildings.map(building => building.id));
+  const visibleMapBuildings = mapBuildings.filter(building => visibleBuildingIds.has(building.id));
   // Counts buildings, the same unit the filtered list shows ("13 幢"), not tasks.
   const followupCount = snapshot?.buildings.filter(b => getCoverageSummary(snapshot, b.id).followUps > 0).length ?? 0;
   const hasDistrictDemo = snapshot?.buildings.some(building => building.id === 'district-16');
@@ -287,21 +302,28 @@ export default function App() {
      * and the whole set is written in one step: the units that cannot be confirmed free of
      * 劏房 are counted and left out rather than silently dropped.
      */
+    const storageNote = workspace.syncMode === 'SHARED'
+      ? ' 已儲存在這部裝置，等待伺服器確認同步。'
+      : ' 已存在這台設備，同事暫時看不到。';
     if (editTarget.unitIds?.length) {
       const inputs = editTarget.unitIds.map((unitId, index) => ({
         ...common, id: editTarget.eventIds[index],
         floorId: snapshot?.units.find(unit => unit.id === unitId)?.floorId, unitId,
       }));
       const result = workspace.recordBatch(inputs, Boolean(draft.confirmNoSubdivision));
+      editTarget.onComplete?.();
       setEditTarget(undefined);
+      if (!floating) setSheetSnap('half');
       setToast(result.skipped
         ? `已為 ${result.saved} 個單位各寫入一筆記錄；${result.skipped} 個已分拆的單位不能確認無劏房，未有改動。`
-        : `已為 ${result.saved} 個單位各寫入一筆記錄${result.confirmed ? `，並確認其中 ${result.confirmed} 個無劏房` : ''}。`);
+        : `已為 ${result.saved} 個單位各寫入一筆記錄${result.confirmed ? `，並確認其中 ${result.confirmed} 個無劏房` : ''}。${storageNote}`);
       return;
     }
     workspace.saveObservation({ ...common, id: editTarget.eventIds[0], floorId: editTarget.floorId, unitId: editTarget.unitId });
+    editTarget.onComplete?.();
     setEditTarget(undefined);
-    setToast('已追加本次記錄，之前的觀察仍保留在時間線。');
+    if (!floating) setSheetSnap('half');
+    setToast(`已追加本次記錄，之前的觀察仍保留在時間線。${storageNote}`);
   };
   /*
    * Withdrawing one record. The store enforces the same rule the server does, so a member
@@ -313,10 +335,13 @@ export default function App() {
   };
   const canWithdraw = (observation: Observation) => Boolean(workspace.operator) && canWithdrawObservation(observation, workspace.operator!, may.mayWithdrawAnyRecord);
   /* A batch carries one id per picked unit, so every record it writes is its own record. */
-  const startObservation = (target: Omit<EditTarget, 'eventIds' | 'visitId'>) => setEditTarget({
-    ...target, visitId: activeVisitId,
-    eventIds: Array.from({ length: target.unitIds?.length || 1 }, () => createRecordId()),
-  });
+  const startObservation = (target: Omit<EditTarget, 'eventIds' | 'visitId'>) => {
+    setEditTarget({
+      ...target, visitId: activeVisitId,
+      eventIds: Array.from({ length: target.unitIds?.length || 1 }, () => createRecordId()),
+    });
+    if (!floating) setSheetSnap('expanded');
+  };
   /*
    * What an entry form opens with for the place it is about. A 劏房 room is answered for and
    * follows the last record that speaks for it; an ordinary unit opens unanswered. The rule
@@ -324,6 +349,29 @@ export default function App() {
    */
   const editUnit = editTarget && snapshot ? snapshot.units.find(unit => unit.id === editTarget.unitId) : undefined;
   const editDefaults = snapshot ? roomFormDefaults(snapshot, editUnit) : {};
+  const removeBatchUnit = (unitId: string) => {
+    if (!editTarget?.unitIds) return;
+    const index = editTarget.unitIds.indexOf(unitId);
+    if (index < 0) return;
+    editTarget.onRemoveUnit?.(unitId);
+    const unitIds = editTarget.unitIds.filter(id => id !== unitId);
+    const eventIds = editTarget.eventIds.filter((_, eventIndex) => eventIndex !== index);
+    if (!unitIds.length) { setEditTarget(undefined); if (!floating) setSheetSnap('half'); return; }
+    if (unitIds.length === 1 && snapshot) {
+      const unit = snapshot.units.find(item => item.id === unitIds[0]);
+      const building = snapshot.buildings.find(item => item.id === editTarget.buildingId);
+      if (unit) {
+        setEditTarget({ ...editTarget, unitIds: undefined, unitId: unit.id, floorId: unit.floorId, label: `${building?.name ?? editTarget.buildingId} · ${unit.label}`, eventIds });
+        return;
+      }
+    }
+    setEditTarget({ ...editTarget, unitIds, eventIds });
+  };
+  const editorUnits = editTarget?.unitIds?.map(id => ({ id, label: snapshot?.units.find(unit => unit.id === id)?.label ?? id }));
+  const editorTargetLabel = editTarget?.unitIds && snapshot
+    ? `${snapshot.buildings.find(building => building.id === editTarget.buildingId)?.name ?? editTarget.label} · 已選 ${editTarget.unitIds.length} 個單位`
+    : editTarget?.label;
+  const closeEditor = () => { setEditTarget(undefined); if (!floating) setSheetSnap('half'); };
   const exportBlank = async () => {
     try {
       const [{ exportWorkflowWorkbook }, { blankSnapshot }] = await Promise.all([import('../data/workflowWorkbook'), import('../data/blankSnapshot')]);
@@ -353,11 +401,50 @@ export default function App() {
     else setImportError('Excel 匯出失敗，請重試。');
   };
 
+  const finder = <aside className={`district-sidebar ${hasDistrictDemo ? 'is-expanded-demo' : ''} ${finderOpen ? 'is-open' : ''}`} aria-label="外展大廈清單">
+    <button type="button" className="finder-bar" aria-expanded={floating ? finderOpen : sheetSnap !== 'collapsed'} aria-controls="finder-body" onClick={() => floating ? setFinderOpen(!finderOpen) : setSheetSnap(sheetSnap === 'collapsed' ? 'half' : 'collapsed')}>
+      <MapPin size={16} /><strong>西營盤</strong>
+      <span>{snapshot ? `${snapshot.buildings.length} 幢 · ${followupCount} 幢待跟進${overlaps.groups.length ? ` · ${overlaps.groups.length} 組可能重複` : ''}` : '未載入資料'}</span>
+      <ChevronDown size={16} className="finder-bar__chevron" />
+    </button>
+    <div className="finder-body" id="finder-body">
+      <div className={`sidebar-heading ${snapshot ? "has-records" : ""}`}><span className="eyebrow">FIELD OUTREACH</span><h1>{snapshot ? "街區外展" : <>每一次到訪，<br /><span>都有跡可循。</span></>}</h1><p>西營盤社區客廳 · 洗樓示範</p></div>
+      {snapshot && <div className="workspace-tabs" data-filter={filter}><button aria-pressed={filter === 'ALL'} className={filter === 'ALL' ? 'active' : ''} onClick={() => setFilter('ALL')}><Building2 size={16} />大廈<span>{snapshot?.buildings.length ?? '—'}</span></button><button aria-pressed={filter === 'FOLLOWUP'} className={filter === 'FOLLOWUP' ? 'active' : ''} onClick={() => setFilter('FOLLOWUP')}><RotateCcw size={15} />待跟進<span>{followupCount}</span></button></div>}
+      {snapshot ? <>
+        <label className="building-search"><Search size={17} /><input ref={searchRef} type="search" onKeyDown={event => { if (event.key === 'Escape') setQuery(''); }} aria-label="搜尋大廈或地址" placeholder="搜尋大廈或地址" value={query} onChange={e => setQuery(e.target.value)} /><button type="button" className="search-clear" aria-label="清除搜尋" disabled={!query} onClick={() => { setQuery(''); searchRef.current?.focus(); }}><X size={15} /></button></label>
+        <div className="list-heading"><span className="cf-caps">Index · {filter === 'FOLLOWUP' ? '需要繼續跟進' : '街區大廈'}</span><span>{buildings.length} 幢</span></div>
+        <div className="building-list">{buildings.map((building, index) => {
+          const summary = getCoverageSummary(snapshot, building.id);
+          const state = buildingState(snapshot, building.id);
+          const selected = selectedBuildingId === building.id;
+          return <BuildingCard possibleDuplicate={overlaps.peers.has(building.id)} key={building.id} name={building.name} address={building.address} floorCount={building.floorCount} index={index} state={state} summary={summary} selected={selected} onSelect={() => { workspace.selectBuilding(building.id); setFinderOpen(false); setSheetSnap('half'); }} />;
+        })}{!buildings.length && <div className="list-empty"><Search size={24} /><p>{query ? '找不到相符的大廈' : '暫無待跟進大廈'}</p><button onClick={() => { setQuery(''); setFilter('ALL'); }}>查看所有大廈</button></div>}</div>
+      </> : workspace.loading
+        ? <div className="start-import" role="status"><span className="import-file-icon"><FileSpreadsheet size={30} strokeWidth={1.4} /></span><h2>正在讀取帳號端的資料…</h2><p>稍候片刻。若長時間沒有回應，請檢查網絡後重新整理。</p></div>
+        : <div className="start-import"><span className="import-file-icon"><FileSpreadsheet size={30} strokeWidth={1.4} /></span><h2>開始使用</h2><p>載入一個虛構街區試用：20 幢大廈、多次探訪和待跟進事項。也可以下載空白範本，填上你們自己的大廈再匯入。</p><button className="primary-button" disabled={importLoading} onClick={() => void loadDemo()}><Upload size={16} />{importLoading ? '載入中…' : '載入示範資料'}<ChevronRight size={16} /></button><button className="start-import__secondary" onClick={openImport}><FileSpreadsheet size={16} />匯入自己的 Excel／下載空白範本</button></div>}
+      {snapshot && <div className="sidebar-footer"><button onClick={openImport}><FileSpreadsheet size={16} />紙本與 Excel</button></div>}
+    </div>
+  </aside>;
+  const detail = snapshot && selectedBuildingId ? <BuildingDetail overlapPeers={overlaps.peers.get(selectedBuildingId)} onSelectBuilding={id => { workspace.selectBuilding(id); setSheetSnap('half'); }} snapshot={snapshot} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} selectedUnitId={selectedUnitId} onBack={() => { workspace.selectBuilding(); setSheetSnap('half'); }} onSelectFloor={workspace.selectFloor} onSelectUnit={workspace.selectUnit} onToggleTag={workspace.setTag} onFollowUpAction={workspace.actOnFollowUp} onStartObservation={startObservation} onStructureChange={features.structureEditing ? change => { const result = workspace.changeStructure(change); if ('error' in result) return result.error; setToast(result.message); return undefined; } : undefined} onBackup={downloadWorkbook} onWithdrawObservation={withdrawObservation} canWithdraw={canWithdraw} canDeleteStructure={may.mayRemoveStructure} /> : undefined;
+  const observationEditor = editTarget && editorTargetLabel ? <ObservationEditor open variant={floating ? 'dialog' : 'sheet'} targetLabel={editorTargetLabel} subjectId={editTarget.unitIds ? undefined : editTarget.unitId ?? editTarget.buildingId} subjectType={editTarget.unitId ? 'UNIT' : 'BUILDING'} batch={editTarget.unitIds ? { units: editTarget.unitIds.length } : undefined} selectedUnits={editorUnits} onRemoveUnit={editTarget.unitIds ? removeBatchUnit : undefined} onChangeContext={() => setSheetSnap('half')} optionPrefs={workspace.optionPrefs} defaultCoverage={editDefaults.coverage} defaultAssessment={editDefaults.assessment} onClose={closeEditor} onSubmit={saveObservation} /> : undefined;
+  const toastNotice = toast ? <div className="toast" key={toast} role="status"><Check size={17} /><span>{toast}</span><button aria-label="關閉提示" onClick={() => setToast('')}><X size={16} /></button></div> : undefined;
+  const syncLabel = workspace.syncMode === 'LOCAL_ONLY' ? '只存在這部裝置'
+    : workspace.syncStatus === 'SYNCED' ? '已同步'
+      : workspace.syncStatus === 'SYNCING' ? '同步中'
+        : workspace.syncStatus === 'ERROR' ? '同步未完成' : '等待同步';
+  const syncTitle = workspace.syncMode === 'LOCAL_ONLY'
+    ? '資料已存在這台設備，同事暫時看不到。開啟同步、設定機構密語並解鎖後才會共享。'
+    : workspace.syncStatus === 'SYNCED'
+      ? `伺服器已確認目前這份資料${workspace.lastSyncedAt ? `（${new Date(workspace.lastSyncedAt).toLocaleTimeString('zh-HK', { hour: '2-digit', minute: '2-digit' })}）` : ''}；其他裝置可在下次拉取後看到。`
+      : workspace.syncStatus === 'ERROR'
+        ? '本機副本仍然保留，但伺服器未確認目前改動；請查看錯誤提示並重試。'
+        : '改動已儲存在這部裝置，正在等待伺服器確認；尚未確認前不能當作其他裝置可見。';
+
   return <div className="app-shell">
     <header className="app-header">
       <a className="brand" href="#" onClick={e => { e.preventDefault(); workspace.selectBuilding(); }} aria-label="CareFlow 街區總覽"><span className="brand-symbol"><Footprints size={21} strokeWidth={1.8} /></span><strong>CareFlow<span>Atlas</span></strong></a>
       <span className="cf-caps app-header__place">西營盤 · Sai Ying Pun · 外展工作台</span>
-      <span className="demo-badge"><span />示範資料{account && <b className={`sync-place is-${account.workspace}`} title={account.workspace === 'shared' ? '同一機構的同事會看到這裡的改動（約半分鐘內）；住戶資料加密後才存到伺服器。' : '這裡的改動只存在這部裝置，同事看不到。管理員開啟「跨裝置同步」並解鎖後才會共享。'}>{account.workspace === 'shared' ? '· 跨裝置同步' : '· 只存在這部裝置'}</b>}</span>
+      <span className="demo-badge"><span />示範資料{account && <b className={`sync-place is-${workspace.syncStatus.toLowerCase()}`} title={syncTitle}>· {syncLabel}</b>}</span>
       <button ref={helpButtonRef} className="help-button icon-button" aria-label="示範說明" aria-expanded={helpOpen} aria-controls="demo-help" onClick={() => setHelpOpen(!helpOpen)}><CircleHelp size={19} /></button>
       <AccountMenu />
       {snapshot && photoIntake && <button className="photo-entry" onClick={() => setPhotoOpen(true)}><Camera size={16} />照片回錄</button>}
@@ -367,42 +454,14 @@ export default function App() {
       {snapshot && aiAssistant && <button className="photo-entry" onClick={() => setAiOpen(true)} title="AI 助手與任務提醒"><Sparkles size={16} />助手</button>}
     </header>
     <main className={`workspace ${selectedBuildingId ? 'has-selection' : ''}`}>
-      {/* On desktop the finder floats over the map: a one-line bar, opened when needed to
-          locate a building and closed again once one is chosen. Phones keep the stacked list. */}
-      <aside className={`district-sidebar ${hasDistrictDemo ? 'is-expanded-demo' : ''} ${finderOpen ? 'is-open' : ''}`} aria-label="外展大廈清單">
-        <button type="button" className="finder-bar" aria-expanded={finderOpen} aria-controls="finder-body" onClick={() => setFinderOpen(!finderOpen)}>
-          <MapPin size={16} /><strong>西營盤</strong>
-          <span>{snapshot ? `${snapshot.buildings.length} 幢 · ${followupCount} 幢待跟進${overlaps.groups.length ? ` · ${overlaps.groups.length} 組可能重複` : ''}` : '未載入資料'}</span>
-          <ChevronDown size={16} className="finder-bar__chevron" />
-        </button>
-        <div className="finder-body" id="finder-body">
-        <div className={`sidebar-heading ${snapshot ? "has-records" : ""}`}><span className="eyebrow">FIELD OUTREACH</span><h1>{snapshot ? "街區外展" : <>每一次到訪，<br /><span>都有跡可循。</span></>}</h1><p>西營盤社區客廳 · 洗樓示範</p></div>
-        {snapshot && <div className="workspace-tabs" data-filter={filter}><button aria-pressed={filter === 'ALL'} className={filter === 'ALL' ? 'active' : ''} onClick={() => setFilter('ALL')}><Building2 size={16} />大廈<span>{snapshot?.buildings.length ?? '—'}</span></button><button aria-pressed={filter === 'FOLLOWUP'} className={filter === 'FOLLOWUP' ? 'active' : ''} onClick={() => setFilter('FOLLOWUP')}><RotateCcw size={15} />待跟進<span>{followupCount}</span></button></div>}
-        {snapshot ? <>
-          <label className="building-search"><Search size={17} /><input ref={searchRef} type="search" onKeyDown={event => { if (event.key === 'Escape') setQuery(''); }} aria-label="搜尋大廈或地址" placeholder="搜尋大廈或地址" value={query} onChange={e => setQuery(e.target.value)} /><button type="button" className="search-clear" aria-label="清除搜尋" disabled={!query} onClick={() => { setQuery(''); searchRef.current?.focus(); }}><X size={15} /></button></label>
-          <div className="list-heading"><span className="cf-caps">Index · {filter === 'FOLLOWUP' ? '需要繼續跟進' : '街區大廈'}</span><span>{buildings.length} 幢</span></div>
-          <div className="building-list">{buildings.map((building, index) => {
-            const summary = getCoverageSummary(snapshot, building.id);
-            const state = buildingState(snapshot, building.id);
-            const selected = selectedBuildingId === building.id;
-            return <BuildingCard possibleDuplicate={overlaps.peers.has(building.id)} key={building.id} name={building.name} address={building.address} floorCount={building.floorCount} index={index} state={state} summary={summary} selected={selected} onSelect={() => { workspace.selectBuilding(building.id); setFinderOpen(false); }} />;
-          })}{!buildings.length && <div className="list-empty"><Search size={24} /><p>{query ? '找不到相符的大廈' : '暫無待跟進大廈'}</p><button onClick={() => { setQuery(''); setFilter('ALL'); }}>查看所有大廈</button></div>}</div>
-        </> : workspace.loading
-          // The account端 copy has not arrived yet; offering "load demo" here would invite a merge into it.
-          ? <div className="start-import" role="status"><span className="import-file-icon"><FileSpreadsheet size={30} strokeWidth={1.4} /></span><h2>正在讀取帳號端的資料…</h2><p>稍候片刻。若長時間沒有回應，請檢查網絡後重新整理。</p></div>
-          : <div className="start-import"><span className="import-file-icon"><FileSpreadsheet size={30} strokeWidth={1.4} /></span><h2>開始使用</h2><p>載入一個虛構街區試用：20 幢大廈、多次探訪和待跟進事項。也可以下載空白範本，填上你們自己的大廈再匯入。</p><button className="primary-button" disabled={importLoading} onClick={() => void loadDemo()}><Upload size={16} />{importLoading ? '載入中…' : '載入示範資料'}<ChevronRight size={16} /></button><button className="start-import__secondary" onClick={openImport}><FileSpreadsheet size={16} />匯入自己的 Excel／下載空白範本</button></div>}
-        {/* One way into paper and Excel: printing, exporting and importing all live in that dialog. */}
-        {snapshot && <div className="sidebar-footer">
-          <button onClick={openImport}><FileSpreadsheet size={16} />紙本與 Excel</button>
-        </div>}
-        </div>
-      </aside>
+      {floating && finder}
       <section className="spatial-workspace" aria-label="街區探索">
         <div className="map-topbar"><div><MapPin size={15} /><span>西營盤</span>{selectedBuildingId && <><ChevronRight size={13} /><strong>{snapshot?.buildings.find(b => b.id === selectedBuildingId)?.name}</strong>{selectedFloorId && <><ChevronRight size={13} /><span>{snapshot?.floors.find(f => f.id === selectedFloorId)?.label}</span></>}{selectedUnitId && <><ChevronRight size={13} /><span>{snapshot?.units.find(u => u.id === selectedUnitId)?.label.replace(/^.*? /, '')}</span></>}</>}</div></div>
-        <div className="spatial-content"><Suspense fallback={<div className="map-loading">正在準備地圖…</div>}><MapScene buildings={mapBuildings} insets={mapInsets} placeSearch={placeSearch} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} expanded={expanded} onSelectBuilding={workspace.selectBuilding} onSelectFloor={workspace.selectFloor} onToggleExpanded={workspace.toggleExpanded} onOverview={() => workspace.selectBuilding()} onSaveFootprint={(id, ring) => { try { workspace.setFootprint(id, ring); setToast('已儲存大廈形狀。記錄沒有改變。'); } catch { setToast('形狀未能儲存，請重試。'); } }} onAddBuilding={input => { try { const refused = workspace.addBuilding(input); if (!refused) { setToast(`已新增「${input.name.trim()}」。`); setFinderOpen(false); } return refused; } catch { return { error: '未能儲存，請重試。', field: '' }; } }} /></Suspense></div>
-        {!selectedBuildingId && snapshot && !explored && <div className="map-prompt"><span><Building2 size={19} /></span><div><strong>從一幢大廈開始</strong><p>選擇地圖標記，讓每一層的記錄展開。</p></div><ChevronRight size={18} /></div>}
+        <div className="spatial-content"><Suspense fallback={<div className="map-loading">正在準備地圖…</div>}><MapScene buildings={visibleMapBuildings} searchActive={Boolean(query.trim())} insets={mapInsets} placeSearch={placeSearch} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} expanded={expanded} onSelectBuilding={id => { workspace.selectBuilding(id); setSheetSnap('half'); }} onBlankClick={() => { if (!floating) setSheetSnap('collapsed'); }} onSelectFloor={workspace.selectFloor} onToggleExpanded={workspace.toggleExpanded} onOverview={() => { workspace.selectBuilding(); setSheetSnap('half'); }} onSaveFootprint={(id, ring) => { try { workspace.setFootprint(id, ring); setToast('已儲存大廈形狀。記錄沒有改變。'); } catch { setToast('形狀未能儲存，請重試。'); } }} onAddBuilding={input => { try { const refused = workspace.addBuilding(input); if (!refused) { setToast(`已新增「${input.name.trim()}」。`); setFinderOpen(false); setSheetSnap('half'); } return refused; } catch { return { error: '未能儲存，請重試。', field: '' }; } }} /></Suspense></div>
+        {!selectedBuildingId && snapshot && !explored && floating && <div className="map-prompt"><span><Building2 size={19} /></span><div><strong>從一幢大廈開始</strong><p>選擇地圖標記，讓每一層的記錄展開。</p></div><ChevronRight size={18} /></div>}
+        {!floating && <MobileSheet title={observationEditor ? '記錄今次結果' : detail ? '大廈與單位' : '大廈清單'} hasSelection={Boolean(detail)} snap={sheetSnap} onSnapChange={setSheetSnap} list={finder} detail={detail} editor={observationEditor} toast={toastNotice} />}
       </section>
-      {snapshot && selectedBuildingId && <BuildingDetail overlapPeers={overlaps.peers.get(selectedBuildingId)} onSelectBuilding={workspace.selectBuilding} snapshot={snapshot} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} selectedUnitId={selectedUnitId} onBack={() => workspace.selectBuilding()} onSelectFloor={workspace.selectFloor} onSelectUnit={workspace.selectUnit} onToggleTag={workspace.setTag} onFollowUpAction={workspace.actOnFollowUp} onStartObservation={startObservation} onStructureChange={features.structureEditing ? change => { const result = workspace.changeStructure(change); if ('error' in result) return result.error; setToast(result.message); return undefined; } : undefined} onBackup={downloadWorkbook} onWithdrawObservation={withdrawObservation} canWithdraw={canWithdraw} canDeleteStructure={may.mayRemoveStructure} />}
+      {floating && detail}
     </main>
     {workspace.storageError && <div className="storage-banner" role="alert">
       <span>{workspace.storageError}</span>
@@ -410,8 +469,8 @@ export default function App() {
       {workspace.syncBlocked && !workspace.pendingConflicts.length && <><AdoptRemoteButton backup={downloadWorkbook} /><ReplaceRemoteButton /></>}
       <button type="button" className="storage-banner__close" aria-label="關閉提示" onClick={workspace.dismissStorageError}><X size={16} /></button>
     </div>}
-    {toast && <div className="toast" key={toast} role="status"><Check size={17} /><span>{toast}</span><button aria-label="關閉提示" onClick={() => setToast('')}><X size={16} /></button></div>}
-    {helpOpen && <div ref={helpRef} id="demo-help" className="help-popover" role="region" aria-label="示範說明"><strong>這是一個外展流程示範</strong><p>大廈、住戶及記錄全部虛構。資料存放在機構工作區：同一機構的成員換一部裝置登入，會看到同一份；但這仍是示範資料，不是正式的機構業務資料庫。</p><h3>顏色</h3><ul className="help-legend">{OUTREACH_STATES.map(state => <li key={state}><i style={{ background: stateColors[state] }} /><b>{stateLabels[state]}</b>{stateLegendNotes[state]}</li>)}</ul><p>「沒有記錄」不等於「沒有發現」：先查看上次結果，再決定下一步。</p><p className="help-credit">地圖底圖由 OpenFreeMap / OpenStreetMap 提供。</p><button onClick={() => setHelpOpen(false)}>知道了</button></div>}
+    {floating && toastNotice}
+    {helpOpen && <div ref={helpRef} id="demo-help" className="help-popover" role="region" aria-label="示範說明"><strong>這是一個外展流程示範</strong><p>大廈、住戶及記錄全部虛構。{workspace.syncMode === 'LOCAL_ONLY' ? '目前資料只存在這台設備，同事暫時看不到。' : workspace.syncStatus === 'SYNCED' ? '伺服器已確認目前這份資料，其他裝置可在下次拉取後看到。' : '目前改動先存在這台設備，尚未完成同步；伺服器確認後，其他裝置才可在下次拉取時看到。'}這仍是示範資料，不是正式的機構業務資料庫。</p><h3>顏色</h3><ul className="help-legend">{OUTREACH_STATES.map(state => <li key={state}><i style={{ background: stateColors[state] }} /><b>{stateLabels[state]}</b>{stateLegendNotes[state]}</li>)}</ul><p>「沒有記錄」不等於「沒有發現」：先查看上次結果，再決定下一步。</p><p className="help-credit">地圖底圖由 OpenFreeMap / OpenStreetMap 提供。</p><button onClick={() => setHelpOpen(false)}>知道了</button></div>}
     <ImportDialog notice={toast.startsWith('Excel 已準備') ? toast : undefined} open={importOpen} review={importReview} loading={importLoading} error={importError} onClose={() => setImportOpen(false)} onFile={loadFile} onLoadDistrict={loadDistrict} onExport={() => void (snapshot ? exportExcel() : exportBlank())} exportLabel={snapshot ? undefined : '下載空白範本'} onPrint={snapshot?.buildings.length ? () => { setImportOpen(false); setPaperOpen(true); } : undefined} onRetry={openImport} onRemap={remapImport} onConfirmReplace={confirmImport} />
     {workspace.conflictsOpen && workspace.pendingConflicts.length > 0 && <SyncConflictDialog conflicts={workspace.pendingConflicts} onResolve={workspace.resolveConflicts} onDefer={workspace.deferConflicts} />}
     {/* One door for the assistant and the task list: the list is computed on this device,
@@ -419,6 +478,6 @@ export default function App() {
     {snapshot && <AiAssistantDialog open={aiOpen} onClose={() => setAiOpen(false)} snapshot={snapshot} orgId={workspace.orgId} viewer={viewer} today={today} aiEnabled={aiAssistant} onOpenTask={openTask} onApplyProposal={features.structureEditing ? workspace.applyLocationProposal : undefined} onWrite={inputs => { const result = workspace.recordBatch(inputs, false); setToast(`已寫入 ${result.saved} 筆由 AI 協助整理的記錄。`); }} />}
     {paperOpen && snapshot && <PaperForm snapshot={snapshot} buildingId={selectedBuildingId} onClose={() => setPaperOpen(false)} />}
     {snapshot && photoIntake && workspace.operator && <PhotoIntake key={workspace.operator.accountId} onApplyProposal={features.structureEditing ? workspace.applyLocationProposal : undefined} open={photoOpen} snapshot={snapshot} operator={workspace.operator} onClose={() => setPhotoOpen(false)} onSave={workspace.savePhotoPages} onView={(buildingId, unitId) => { workspace.selectBuilding(buildingId); if (unitId) workspace.selectUnit(unitId); setFinderOpen(false); }} />}
-    {editTarget && <ObservationEditor open targetLabel={editTarget.label} subjectId={editTarget.unitIds ? undefined : editTarget.unitId ?? editTarget.buildingId} subjectType={editTarget.unitId ? 'UNIT' : 'BUILDING'} batch={editTarget.unitIds ? { units: editTarget.unitIds.length } : undefined} optionPrefs={workspace.optionPrefs} defaultCoverage={editDefaults.coverage} defaultAssessment={editDefaults.assessment} onClose={() => setEditTarget(undefined)} onSubmit={saveObservation} />}
+    {floating && observationEditor}
   </div>;
 }

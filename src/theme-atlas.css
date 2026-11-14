@@ -370,6 +370,12 @@ button.cf-room-list__pick:hover{border-color:var(--atlas-acc)}
 .app-shell .cf-pick__more{margin:0;padding:8px 10px;border:1px solid var(--atlas-rule);border-radius:var(--radius-md);background:var(--atlas-paper);color:var(--atlas-mute);font-size:12px;line-height:1.6}
 .app-shell .cf-pick__acts{display:flex;flex-wrap:wrap;gap:8px}
 .app-shell .cf-pick__acts .cf-button{flex:1;min-width:150px;justify-content:center}
+.app-shell .cf-pick__units{display:flex;flex-wrap:wrap;gap:6px;list-style:none;margin:0;padding:0}
+.app-shell .cf-pick__units li{display:inline-flex;align-items:center;max-width:100%;min-height:32px;padding-left:9px;border:1px solid var(--atlas-rule);border-radius:var(--radius-md);background:var(--atlas-paper);color:var(--atlas-ink);font-size:12px}
+.app-shell .cf-pick__units li span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.app-shell .cf-pick__units button{width:32px;height:32px;padding:0;border:0;background:transparent;color:var(--atlas-mute);display:grid;place-items:center}
+.app-shell .cf-multiselect-toggle{flex:none;min-height:32px;padding:5px 9px;border:1px solid var(--atlas-rule);border-radius:var(--radius-sm);background:var(--atlas-card);color:var(--atlas-mute);font-size:12px;cursor:pointer}
+.app-shell .cf-multiselect-toggle.is-active{border-color:var(--atlas-acc);background:#edf5f0;color:var(--atlas-acc)}
 /* The batch line sits under the dialog heading: what the one form is about to write. */
 .app-shell .cf-editor__batch{margin:0;padding:7px 10px;border-radius:var(--radius-md);background:var(--atlas-paper);color:var(--atlas-mute);font-size:12.5px;line-height:1.5}
 .app-shell .cf-editor__confirm{display:flex;align-items:center;gap:8px;font-size:13px}
