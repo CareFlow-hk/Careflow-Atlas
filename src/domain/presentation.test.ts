@@ -80,8 +80,9 @@ describe('one source for every label', () => {
     }
   });
 
-  it('never words the yellow legend as a follow-up', () => {
-    expect(stateLegendNotes.YELLOW).not.toContain('待跟進');
+  it('explains both open follow-ups and mixed children in the yellow legend', () => {
+    expect(stateLegendNotes.YELLOW).toContain('跟進');
+    expect(stateLegendNotes.YELLOW).toContain('混雜');
     expect(stateLabels.YELLOW).not.toContain('待跟進');
   });
 });

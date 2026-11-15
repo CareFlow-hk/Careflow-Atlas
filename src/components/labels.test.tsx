@@ -138,12 +138,12 @@ describe('history chips keep every axis', () => {
 });
 
 describe('two markers, never a fifth colour', () => {
-  it('badges a task on a red unit and leaves the colour alone', () => {
+  it('uses yellow for an open task and keeps the task badge', () => {
     const snapshot = scene([observation({ id: 'o1', coverage: 'INACCESSIBLE', followUp: { action: '再訪樓梯口', status: 'OPEN', category: 'GENERAL' } })]);
     const markup = renderDetail(snapshot);
-    expect(unitState(snapshot, 'b1', 'u1')).toBe('RED');
+    expect(unitState(snapshot, 'b1', 'u1')).toBe('YELLOW');
     expect(markup).toContain('一般跟進'); // the badge names the task
-    expect(markup).toContain('未能完成'); // the unit keeps its own colour label
+    expect(markup).toContain(stateLabels.YELLOW);
   });
 
   it('shows the generic badge when a task has no category', () => {
@@ -477,8 +477,8 @@ describe('a category written out by hand is shown as written (§10.4)', () => {
 
 /*
  * One result at every picked unit (2026-10-15). The form is the same form — the same
- * choices, storing the same things — with the parts that only make sense for a single place
- * left out, and one extra statement that only makes sense for a set.
+ * choices, storing the same things, including the optional 跟進 — with one extra statement
+ * that only makes sense for a set (2026-11-15: a batch can also leave a task per unit).
  */
 describe('the entry form for a whole selection', () => {
   const batch = renderToStaticMarkup(<ObservationEditor open targetLabel="合成大廈 · 已選 3 個單位" batch={{ units: 3 }} onClose={noop} onSubmit={noop} />);
@@ -496,12 +496,16 @@ describe('the entry form for a whole selection', () => {
     expect(batch).not.toContain(assessmentLabels.NOT_UPDATED);
   });
 
-  /* A follow-up is one place needing one thing done; three units is three different things. */
-  it('offers no 跟進 at all, rather than opening a task per unit', () => {
-    expect(batch).not.toContain('name="followUpReason"');
-    expect(batch).not.toContain('name="followUpDueAt"');
-    expect(batch).not.toContain('更多跟進資料');
-    // The single-place form still has it.
+  /*
+   * A batch may leave each picked unit its own task (2026-11-15): the recorder fills the
+   * same optional 跟進 once, and the store writes one follow-up per unit it saved. Recall
+   * that a blank 跟進 still writes none — filling it is what opens a task, per place.
+   */
+  it('offers the same optional 跟進 as a single record, and says it is written per unit', () => {
+    expect(batch).toContain('name="followUpReason"');
+    expect(batch).toContain('name="followUpDueAt"');
+    expect(batch).toContain('更多跟進資料');
+    expect(batch).toContain('跟進如填寫，亦會為每個單位各開一項。');
     expect(single).toContain('name="followUpReason"');
   });
 

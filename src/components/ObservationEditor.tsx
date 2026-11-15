@@ -9,7 +9,7 @@ import { applyCoverageChange, markTouched, menuChoices, customOptionFor, type Cu
  * `<option>` cannot hold markup, so a colour dot per choice is only possible this way
  * — and it puts every choice on screen at once instead of behind a click.
  */
-function ChoiceRow({ legend, note, name, choices, value, onChange, dotFor, required }: {
+function ChoiceRow({ legend, note, name, choices, value, onChange, dotFor, required, error }: {
   legend: string;
   /** Said beside the legend about the value already chosen there, not about any one choice. */
   note?: string;
@@ -20,9 +20,12 @@ function ChoiceRow({ legend, note, name, choices, value, onChange, dotFor, requi
   /** Only the coverage row decides a colour, so only it shows dots. */
   dotFor?: (choice: string) => string | undefined;
   required?: boolean;
+  error?: string;
 }) {
   return (
-    <fieldset className="cf-choice-row">
+    <fieldset className="cf-choice-row" role={required ? "radiogroup" : undefined} aria-required={required || undefined}
+      aria-invalid={error ? true : undefined} aria-describedby={error ? `${name}-error` : undefined}
+      tabIndex={required ? -1 : undefined} data-choice={name}>
       <legend>{legend}{note && <span className="cf-choice-row__hint">{note}</span>}{required && <span className="cf-required-mark" aria-hidden="true"> *</span>}</legend>
       <div className="cf-choice-row__items">
         {choices.map(choice => {
@@ -36,6 +39,7 @@ function ChoiceRow({ legend, note, name, choices, value, onChange, dotFor, requi
           );
         })}
       </div>
+      {error && <p className="cf-choice-row__error" id={`${name}-error`} role="alert">{error}</p>}
     </fieldset>
   );
 }
@@ -137,9 +141,11 @@ const seedFields = (defaultCoverage?: CoverageStatus, defaultAssessment?: Housin
  */
 export function ObservationEditor({ open, targetLabel, subjectId, batch, selectedUnits, onRemoveUnit, variant = 'dialog', onChangeContext, optionPrefs = {}, defaultAssessment, defaultCoverage, onClose, onSubmit }: ObservationEditorProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [invalidField, setInvalidField] = useState("");
   /*
    * The dependent fields are controlled so a coverage change can fill them in. Reset
    * whenever the dialog opens, so a finished entry never seeds the next one.
@@ -160,7 +166,7 @@ export function ObservationEditor({ open, targetLabel, subjectId, batch, selecte
     if (!open) return;
     // Reset when the dialog opens, so a finished entry never seeds the next one.
     setFields(seedFields(defaultCoverage, defaultAssessment));
-    setCategory(""); setError("");
+    setCategory(""); setError(""); setInvalidField("");
   }, [open, defaultCoverage, defaultAssessment]);
 
   const close = () => {
@@ -181,19 +187,45 @@ export function ObservationEditor({ open, targetLabel, subjectId, batch, selecte
   };
   /** What a chosen menu entry would actually store — a custom entry stores its declared value. */
   const resolved = (field: OptionField, chosen: string | undefined) => resolve(field, chosen ?? "").value ?? "";
+  /*
+   * The radios are visually hidden, so a native validation bubble is anchored to a 1px
+   * input instead of the choice the recorder can see. The form opts out of native bubbles;
+   * the same required answers are checked here, then the visible group is centred and
+   * focused. `required` stays on the inputs as the DOM/SSR statement of the business rule.
+   */
+  const showValidation = (name: string, message: string) => {
+    setInvalidField(name); setError(message);
+    requestAnimationFrame(() => {
+      const form = formRef.current;
+      const target = form?.querySelector<HTMLElement>(`[data-choice="${name}"]`)
+        ?? form?.querySelector<HTMLElement>(`[name="${name}"]`);
+      if (!target) return;
+      target.scrollIntoView({ block: "center" });
+      target.focus({ preventScroll: true });
+    });
+  };
+  const clearValidation = (name: string) => {
+    if (invalidField !== name) return;
+    setInvalidField(""); setError("");
+  };
+  const choiceError = (name: string) => invalidField === name ? error : undefined;
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const value = (key: string) => String(data.get(key) ?? "").trim();
-    setSaving(true); setError("");
+    setSaving(true); setError(""); setInvalidField("");
     try {
       const occurredDate = value("occurredDate");
-      if (!occurredDate) throw new Error("請選擇發生日期。");
-      if (!value("followUpReason") && ["assignee", "timingNote", "followUpDueAt"].some(key => value(key)) || !value("followUpReason") && category) throw new Error("已填跟進資料，請寫明跟進行動。");
+      if (!occurredDate) { showValidation("occurredDate", "請選擇發生日期。"); return; }
       const coverage = resolve("coverage", value("coverageStatus"));
       const assessment = resolve("assessment", fields.assessment?.value ?? "");
       const sourceType = resolve("sourceType", fields.sourceType?.value ?? "");
-      if (!coverage.value || !assessment.value || !sourceType.value) throw new Error("請填妥覆蓋狀態、住房判斷及資料來源。");
+      if (!coverage.value) { showValidation("coverageStatus", "請選擇覆蓋狀態。"); return; }
+      if (!assessment.value) { showValidation("housingAssessment", "請選擇住房判斷。"); return; }
+      if (!sourceType.value) { showValidation("sourceType", "請選擇資料來源。"); return; }
+      if (!value("followUpReason") && (["assignee", "timingNote", "followUpDueAt"].some(key => value(key)) || category)) {
+        showValidation("followUpReason", "已填跟進資料，請寫明跟進行動。"); return;
+      }
       // 接觸結果 is not asked, so it is not stored: a value nobody confirmed is not a fact.
       const optionNotes: OptionNotes = { coverage: coverage.note, assessment: assessment.note, sourceType: sourceType.note };
       await onSubmit({
@@ -217,58 +249,54 @@ export function ObservationEditor({ open, targetLabel, subjectId, batch, selecte
   };
 
   const form = (
-      <form className={`cf-editor${variant === 'sheet' ? ' cf-editor--sheet' : ''}`} onSubmit={submit}>
+      <form ref={formRef} className={`cf-editor${variant === 'sheet' ? ' cf-editor--sheet' : ''}`} onSubmit={submit} noValidate>
         <header className={`cf-dialog__header${variant === 'sheet' ? ' cf-editor__context' : ''}`}><div><span className="cf-eyebrow">記錄今次結果</span><div className="cf-editor__target"><h2 id="observation-title">{targetLabel}</h2>{variant === 'sheet' && onChangeContext && <button type="button" className="cf-editor__change" onClick={onChangeContext}>更改</button>}</div>{variant === 'sheet' && selectedUnits && <ul className="cf-editor__selected" aria-label="本次已選單位">{selectedUnits.map(unit => <li key={unit.id}><span>{unit.label}</span>{onRemoveUnit && <button type="button" aria-label={`取消本次 ${unit.label}`} onClick={() => onRemoveUnit(unit.id)}><X size={14} /></button>}</li>)}</ul>}</div><button type="button" className="cf-icon-button" onClick={close} aria-label="關閉"><X /></button></header>
-        {/* One batch writes the same result to every picked unit; the follow-up blocks are gone
-            because a follow-up is one place needing one thing done. */}
-        {batch ? <p className="cf-editor__batch">會為已選的 {batch.units} 個單位各寫入一筆相同的記錄。</p> : null}
+        {/* One batch writes the same result to every picked unit. A follow-up filled here is
+            also written once per picked unit, so a batch visit can leave each door its own
+            task; leaving it blank writes none, exactly like a single record (2026-11-15). */}
+        {batch ? <p className="cf-editor__batch">會為已選的 {batch.units} 個單位各寫入一筆相同的記錄。跟進如填寫，亦會為每個單位各開一項。</p> : null}
         {/* The dot beside a coverage choice is the colour it produces, from the same rule the map uses. */}
         <div className="cf-choice-grid">
-          <ChoiceRow legend="覆蓋狀態" name="coverageStatus" required
+          <ChoiceRow legend="覆蓋狀態" name="coverageStatus" required error={choiceError("coverageStatus")}
             // Said only while the carried-over value is the one still chosen: once the
             // recorder picks another, nothing here is following the last record any more.
             note={defaultCoverage && fields.coverage?.value === defaultCoverage ? "沿用上次結果" : undefined}
             choices={menuChoices("coverage", optionPrefs)}
             value={fields.coverage?.value ?? ""}
-            onChange={next => setFields({ ...applyCoverageChange(fields, resolved("coverage", next)), coverage: { value: next, touched: true } })}
+            onChange={next => { clearValidation("coverageStatus"); setFields({ ...applyCoverageChange(fields, resolved("coverage", next)), coverage: { value: next, touched: true } }); }}
             dotFor={choice => choice ? stateColors[previewState(resolved("coverage", choice) as CoverageStatus, undefined, false)] : undefined} />
-          <ChoiceRow legend="住房判斷" name="housingAssessment" required
+          <ChoiceRow legend="住房判斷" name="housingAssessment" required error={choiceError("housingAssessment")}
             choices={menuChoices("assessment", optionPrefs)}
             value={fields.assessment?.value ?? ""}
-            onChange={next => setFields(markTouched(fields, "assessment", next))} />
-          <ChoiceRow legend="資料來源" name="sourceType" required
+            onChange={next => { clearValidation("housingAssessment"); setFields(markTouched(fields, "assessment", next)); }} />
+          <ChoiceRow legend="資料來源" name="sourceType" required error={choiceError("sourceType")}
             choices={menuChoices("sourceType", optionPrefs)}
             value={fields.sourceType?.value ?? ""}
-            onChange={next => setFields(markTouched(fields, "sourceType", next))} />
+            onChange={next => { clearValidation("sourceType"); setFields(markTouched(fields, "sourceType", next)); }} />
         </div>
         <div className="cf-form-grid">
           {/* Required, and only the date: leaving the time empty keeps the record at date
               precision instead of inventing an hour from the entry moment. */}
-          <label><span>發生日期</span><input type="date" name="occurredDate" defaultValue={todayLocal()} required /></label>
+          <label><span>發生日期</span><input type="date" name="occurredDate" defaultValue={todayLocal()} required onChange={() => clearValidation("occurredDate")} /></label>
           <label><span>發生時間（可選）</span><input type="time" name="occurredTime" /></label>
           <label className="cf-field--wide"><span>記錄內容{batch ? "（會寫進每個單位）" : ""}</span><textarea name="note" rows={3} placeholder="看到、聽到或獲告知的內容，以及原話；不確定的地方照實寫。" /></label>
         </div>
         <details className="cf-more"><summary>更多</summary>
           <div className="cf-form-grid"><label className="cf-field--wide"><span>依據</span><input name="evidence" placeholder="例如：門牌細分；居民口述" /></label></div>
         </details>
-        {batch ? (
-          <label className="cf-editor__confirm"><input type="checkbox" name="confirmNoSubdivision" /><span>同時確認這些單位無劏房</span></label>
-        ) : (
-          <>
-            <fieldset className="cf-followup-fields"><legend><CalendarDays size={17} />跟進（可選）</legend><label><span>跟進行動</span><input name="followUpReason" placeholder="例如：傍晚再訪" /></label><label><span>限期</span><input type="date" name="followUpDueAt" /></label></fieldset>
-            <details className="cf-more"><summary>更多跟進資料</summary>
-              {/* A blank category is allowed: "not classified" is not the same as "general". */}
-              <div className="cf-choice-grid cf-choice-grid--followup">
-                <ChoiceRow legend="跟進類別" name="category"
-                  choices={[{ value: "", label: "未分類" }, ...Object.entries(supportCategoryLabels).map(([key, label]) => ({ value: key, label }))]}
-                  value={category}
-                  onChange={setCategory} />
-              </div>
-              <div className="cf-form-grid"><label><span>負責人</span><input name="assignee" /></label><label className="cf-field--wide"><span>時間原話／待確認</span><input name="timingNote" placeholder="例如：翌日午後，實際日期待確認" /></label></div>
-            </details>
-          </>
-        )}
-        {error && <p role="alert" className="cf-error"><AlertCircle size={17} />{error}</p>}
+        {batch && <label className="cf-editor__confirm"><input type="checkbox" name="confirmNoSubdivision" /><span>同時確認這些單位無劏房</span></label>}
+        <fieldset className="cf-followup-fields"><legend><CalendarDays size={17} />跟進（可選）</legend><label><span>跟進行動</span><input name="followUpReason" placeholder={batch ? "例如：傍晚再訪（每個單位各開一項）" : "例如：傍晚再訪"} onChange={() => clearValidation("followUpReason")} /></label><label><span>限期</span><input type="date" name="followUpDueAt" /></label></fieldset>
+        <details className="cf-more"><summary>更多跟進資料</summary>
+          {/* A blank category is allowed: "not classified" is not the same as "general". */}
+          <div className="cf-choice-grid cf-choice-grid--followup">
+            <ChoiceRow legend="跟進類別" name="category"
+              choices={[{ value: "", label: "未分類" }, ...Object.entries(supportCategoryLabels).map(([key, label]) => ({ value: key, label }))]}
+              value={category}
+              onChange={setCategory} />
+          </div>
+          <div className="cf-form-grid"><label><span>負責人</span><input name="assignee" /></label><label className="cf-field--wide"><span>時間原話／待確認</span><input name="timingNote" placeholder="例如：翌日午後，實際日期待確認" /></label></div>
+        </details>
+        {error && !["coverageStatus", "housingAssessment", "sourceType"].includes(invalidField) && <p role="alert" className="cf-error"><AlertCircle size={17} />{error}</p>}
         <footer className="cf-dialog__footer"><span>儲存後舊記錄仍會保留。</span><div><button type="button" className="cf-button cf-button--ghost" onClick={close}>取消</button><button className="cf-button cf-button--primary" disabled={saving}><Save size={17} />{saving ? "儲存中…" : "儲存記錄"}</button></div></footer>
       </form>
   );

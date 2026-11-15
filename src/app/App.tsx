@@ -193,11 +193,14 @@ export default function App() {
 
   const overlaps = useMemo(() => buildingOverlapGroups(mapBuildings), [mapBuildings]);
 
-  const buildings = filterBuildings(snapshot?.buildings ?? [], query)
-    .filter(building => filter === 'ALL' || getCoverageSummary(snapshot!, building.id).followUps > 0);
-  // The list and the map consume this same result; searching never calls the address service.
-  const visibleBuildingIds = new Set(buildings.map(building => building.id));
-  const visibleMapBuildings = mapBuildings.filter(building => visibleBuildingIds.has(building.id));
+  const buildings = useMemo(() => filterBuildings(snapshot?.buildings ?? [], query)
+    .filter(building => filter === 'ALL' || getCoverageSummary(snapshot!, building.id).followUps > 0), [snapshot, query, filter]);
+  /*
+   * The list consumes the search result; the map always receives every building, so
+   * searching must not erase a neighbour's colour or its footprint from the click and
+   * overlap layers. Only these ids are outlined, and only they stay at full weight.
+   */
+  const searchMatchIds = useMemo(() => (query.trim() ? new Set(buildings.map(building => building.id)) : undefined), [buildings, query]);
   // Counts buildings, the same unit the filtered list shows ("13 幢"), not tasks.
   const followupCount = snapshot?.buildings.filter(b => getCoverageSummary(snapshot, b.id).followUps > 0).length ?? 0;
   const hasDistrictDemo = snapshot?.buildings.some(building => building.id === 'district-16');
@@ -457,7 +460,7 @@ export default function App() {
       {floating && finder}
       <section className="spatial-workspace" aria-label="街區探索">
         <div className="map-topbar"><div><MapPin size={15} /><span>西營盤</span>{selectedBuildingId && <><ChevronRight size={13} /><strong>{snapshot?.buildings.find(b => b.id === selectedBuildingId)?.name}</strong>{selectedFloorId && <><ChevronRight size={13} /><span>{snapshot?.floors.find(f => f.id === selectedFloorId)?.label}</span></>}{selectedUnitId && <><ChevronRight size={13} /><span>{snapshot?.units.find(u => u.id === selectedUnitId)?.label.replace(/^.*? /, '')}</span></>}</>}</div></div>
-        <div className="spatial-content"><Suspense fallback={<div className="map-loading">正在準備地圖…</div>}><MapScene buildings={visibleMapBuildings} searchActive={Boolean(query.trim())} insets={mapInsets} placeSearch={placeSearch} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} expanded={expanded} onSelectBuilding={id => { workspace.selectBuilding(id); setSheetSnap('half'); }} onBlankClick={() => { if (!floating) setSheetSnap('collapsed'); }} onSelectFloor={workspace.selectFloor} onToggleExpanded={workspace.toggleExpanded} onOverview={() => { workspace.selectBuilding(); setSheetSnap('half'); }} onSaveFootprint={(id, ring) => { try { workspace.setFootprint(id, ring); setToast('已儲存大廈形狀。記錄沒有改變。'); } catch { setToast('形狀未能儲存，請重試。'); } }} onAddBuilding={input => { try { const refused = workspace.addBuilding(input); if (!refused) { setToast(`已新增「${input.name.trim()}」。`); setFinderOpen(false); setSheetSnap('half'); } return refused; } catch { return { error: '未能儲存，請重試。', field: '' }; } }} /></Suspense></div>
+        <div className="spatial-content"><Suspense fallback={<div className="map-loading">正在準備地圖…</div>}><MapScene buildings={mapBuildings} searchMatchIds={searchMatchIds} insets={mapInsets} placeSearch={placeSearch} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} expanded={expanded} onSelectBuilding={id => { workspace.selectBuilding(id); setSheetSnap('half'); }} onBlankClick={() => { if (!floating) setSheetSnap('collapsed'); }} onSelectFloor={workspace.selectFloor} onToggleExpanded={workspace.toggleExpanded} onOverview={() => { workspace.selectBuilding(); setSheetSnap('half'); }} onSaveFootprint={(id, ring) => { try { workspace.setFootprint(id, ring); setToast('已儲存大廈形狀。記錄沒有改變。'); } catch { setToast('形狀未能儲存，請重試。'); } }} onAddBuilding={input => { try { const refused = workspace.addBuilding(input); if (!refused) { setToast(`已新增「${input.name.trim()}」。`); setFinderOpen(false); setSheetSnap('half'); } return refused; } catch { return { error: '未能儲存，請重試。', field: '' }; } }} /></Suspense></div>
         {!selectedBuildingId && snapshot && !explored && floating && <div className="map-prompt"><span><Building2 size={19} /></span><div><strong>從一幢大廈開始</strong><p>選擇地圖標記，讓每一層的記錄展開。</p></div><ChevronRight size={18} /></div>}
         {!floating && <MobileSheet title={observationEditor ? '記錄今次結果' : detail ? '大廈與單位' : '大廈清單'} hasSelection={Boolean(detail)} snap={sheetSnap} onSnapChange={setSheetSnap} list={finder} detail={detail} editor={observationEditor} toast={toastNotice} />}
       </section>

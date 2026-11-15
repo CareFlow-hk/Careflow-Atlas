@@ -115,6 +115,17 @@ describe('a building marker names its own task', () => {
     expect(markerLabel(withTasks(0), true).className).toBe('building-map-marker is-selected');
   });
 
+  /*
+   * A local search outlines what it matched and steps the rest back; it never removes a
+   * marker, because the map still has to show the district's colours and keep every
+   * building clickable (2026-11-15, search must not erase the layer).
+   */
+  it('distinguishes a search match from a dimmed neighbour without losing the state tag', () => {
+    expect(markerLabel(withTasks(1), false, false, true).className).toBe('building-map-marker is-search-match has-followup');
+    expect(markerLabel(withTasks(0), false, false, false, true).className).toBe('building-map-marker is-search-dim');
+    expect(markerLabel(withTasks(0), false, false, false, true).title).toContain(stateLabels[building.state]);
+  });
+
   it('declares the extra width, so the tag is not laid out under a neighbouring name', () => {
     const without = markerLabel(withTasks(0), false).labelWidth;
     expect(markerLabel(withTasks(1), false).labelWidth).toBe(without + 60);

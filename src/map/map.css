@@ -83,6 +83,13 @@
 .map-scene .building-map-marker.is-compact:hover strong,
 .map-scene .building-map-marker.is-compact:focus-visible strong { display:block; }
 .map-scene .building-map-marker:focus-visible { outline:3px solid #195f4e; outline-offset:3px; }
+/* A local search marks its matches. Every other building keeps its dot colour, footprint
+   and click target; it only steps back, because the map still has to show the district. */
+.map-scene .building-map-marker.is-search-dim { opacity:.4; }
+.map-scene .building-map-marker.is-search-dim:hover,
+.map-scene .building-map-marker.is-search-dim:focus-visible,
+.map-scene .building-map-marker.is-selected.is-search-dim { opacity:1; }
+.map-scene .building-map-marker.is-search-match { border-color:#126455; box-shadow:0 0 0 3px #fff, 0 0 0 5px #126455, 0 5px 18px #29453938; z-index:3; }
 .map-scene .district-map-summary { display:flex; align-items:center; gap:11px; margin-top:12px; padding:12px 15px 12px 0; border-top:1px solid #abbeb2; width:max-content; }
 .map-scene .district-map-summary>b { font-size:33px; line-height:1; font-weight:550; letter-spacing:-.04em; font-variant-numeric:tabular-nums; color:#244e3f; }
 .map-scene .district-map-summary>span { font-size:12px; color:#365b49; letter-spacing:.03em; }

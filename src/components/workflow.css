@@ -101,6 +101,9 @@
 .cf-choice-row legend{font-size:12px;font-weight:700;padding:0}
 .cf-choice-row__hint{margin-left:6px;font-size:10px;font-weight:400;color:#7b8b85}
 .cf-choice-row__items{display:flex;flex-wrap:wrap;gap:6px}
+.cf-choice-row:focus{outline:2px solid #8b3e32;outline-offset:5px}
+.cf-choice-row[aria-invalid="true"] legend{color:#8b3e32}
+.cf-choice-row__error{display:flex;align-items:center;gap:5px;margin:8px 0 0;color:#8b3e32;font-size:12px;font-weight:600;line-height:1.5}
 /* .cf-editor label would otherwise stack these vertically. */
 .cf-editor .cf-choice{display:inline-flex;flex-direction:row;align-items:center;gap:7px;min-height:44px;padding:9px 11px;border:1px solid #cad8d4;border-radius:var(--radius-sm);background:#fff;font-size:12px;font-weight:400;cursor:pointer;box-sizing:border-box}
 .cf-editor .cf-choice.is-on{border-color:#126455;background:#f0f7f5;font-weight:700}

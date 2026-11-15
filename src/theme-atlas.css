@@ -11,6 +11,7 @@
   --atlas-paper:#f7f4ec; --atlas-card:#fffdf8; --atlas-ink:#1d2622; --atlas-mute:#7a766b; --atlas-rule:#ddd6c6;
   --atlas-soft:#efe8da; --atlas-acc:#7d3b27; --atlas-task:#9a6420; --atlas-task-bg:#fbf3e3;
   --atlas-serif:'Noto Serif TC',serif; --atlas-sans:'Inter','Noto Sans TC',-apple-system,sans-serif;
+  --app-header-height:52px;
   --font:var(--atlas-sans); --ink:var(--atlas-ink); --muted:var(--atlas-mute); --line:var(--atlas-rule);
   --teal:var(--atlas-ink); --teal-soft:var(--atlas-soft); background:var(--atlas-paper);
 }
@@ -19,7 +20,7 @@ body{background:var(--atlas-paper)}
 
 /* ------------------------------------------------------------------ header */
 .app-shell{background:var(--atlas-paper);color:var(--atlas-ink)}
-.app-shell .app-header{height:52px;background:var(--atlas-paper);border-bottom:1px solid var(--atlas-rule);gap:18px;padding:0 20px}
+.app-shell .app-header{height:var(--app-header-height);background:var(--atlas-paper);border-bottom:1px solid var(--atlas-rule);gap:18px;padding:0 20px}
 .app-shell .brand strong{font-family:var(--atlas-serif);font-size:18px;font-weight:600;color:var(--atlas-ink);letter-spacing:0}
 .app-shell .brand strong span{color:var(--atlas-acc);font-style:normal;margin-left:4px;font-weight:600}
 .app-shell .brand-symbol{background:var(--atlas-ink);color:var(--atlas-paper);border-radius:var(--radius-sm)}
@@ -37,6 +38,26 @@ body{background:var(--atlas-paper)}
 .app-shell .help-popover p,.app-shell .help-popover li{color:var(--atlas-mute)}
 .app-shell .help-popover button{background:var(--atlas-ink);color:var(--atlas-paper);border-radius:var(--radius-sm)}
 .app-shell .help-legend i{border-radius:50%}
+/*
+ * Phone header (2026-11-15): one 44px control row plus the data-status line, both sized
+ * from --app-header-height so the shell, the map and the help popover cannot drift apart.
+ * Three older layers used to set 52/84/76px for the same box; only this file is loaded
+ * last, so the phone size lives here rather than in mobile.css.
+ */
+@media (max-width:760px){
+  :root{--app-header-height:62px}
+  .app-shell .app-header{height:auto;min-height:var(--app-header-height);gap:0 2px;padding:2px 12px;display:flex;flex-wrap:wrap;align-content:center;align-items:center}
+  .app-shell .brand{gap:8px;min-width:0;min-height:44px}
+  .app-shell .brand strong{font-size:16px;line-height:1.15}
+  .app-shell .brand strong span{font-size:10px;margin-left:3px}
+  .app-shell .brand-symbol{width:28px;height:31px}
+  .app-shell .demo-badge{flex:1 0 100%;font-size:10.5px;line-height:14px;letter-spacing:.08em}
+  .app-shell .help-button,.app-shell .icon-button{min-width:44px;min-height:44px;margin:0}
+  .app-shell .account-menu>summary{min-height:44px;padding:4px}
+  .app-shell .photo-entry{min-width:44px;min-height:44px}
+  .app-shell .help-popover{top:calc(var(--app-header-height) + 6px)}
+}
+@media (max-width:360px){ .app-shell .brand strong span{display:none} }
 
 /* ------------------------------------------------------------------ finder / index */
 .app-shell .district-sidebar{background:var(--atlas-card)}

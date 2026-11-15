@@ -2,13 +2,14 @@
 @media (max-width: 760px) {
   html, body, #root { height: 100%; overflow: hidden; }
   .app-shell { height: 100dvh; min-height: 0; overflow: hidden; }
-  .app-header { height: 76px; min-height: 76px; padding: 6px 12px; display: flex; flex-wrap: wrap; align-content: center; gap: 2px 4px; }
-  .app-header .brand { order: 1; flex: 1; min-width: 120px; }
-  .app-header .demo-badge { order: 6; flex: 1 0 100%; width: auto; margin: 0; padding: 0; border: 0; background: transparent; font-size: 11px; }
-  .app-header .help-button { order: 2; margin: 0; min-width: 40px; min-height: 40px; }
+  /* The height and the 44px controls are the theme's phone header block; this layer
+     only decides where each child sits (theme-atlas.css loads after this file). */
+  .app-header { display: flex; flex-wrap: wrap; align-content: center; gap: 0 2px; padding: 2px 12px; }
+  .app-header .brand { order: 1; flex: 1 1 auto; min-width: 0; }
+  .app-header .demo-badge { order: 6; }
+  .app-header .help-button { order: 2; }
   .app-header .account-menu { order: 3; }
-  .app-header .photo-entry { order: 4; width: 40px; min-height: 40px; padding: 0; font-size: 0; }
-  .app-header .account-menu > summary { min-height: 40px; padding: 4px; }
+  .app-header .photo-entry { order: 4; width: 44px; padding: 0; font-size: 0; }
   .app-header__place { display: none; }
 
   .workspace, .workspace.has-selection { position: relative; display: block; flex: 1; min-height: 0; height: auto; overflow: hidden; }

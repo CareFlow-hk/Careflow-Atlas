@@ -44,6 +44,14 @@ describe('closing a task without a visit', () => {
     expect(unitState(after, 'b1', 'u1')).toBe('GREEN');
   });
 
+  it('turns an unvisited unit yellow immediately and restores grey when its task closes', () => {
+    const before = scene([visited({ coverage: 'UNVISITED', assessment: 'UNKNOWN', sourceType: 'STAFF_OBSERVATION' })]);
+    expect(unitState(before, 'b1', 'u1')).toBe('YELLOW');
+    const done = act(before, 'DONE', 1);
+    expect(unitState(done, 'b1', 'u1')).toBe('GRAY');
+    expect(unitState(act(done, 'REOPENED', 2), 'b1', 'u1')).toBe('YELLOW');
+  });
+
   it('adds no observation: nothing pretends a visit happened', () => {
     const before = scene([visited()]);
     expect(act(before, 'DONE', 1).observations).toEqual(before.observations);

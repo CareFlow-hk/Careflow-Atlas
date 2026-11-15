@@ -42,9 +42,51 @@ describe('ObservationEditor mobile sheet', () => {
     expect((html.match(/required=""/g) ?? []).length).toBeGreaterThanOrEqual(4);
   });
 
+  it('replaces misplaced native radio bubbles with focusable required groups', () => {
+    const html = renderToStaticMarkup(<ObservationEditor
+      open
+      variant="sheet"
+      targetLabel="真光大廈 · 1樓 A室"
+      subjectId="a"
+      onClose={noop}
+      onSubmit={noop}
+    />);
+    expect(html).toContain('noValidate=""');
+    for (const name of ['coverageStatus', 'housingAssessment', 'sourceType']) {
+      expect(html).toContain(`data-choice="${name}"`);
+    }
+    expect(html).toContain('role="radiogroup"');
+    expect(html).toContain('aria-required="true"');
+    expect(html).toContain('tabindex="-1"');
+    expect(html).toContain('required=""');
+  });
+
   it('keeps the original modal for desktop', () => {
     const html = renderToStaticMarkup(<ObservationEditor open targetLabel="大廈" onClose={noop} onSubmit={noop} />);
     expect(html).toMatch(/<dialog[^>]*class="cf-dialog"/);
     expect(html).not.toContain('cf-editor--sheet');
+  });
+
+  /*
+   * A batch of one is still a batch (2026-11-15): the recorder must be able to leave a
+   * task whether they picked one unit or five, so the field cannot be hidden by `batch`.
+   */
+  it('offers the optional follow-up in a batch too, though it is not required', () => {
+    for (const units of [1, 3]) {
+      const html = renderToStaticMarkup(<ObservationEditor
+        open
+        variant="sheet"
+        targetLabel={`真光大廈 · 已選 ${units} 個單位`}
+        batch={{ units }}
+        selectedUnits={[{ id: 'a', label: '1樓 A室' }]}
+        onClose={noop}
+        onSubmit={noop}
+      />);
+      expect(html).toContain('name="followUpReason"');
+      expect(html).toContain('name="followUpDueAt"');
+      expect(html).toContain('更多跟進資料');
+      expect(html).toContain('跟進如填寫，亦會為每個單位各開一項。');
+      expect(html).not.toMatch(/name="followUpReason"[^>]*required/);
+    }
   });
 });

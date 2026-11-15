@@ -35,8 +35,12 @@ interface MapSceneProps {
   expanded: boolean;
   onSelectBuilding: (id: string) => void;
   onBlankClick?: () => void;
-  /** Local-list search is active: every supplied marker is a match and gets a visual outline. */
-  searchActive?: boolean;
+  /**
+   * Ids matched by the local list search. The map always receives every building, so a
+   * search only outlines these and dims the rest: it must never remove a building from the
+   * layer, the click target or the overlap check the add panel relies on.
+   */
+  searchMatchIds?: ReadonlySet<string>;
   onSelectFloor: (id: string) => void;
   onToggleExpanded: () => void;
   onOverview: () => void;
@@ -84,6 +88,9 @@ export default function MapScene(props: MapSceneProps) {
   const extentKey = JSON.stringify(props.buildings.map(b => [b.id, b.longitude, b.latitude, b.footprint]));
   const recordedUnits = props.buildings.reduce((sum, b) => sum + b.floors.reduce((n, f) => n + f.recorded, 0), 0);
   const knownUnits = props.buildings.reduce((sum, b) => sum + b.floors.reduce((n, f) => n + f.total, 0), 0);
+  // A search that found nothing dims nothing: the empty list is said by the list, not the map.
+  const searchMatchIds = props.searchMatchIds;
+  const searchActive = (searchMatchIds?.size ?? 0) > 0;
 
   const frameDistrict = (map: LibreMap) => {
     const bounds = districtBounds(current.current.buildings);
@@ -269,9 +276,11 @@ export default function MapScene(props: MapSceneProps) {
     markers.current = visibleBuildings(props.buildings, props.selectedBuildingId).map(building => {
       // The wording and the class names come from `markerLabel`, so what a marker says
       // can be asserted without a browser; only the assembly happens here.
-      const label = markerLabel(building, building.id === props.selectedBuildingId, overlapPeers.has(building.id), props.searchActive);
+      const match = searchActive && Boolean(searchMatchIds?.has(building.id));
+      const label = markerLabel(building, building.id === props.selectedBuildingId, overlapPeers.has(building.id), match, searchActive && !match);
       const button = document.createElement('button');
       button.className = label.className;
+      button.dataset.search = searchActive ? (match ? 'match' : 'other') : '';
       button.setAttribute('aria-label', label.ariaLabel);
       button.title = label.title;
       button.dataset.buildingId = building.id;
@@ -300,7 +309,7 @@ export default function MapScene(props: MapSceneProps) {
     map.setPaintProperty('focused-city', 'fill-extrusion-height', active ? focusHeight : overviewContextHeight);
     map.setPaintProperty('focused-city', 'fill-extrusion-opacity', (active ? .4 : .72) * Math.min(1, map.getPitch() / 45));
     map.setPaintProperty('focused-city', 'fill-extrusion-base', active ? ['min', ['get', 'base'], focusHeight] : overviewContextBase);
-  }, [props.buildings, props.selectedBuildingId, props.searchActive, active, ready]);
+  }, [props.buildings, props.selectedBuildingId, searchMatchIds, searchActive, active, ready]);
 
   useEffect(() => {
     const map = mapRef.current;
