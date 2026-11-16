@@ -126,6 +126,28 @@ export default function App() {
     query.addEventListener('change', change);
     return () => query.removeEventListener('change', change);
   }, []);
+  // A phone keyboard can leave the layout viewport taller than the visible one. Only the
+  // mobile shell consumes these variables; desktop sizing and all business state stay put.
+  useEffect(() => {
+    if (floating) return;
+    const root = document.documentElement;
+    const viewport = window.visualViewport;
+    const update = () => {
+      root.style.setProperty('--app-viewport-height', `${viewport?.height ?? window.innerHeight}px`);
+      root.style.setProperty('--app-viewport-offset-top', `${viewport?.offsetTop ?? 0}px`);
+    };
+    update();
+    viewport?.addEventListener('resize', update);
+    viewport?.addEventListener('scroll', update);
+    window.addEventListener('resize', update);
+    return () => {
+      viewport?.removeEventListener('resize', update);
+      viewport?.removeEventListener('scroll', update);
+      window.removeEventListener('resize', update);
+      root.style.removeProperty('--app-viewport-height');
+      root.style.removeProperty('--app-viewport-offset-top');
+    };
+  }, [floating]);
   // The desktop finder closes once data arrives; a phone owns its drawer position instead.
   const [finderOpen, setFinderOpen] = useState(true);
   const hasSnapshot = Boolean(snapshot);
@@ -442,19 +464,31 @@ export default function App() {
       : workspace.syncStatus === 'ERROR'
         ? '本機副本仍然保留，但伺服器未確認目前改動；請查看錯誤提示並重試。'
         : '改動已儲存在這部裝置，正在等待伺服器確認；尚未確認前不能當作其他裝置可見。';
+  const headerStatus = <span className="demo-badge"><span />示範資料{account && <b className={`sync-place is-${workspace.syncStatus.toLowerCase()}`} title={syncTitle}>· {syncLabel}</b>}</span>;
+  const headerActions = <>
+    <button ref={helpButtonRef} className="help-button icon-button" aria-label="示範說明" aria-expanded={helpOpen} aria-controls="demo-help" onClick={() => setHelpOpen(!helpOpen)}><CircleHelp size={19} /></button>
+    <AccountMenu />
+    {snapshot && photoIntake && <button className="photo-entry" onClick={() => setPhotoOpen(true)}><Camera size={16} />照片回錄</button>}
+    {/* No switch, no entry (2026-11-02, docs/UI_PERMISSIONS.md 6.2). The task list can still
+        be reached from the sidebar's 「待跟進」 tab, so hiding this loses no data — it only
+        stops offering a dialog the server would refuse to answer. */}
+    {snapshot && aiAssistant && <button className="photo-entry" onClick={() => setAiOpen(true)} title="AI 助手與任務提醒"><Sparkles size={16} />助手</button>}
+  </>;
+  const mobileAccountExtras = <>
+    <div className="mobile-account-menu__meta"><span className="cf-caps">西營盤 · Sai Ying Pun · 外展工作台</span>{headerStatus}</div>
+    <button ref={helpButtonRef} type="button" role="menuitem" className="mobile-account-action" aria-expanded={helpOpen} aria-controls="demo-help" onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); setHelpOpen(!helpOpen); }}><CircleHelp size={17} />示範說明</button>
+    {snapshot && photoIntake && <button type="button" role="menuitem" className="mobile-account-action" onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); setPhotoOpen(true); }}><Camera size={17} />照片回錄</button>}
+    {snapshot && aiAssistant && <button type="button" role="menuitem" className="mobile-account-action" onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); setAiOpen(true); }}><Sparkles size={17} />AI 助手與任務</button>}
+  </>;
 
   return <div className="app-shell">
     <header className="app-header">
       <a className="brand" href="#" onClick={e => { e.preventDefault(); workspace.selectBuilding(); }} aria-label="CareFlow 街區總覽"><span className="brand-symbol"><Footprints size={21} strokeWidth={1.8} /></span><strong>CareFlow<span>Atlas</span></strong></a>
-      <span className="cf-caps app-header__place">西營盤 · Sai Ying Pun · 外展工作台</span>
-      <span className="demo-badge"><span />示範資料{account && <b className={`sync-place is-${workspace.syncStatus.toLowerCase()}`} title={syncTitle}>· {syncLabel}</b>}</span>
-      <button ref={helpButtonRef} className="help-button icon-button" aria-label="示範說明" aria-expanded={helpOpen} aria-controls="demo-help" onClick={() => setHelpOpen(!helpOpen)}><CircleHelp size={19} /></button>
-      <AccountMenu />
-      {snapshot && photoIntake && <button className="photo-entry" onClick={() => setPhotoOpen(true)}><Camera size={16} />照片回錄</button>}
-      {/* No switch, no entry (2026-11-02, docs/UI_PERMISSIONS.md 6.2). The task list can still
-          be reached from the sidebar's 「待跟進」 tab, so hiding this loses no data — it only
-          stops offering a dialog the server would refuse to answer. */}
-      {snapshot && aiAssistant && <button className="photo-entry" onClick={() => setAiOpen(true)} title="AI 助手與任務提醒"><Sparkles size={16} />助手</button>}
+      {floating ? <>
+        <span className="cf-caps app-header__place">西營盤 · Sai Ying Pun · 外展工作台</span>
+        {headerStatus}
+        {headerActions}
+      </> : <AccountMenu>{mobileAccountExtras}</AccountMenu>}
     </header>
     <main className={`workspace ${selectedBuildingId ? 'has-selection' : ''}`}>
       {floating && finder}
@@ -462,7 +496,7 @@ export default function App() {
         <div className="map-topbar"><div><MapPin size={15} /><span>西營盤</span>{selectedBuildingId && <><ChevronRight size={13} /><strong>{snapshot?.buildings.find(b => b.id === selectedBuildingId)?.name}</strong>{selectedFloorId && <><ChevronRight size={13} /><span>{snapshot?.floors.find(f => f.id === selectedFloorId)?.label}</span></>}{selectedUnitId && <><ChevronRight size={13} /><span>{snapshot?.units.find(u => u.id === selectedUnitId)?.label.replace(/^.*? /, '')}</span></>}</>}</div></div>
         <div className="spatial-content"><Suspense fallback={<div className="map-loading">正在準備地圖…</div>}><MapScene buildings={mapBuildings} searchMatchIds={searchMatchIds} insets={mapInsets} placeSearch={placeSearch} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} expanded={expanded} onSelectBuilding={id => { workspace.selectBuilding(id); setSheetSnap('half'); }} onBlankClick={() => { if (!floating) setSheetSnap('collapsed'); }} onSelectFloor={workspace.selectFloor} onToggleExpanded={workspace.toggleExpanded} onOverview={() => { workspace.selectBuilding(); setSheetSnap('half'); }} onSaveFootprint={(id, ring) => { try { workspace.setFootprint(id, ring); setToast('已儲存大廈形狀。記錄沒有改變。'); } catch { setToast('形狀未能儲存，請重試。'); } }} onAddBuilding={input => { try { const refused = workspace.addBuilding(input); if (!refused) { setToast(`已新增「${input.name.trim()}」。`); setFinderOpen(false); setSheetSnap('half'); } return refused; } catch { return { error: '未能儲存，請重試。', field: '' }; } }} /></Suspense></div>
         {!selectedBuildingId && snapshot && !explored && floating && <div className="map-prompt"><span><Building2 size={19} /></span><div><strong>從一幢大廈開始</strong><p>選擇地圖標記，讓每一層的記錄展開。</p></div><ChevronRight size={18} /></div>}
-        {!floating && <MobileSheet title={observationEditor ? '記錄今次結果' : detail ? '大廈與單位' : '大廈清單'} hasSelection={Boolean(detail)} snap={sheetSnap} onSnapChange={setSheetSnap} list={finder} detail={detail} editor={observationEditor} toast={toastNotice} />}
+        {!floating && <MobileSheet title={observationEditor ? '記錄今次結果' : detail ? '大廈與單位' : '搜尋／大廈清單'} hasSelection={Boolean(detail)} snap={sheetSnap} onSnapChange={setSheetSnap} list={finder} detail={detail} editor={observationEditor} toast={toastNotice} />}
       </section>
       {floating && detail}
     </main>

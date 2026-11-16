@@ -393,7 +393,7 @@ export default function MapScene(props: MapSceneProps) {
       // gently: floors thinner than their labels would stack the labels on each other.
       const visibleWidth = Math.max(320, map.getCanvas().clientWidth - (props.insets?.left ?? 0) - (props.insets?.right ?? 0));
       const stackZoom = 18.7 + Math.log2(8 / Math.max(8, active.floors.length)) + Math.min(0, Math.log2(map.getCanvas().clientHeight / 700), Math.log2(visibleWidth / 560));
-      focusOffset.current = [((props.insets?.left ?? 0) - (props.insets?.right ?? 0)) / 2 - (compact ? 0 : FLOOR_LABEL_ALLOWANCE / 2), compact ? 20 : active.floors.length > 3 ? Math.min(110, Math.max(0, map.getCanvas().clientHeight / 2 - 225)) : 0];
+      focusOffset.current = [((props.insets?.left ?? 0) - (props.insets?.right ?? 0)) / 2 - (compact ? 0 : FLOOR_LABEL_ALLOWANCE / 2), compact ? -Math.min(170, map.getCanvas().clientHeight * 0.18) : active.floors.length > 3 ? Math.min(110, Math.max(0, map.getCanvas().clientHeight / 2 - 225)) : 0];
       refreshCutaway.current?.();
       map.flyTo({ center: [active.longitude, active.latitude], zoom: compact ? 17.8 : active.floors.length > 3 ? stackZoom : 18.7, pitch: 58, bearing: -24,
         // Reserve space above the floating controls, including on short desktops. The

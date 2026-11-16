@@ -7,7 +7,7 @@
  */
 
 :root{
-  --radius-sm:4px; --radius-md:8px;
+  --radius-sm:4px; --radius-md:8px; --radius-lg:20px;
   --atlas-paper:#f7f4ec; --atlas-card:#fffdf8; --atlas-ink:#1d2622; --atlas-mute:#7a766b; --atlas-rule:#ddd6c6;
   --atlas-soft:#efe8da; --atlas-acc:#7d3b27; --atlas-task:#9a6420; --atlas-task-bg:#fbf3e3;
   --atlas-serif:'Noto Serif TC',serif; --atlas-sans:'Inter','Noto Sans TC',-apple-system,sans-serif;
@@ -38,26 +38,40 @@ body{background:var(--atlas-paper)}
 .app-shell .help-popover p,.app-shell .help-popover li{color:var(--atlas-mute)}
 .app-shell .help-popover button{background:var(--atlas-ink);color:var(--atlas-paper);border-radius:var(--radius-sm)}
 .app-shell .help-legend i{border-radius:50%}
-/*
- * Phone header (2026-11-15): one 44px control row plus the data-status line, both sized
- * from --app-header-height so the shell, the map and the help popover cannot drift apart.
- * Three older layers used to set 52/84/76px for the same box; only this file is loaded
- * last, so the phone size lives here rather than in mobile.css.
- */
+/* Phone chrome: two independent rounded rectangles over the full-bleed map. */
 @media (max-width:760px){
-  :root{--app-header-height:62px}
-  .app-shell .app-header{height:auto;min-height:var(--app-header-height);gap:0 2px;padding:2px 12px;display:flex;flex-wrap:wrap;align-content:center;align-items:center}
-  .app-shell .brand{gap:8px;min-width:0;min-height:44px}
-  .app-shell .brand strong{font-size:16px;line-height:1.15}
-  .app-shell .brand strong span{font-size:10px;margin-left:3px}
-  .app-shell .brand-symbol{width:28px;height:31px}
-  .app-shell .demo-badge{flex:1 0 100%;font-size:10.5px;line-height:14px;letter-spacing:.08em}
-  .app-shell .help-button,.app-shell .icon-button{min-width:44px;min-height:44px;margin:0}
-  .app-shell .account-menu>summary{min-height:44px;padding:4px}
-  .app-shell .photo-entry{min-width:44px;min-height:44px}
-  .app-shell .help-popover{top:calc(var(--app-header-height) + 6px)}
+  :root{--app-header-height:52px}
+  .app-shell .app-header{
+    position:absolute;top:calc(env(safe-area-inset-top,0px) + 12px);left:12px;right:12px;z-index:40;
+    width:auto;max-width:none;height:var(--app-header-height);min-height:var(--app-header-height);
+    padding:0;display:block;pointer-events:none;background:transparent;border:0;box-shadow:none;backdrop-filter:none;
+  }
+  .app-shell .brand{
+    position:absolute;left:0;top:0;gap:8px;min-width:0;min-height:44px;height:52px;padding:4px 12px;
+    pointer-events:auto;background:#fffdf8f2;border:1px solid #ddd6c6;border-radius:var(--radius-lg);box-shadow:0 6px 20px #3a2e1a1f;backdrop-filter:blur(16px);
+  }
+  .app-shell .brand strong{font-size:16px;line-height:1.15;white-space:nowrap}
+  .app-shell .brand strong span{display:none}
+  .app-shell .brand-symbol{width:30px;height:32px;flex:none}
+  .app-shell .app-header__place{display:none}
+  .app-shell .account-menu{position:absolute;right:0;top:0;margin:0;pointer-events:auto}
+  .app-shell .account-menu>summary{
+    min-height:52px;height:52px;padding:4px 10px 4px 6px;gap:6px;list-style:none;
+    background:#fffdf8f2;border:1px solid #ddd6c6;border-radius:var(--radius-lg);box-shadow:0 6px 20px #3a2e1a1f;backdrop-filter:blur(16px);
+  }
+  .app-shell .account-menu[open]>summary{background:var(--atlas-card)}
+  .app-shell .account-menu__name{display:block;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .app-shell .account-menu__list{
+    top:calc(100% + 8px);right:0;left:auto;width:min(320px,calc(100vw - 24px));max-height:calc(var(--app-viewport-height,100dvh) - env(safe-area-inset-top,0px) - 88px);
+    overflow-y:auto;overscroll-behavior:contain;border-radius:var(--radius-lg);
+  }
+  .app-shell .account-menu__extras{display:grid;gap:4px;margin:0 0 6px;padding:0 0 6px;border-bottom:1px solid var(--atlas-rule)}
+  .app-shell .mobile-account-menu__meta{display:grid;gap:8px;padding:6px 10px 10px}
+  .app-shell .mobile-account-menu__meta .cf-caps{font-size:9px;line-height:1.5}
+  .app-shell .mobile-account-menu__meta .demo-badge{font-size:10.5px;line-height:14px;letter-spacing:.08em}
+  .app-shell .account-menu__list .mobile-account-action{width:100%;min-height:44px}
+  .app-shell .help-popover{position:fixed;top:calc(env(safe-area-inset-top,0px) + 76px);left:12px;right:12px;z-index:60;width:auto;max-width:360px;max-height:calc(var(--app-viewport-height,100dvh) - env(safe-area-inset-top,0px) - 88px);overflow-y:auto}
 }
-@media (max-width:360px){ .app-shell .brand strong span{display:none} }
 
 /* ------------------------------------------------------------------ finder / index */
 .app-shell .district-sidebar{background:var(--atlas-card)}

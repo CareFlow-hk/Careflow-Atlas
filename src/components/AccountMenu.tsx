@@ -1,9 +1,9 @@
 import { ChevronDown, LogOut, Settings2 } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { useAccount } from "../auth/accountContext";
 
 /** The signed-in account in the header: one menu for settings and signing out. */
-export function AccountMenu() {
+export function AccountMenu({ children }: { children?: ReactNode }) {
   const account = useAccount();
   const menu = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
@@ -22,6 +22,7 @@ export function AccountMenu() {
       <summary aria-label="帳號選單"><span className="account-menu__avatar" aria-hidden="true">{account.name.slice(0, 1)}</span><span className="account-menu__name">{account.name}</span><ChevronDown size={15} aria-hidden="true" /></summary>
       <div className="account-menu__list" role="menu">
         <p>{account.role === "ADMIN" ? "機構管理員" : "成員"}</p>
+        {children && <div className="account-menu__extras">{children}</div>}
         <button type="button" role="menuitem" onClick={() => choose(account.openSettings)}><Settings2 size={16} />設定</button>
         <button type="button" role="menuitem" disabled={account.busy} onClick={() => choose(account.logout)}><LogOut size={16} />登出</button>
       </div>
