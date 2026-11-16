@@ -138,6 +138,12 @@ export default function MapScene(props: MapSceneProps) {
         window.clearTimeout(timeout);
         setFailed(false);
         setNotice('');
+        // MapLibre opens the compact attribution on its first paint. On a phone that becomes a
+        // full-width licence strip over the legend and scale; start it as the small info button,
+        // which still expands on tap.
+        if (window.matchMedia('(max-width: 760px)').matches) {
+          map.getContainer().querySelector('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show');
+        }
         const firstLabel = map.getStyle().layers.find(layer => layer.type === 'symbol')?.id;
         // Re-ink the basemap in the atlas tones; layers it does not recognise keep their style.
         for (const layer of map.getStyle().layers) {

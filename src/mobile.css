@@ -33,16 +33,23 @@
     margin: 0;
   }
   .map-scene { position: absolute; inset: 0; height: 100%; min-height: 0; }
-  .map-scene .map-tools { max-height: calc(100% - 96px); overflow-y: auto; }
-  .map-scene .map-toolstack { top: calc(env(safe-area-inset-top, 0px) + 80px); right: 10px; }
-  .map-scene .map-location { top: calc(env(safe-area-inset-top, 0px) + 82px); left: 12px; pointer-events: none; }
-  .map-scene .map-location > span { font-size: 9px; }
-  .map-scene .map-location > strong { margin-top: 3px; font-size: 18px; }
-  .map-scene .map-location > strong small { font-size: 9px; }
-  .map-scene .building-map-marker.is-search-match { border-color: #126455; box-shadow: 0 0 0 3px #ffffff, 0 0 0 5px #126455, 0 5px 18px #29453938; z-index: 3; }
-  .map-scene .map-legend { bottom: calc(env(safe-area-inset-bottom, 0px) + 88px); }
-  .map-scene .map-notice { bottom: calc(env(safe-area-inset-bottom, 0px) + 94px); }
-  .map-scene .maplibregl-ctrl-bottom-left, .map-scene .maplibregl-ctrl-bottom-right { bottom: calc(env(safe-area-inset-bottom, 0px) + 78px); }
+  .app-shell .map-scene .map-tools { max-height: calc(100% - 96px); overflow-y: auto; }
+  .app-shell .map-scene .map-toolstack { top: calc(env(safe-area-inset-top, 0px) + 82px); right: 12px; }
+  /* MapScene is lazy-loaded after this file; the extra scope keeps its top:16px from winning. */
+  .app-shell .map-scene .map-location { top: calc(env(safe-area-inset-top, 0px) + 82px); left: 12px; pointer-events: none; }
+  .app-shell .map-scene .map-location > span { font-size: 9px; }
+  .app-shell .map-scene .map-location > strong { margin-top: 3px; font-size: 18px; }
+  .app-shell .map-scene .map-location > strong small { font-size: 9px; }
+  .app-shell .map-scene .building-map-marker.is-search-match { border-color: #126455; box-shadow: 0 0 0 3px #ffffff, 0 0 0 5px #126455, 0 5px 18px #29453938; z-index: 3; }
+  /* Bottom chrome stacks once: legend above the scale and the small attribution button,
+     so the four-state key never sits under the 50 m bar. */
+  .app-shell .map-scene .map-legend { left: 12px; bottom: calc(env(safe-area-inset-bottom, 0px) + 116px); }
+  .app-shell .map-scene .map-notice { bottom: calc(env(safe-area-inset-bottom, 0px) + 158px); }
+  .app-shell .map-scene .maplibregl-ctrl-bottom-left, .app-shell .map-scene .maplibregl-ctrl-bottom-right { bottom: calc(env(safe-area-inset-bottom, 0px) + 78px); }
+  .app-shell .map-scene .maplibregl-ctrl-bottom-left .maplibregl-ctrl { margin-left: 12px !important; }
+  .app-shell .map-scene .maplibregl-ctrl-bottom-right .maplibregl-ctrl { margin-right: 12px !important; }
+  /* The opened licence strip is a temporary overlay; hide the scale under it rather than let them collide. */
+  .app-shell .map-scene:has(.maplibregl-compact-show) .maplibregl-ctrl-scale { visibility: hidden; }
 
   /* Collapsed and half are cards with a map gutter; expanded trades gutter for form space. */
   .cf-mobile-sheet {
@@ -152,7 +159,8 @@
   .cf-editor--sheet .cf-dialog__footer .cf-button { min-height: 44px; }
 
   /* Add/reselect stays above the floating card and scrolls inside the visible map. */
-  .fp-editor-dock { z-index: 30; left: 8px !important; right: 8px !important; bottom: calc(env(safe-area-inset-bottom, 0px) + 88px); max-height: calc(100% - env(safe-area-inset-top, 0px) - 176px); overflow-y: auto; overscroll-behavior: contain; }
+  /* map.css is injected with the lazy map, so the dock needs the extra scope to keep its bottom edge above the sheet. */
+  .app-shell .map-scene .fp-editor-dock { z-index: 30; left: 12px !important; right: 12px !important; bottom: calc(env(safe-area-inset-bottom, 0px) + 88px); max-height: calc(100% - env(safe-area-inset-top, 0px) - 176px); overflow-y: auto; overscroll-behavior: contain; }
   .fp-editor { width: 100%; max-height: none; padding: 12px; }
   .add-building__close { width: 44px; height: 44px; }
   .add-building__search { align-items: stretch; flex-wrap: wrap; }
@@ -165,6 +173,17 @@
   .add-building__suggest small { margin-left: 0; flex-basis: 100%; }
 
   .storage-banner { bottom: calc(env(safe-area-inset-bottom, 0px) + 88px); z-index: 45; }
+}
+
+/* On short phones the add/reshape panel reaches up into the camera column; keep the mode
+   button but drop the camera tools so the two never sit on top of each other. */
+@media (max-width: 760px) and (max-height: 700px) {
+  .app-shell .map-scene:has(.fp-editor-dock) .map-toolstack .map-tools:not(.map-tools--shape) { display: none; }
+}
+
+/* The toast sits in the 73px gap between the camera column and the key on the shortest phones. */
+@media (max-width: 760px) and (max-height: 640px) {
+  .app-shell .map-scene .map-notice { padding: 10px 12px; }
 }
 
 @media (max-width: 380px) {

@@ -43,6 +43,16 @@ describe('the shared radius and stripe rules', () => {
     expect(mobile['.app-shell'].position).toBe('fixed');
     expect(mobile['.spatial-content'].position).toBe('absolute');
     expect(mobile['.map-topbar'].display).toBe('none');
+    expect(mobile['.app-shell .map-scene .map-location'].top).toBe('calc(env(safe-area-inset-top, 0px) + 82px)');
+    expect(mobile['.app-shell .map-scene .map-legend'].bottom).toBe('calc(env(safe-area-inset-bottom, 0px) + 116px)');
+    expect(mobile['.app-shell .map-scene .map-legend'].left).toBe('12px');
+    expect(mobile['.app-shell .map-scene .map-notice'].bottom).toBe('calc(env(safe-area-inset-bottom, 0px) + 158px)');
+    expect(mobile['.app-shell .map-scene .fp-editor-dock'].bottom).toBe('calc(env(safe-area-inset-bottom, 0px) + 88px)');
+    expect(mobile['.app-shell .map-scene .fp-editor-dock'].left).toBe('12px');
+    expect(mobile['.app-shell .map-scene .fp-editor-dock'].right).toBe('12px');
+    expect(mobile['.app-shell .map-scene:has(.fp-editor-dock) .map-toolstack .map-tools:not(.map-tools--shape)'].display).toBe('none');
+    expect(mobile['.app-shell .map-scene .maplibregl-ctrl-bottom-left .maplibregl-ctrl']['margin-left']).toBe('12px');
+    expect(mobile['.app-shell .map-scene:has(.maplibregl-compact-show) .maplibregl-ctrl-scale'].visibility).toBe('hidden');
     expect(mobile['.cf-mobile-sheet'].position).toBe('absolute');
     expect(mobile['.cf-mobile-sheet.is-collapsed'].height).toBe('64px');
     expect(mobile['.cf-mobile-sheet.is-expanded'].left).toBe('6px');
@@ -51,7 +61,9 @@ describe('the shared radius and stripe rules', () => {
     expect(theme['.app-shell .app-header'].background).toBe('transparent');
     expect(theme['.app-shell .brand']['border-radius']).toBe('var(--radius-lg)');
     expect(theme['.app-shell .account-menu>summary']['border-radius']).toBe('var(--radius-lg)');
+    expect(theme['.app-shell .account-menu__avatar']['border-radius']).toBe('var(--radius-lg)');
     expect(theme['.app-shell .account-menu__list'].right).toBe('0');
+    expect(theme['.app-shell .account-menu__list > button']['min-height']).toBe('44px');
   });
   it('does not bypass the stylesheet using inline radii or left stripes', () => {
     for (const file of source.filter(file => file.endsWith('.tsx'))) expect(readFileSync(file, 'utf8'), file).not.toMatch(/\b(?:borderRadius|borderTopLeftRadius|borderTopRightRadius|borderBottomLeftRadius|borderBottomRightRadius|borderLeft(?:Color|Width|Style)?)\s*:/);
