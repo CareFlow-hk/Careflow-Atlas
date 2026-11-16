@@ -36,10 +36,12 @@
   .app-shell .map-scene .map-tools { max-height: calc(100% - 96px); overflow-y: auto; }
   .app-shell .map-scene .map-toolstack { top: calc(env(safe-area-inset-top, 0px) + 82px); right: 12px; }
   /* MapScene is lazy-loaded after this file; the extra scope keeps its top:16px from winning. */
-  .app-shell .map-scene .map-location { top: calc(env(safe-area-inset-top, 0px) + 82px); left: 12px; pointer-events: none; }
+  .app-shell .map-scene .map-location { top: calc(env(safe-area-inset-top, 0px) + 100px); left: 12px; pointer-events: none; }
   .app-shell .map-scene .map-location > span { font-size: 9px; }
   .app-shell .map-scene .map-location > strong { margin-top: 3px; font-size: 18px; }
   .app-shell .map-scene .map-location > strong small { font-size: 9px; }
+  /* The account panel is an overlay on the map; fade the caption instead of half-covering it. */
+  .app-shell:has(.account-menu[open]) .map-scene .map-location { opacity: 0; }
   .app-shell .map-scene .building-map-marker.is-search-match { border-color: #126455; box-shadow: 0 0 0 3px #ffffff, 0 0 0 5px #126455, 0 5px 18px #29453938; z-index: 3; }
   /* Bottom chrome stacks once: legend above the scale and the small attribution button,
      so the four-state key never sits under the 50 m bar. */
