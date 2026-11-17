@@ -185,7 +185,7 @@ export function SessionGate({ children }: { children: ReactNode }) {
       <button disabled={busy}>{busy ? '正在處理…' : grant ? '設定密碼' : '登入'}</button>
     </form>
     {grant ? <button className="account-text-button" onClick={() => { setGrant(''); setError(''); }}>返回登入</button> : <details><summary>忘記密碼或沒有帳號？</summary><p>請聯絡機構管理員核對身份，獲取一次性邀請或重設連結。管理員無法登入時，由 VPS 運維人員執行恢復命令。</p></details>}
-    <p className="account-note">目前工作台僅用於合成資料示範。管理員開啟「跨裝置同步」後，同一機構的成員在不同裝置會看到同一份，住戶姓名、電話和記錄文字先在瀏覽器加密才存到伺服器；未開啟時資料只留在這部裝置。這仍不是正式的業務資料庫。</p>
+    <p className="account-note">目前工作台僅用於合成資料示範。管理員開啟「跨裝置同步」、設定機構密語並在裝置解鎖後，伺服器確認的改動才可由同一機構成員在下次拉取時看到；住戶姓名、電話和記錄文字先在瀏覽器加密才存到伺服器。未開啟或未解鎖時，資料只留在這部裝置。這仍不是正式的業務資料庫。</p>
   </section></main>;
   if (sync.mode === 'checking') return <main className="account-loading" role="status">正在確認同步設定…</main>;
   const admin = session.user.role === 'ADMIN';

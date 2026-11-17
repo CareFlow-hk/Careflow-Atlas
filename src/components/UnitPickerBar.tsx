@@ -10,17 +10,20 @@ import { pickerKeyAction } from "./unitSelection";
  * accessibility tree in the right place and a reader can still find it when it is shut.
  */
 export interface UnitPickerBarProps {
-  /** How many units the selection holds. Never zero: without a selection there is no bar. */
+  /** Zero is allowed while touch multi-select is waiting for the first unit. */
   count: number;
   /** How many records a delete would take with it, across the whole selection. */
   recordCount: number;
+  /** Names every picked unit so one can be removed without clearing the rest. */
+  units?: readonly { id: string; label: string }[];
+  onRemove?: (unitId: string) => void;
   onClear: () => void;
   onRecord: () => void;
   /** Absent where structure editing is off: recording a set does not depend on it, deleting does. */
   onDelete?: () => void;
 }
 
-export function UnitPickerBar({ count, recordCount, onClear, onDelete, onRecord }: UnitPickerBarProps) {
+export function UnitPickerBar({ count, recordCount, units, onRemove, onClear, onDelete, onRecord }: UnitPickerBarProps) {
   const [helpOpen, setHelpOpen] = useState(false);
   /*
    * Esc clears the picked set while there is one. It is a key people also press to get out
@@ -43,17 +46,20 @@ export function UnitPickerBar({ count, recordCount, onClear, onDelete, onRecord 
   return (
     <div className="cf-pick" role="group" aria-label={`已選 ${count} 個單位`}>
       <p className="cf-pick__head">
-        <strong>已選 {count} 個單位</strong>
+        <strong>{count ? `已選 ${count} 個單位` : '請點選要記錄的單位'}</strong>
         <button type="button" className="cf-pick__help" aria-label="多選操作說明" aria-expanded={helpOpen} aria-controls="cf-pick-help" onClick={() => setHelpOpen(!helpOpen)}><CircleHelp size={14} /></button>
-        <button type="button" className="cf-pick__clear" onClick={onClear}><X size={13} />清除選取</button>
+        <button type="button" className="cf-pick__clear" onClick={onClear}><X size={13} />{count ? '清除選取' : '退出多選'}</button>
       </p>
+      {units && <ul className="cf-pick__units" aria-label="已選單位">
+        {units.map(unit => <li key={unit.id}><span>{unit.label}</span>{onRemove && <button type="button" aria-label={`取消選取 ${unit.label}`} onClick={() => onRemove(unit.id)}><X size={14} /></button>}</li>)}
+      </ul>}
       <p className="cf-pick__more" id="cf-pick-help" hidden={!helpOpen}>
-        按住 Shift 點色塊，可以逐個加入或移出選取；直接點色塊就還原成只選一個。按 Esc 清除選取。
+        多選模式下直接點色塊，即可逐個加入或移出選取；桌面也可按住 Shift 點色塊。按 Esc 清除選取。
         劏房房間要逐格點；已經分拆的單位不能確認無劏房，會被略過。
       </p>
       <div className="cf-pick__acts">
-        <button type="button" className="cf-button cf-button--primary" onClick={onRecord}><ClipboardPlus size={17} />記錄 {count} 個單位</button>
-        {onDelete && <button type="button" className="cf-button cf-button--ghost is-danger" onClick={onDelete}><Trash2 size={15} />刪除選取的 {count} 個單位{recordCount ? `（連 ${recordCount} 筆記錄）` : ""}</button>}
+        <button type="button" className="cf-button cf-button--primary" disabled={!count} onClick={onRecord}><ClipboardPlus size={17} />{count ? `記錄 ${count} 個單位` : '請先選擇單位'}</button>
+        {onDelete && count > 0 && <button type="button" className="cf-button cf-button--ghost is-danger" onClick={onDelete}><Trash2 size={15} />刪除選取的 {count} 個單位{recordCount ? `（連 ${recordCount} 筆記錄）` : ""}</button>}
       </div>
     </div>
   );

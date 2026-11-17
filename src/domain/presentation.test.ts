@@ -80,8 +80,9 @@ describe('one source for every label', () => {
     }
   });
 
-  it('never words the yellow legend as a follow-up', () => {
-    expect(stateLegendNotes.YELLOW).not.toContain('待跟進');
+  it('explains both open follow-ups and mixed children in the yellow legend', () => {
+    expect(stateLegendNotes.YELLOW).toContain('跟進');
+    expect(stateLegendNotes.YELLOW).toContain('混雜');
     expect(stateLabels.YELLOW).not.toContain('待跟進');
   });
 });
@@ -97,14 +98,14 @@ describe('one source for every option', () => {
     expect(contactOptionGroups.map(option => option.group)).toEqual([...CONTACT_GROUPS]);
   });
 
-  it('keeps three built-in choices per field, plus a blank where the field allows it', () => {
+  it('keeps three coverage, contact and source choices, and four explicit housing choices', () => {
     expect(coverageOptionGroups).toHaveLength(3);
     expect(contactOptionGroups).toHaveLength(3);
-    expect(assessmentOptions).toHaveLength(3);
+    expect(assessmentOptions).toHaveLength(4);
     expect(sourceOptions).toHaveLength(3);
-    // Housing and source may be left unrecorded; coverage and contact must be stated.
+    // NOT_UPDATED remains the blank historical state; UNKNOWN must be chosen explicitly.
     expect(assessmentOptions.map(option => option.value)).not.toContain('NOT_UPDATED');
-    expect(assessmentOptions.map(option => option.value)).not.toContain('UNKNOWN');
+    expect(assessmentOptions).toContainEqual({ value: 'UNKNOWN', label: '今次未能判斷住房情況' });
     for (const option of coverageOptionGroups) expect(COVERAGE_STATUSES).toContain(option.canonical);
     for (const option of contactOptionGroups) expect(CONTACT_OUTCOMES).toContain(option.canonical);
   });
@@ -142,6 +143,7 @@ describe('one source for every option', () => {
     expect(acceptedCoverage['覆蓋未明']).toBe('UNKNOWN');
     expect(acceptedContact['未能接觸']).toBe('NO_ANSWER');
     expect(acceptedAssessment['今次未更新']).toBe('NOT_UPDATED');
+    expect(acceptedAssessment['今次未能判斷住房情況']).toBe('UNKNOWN');
     expect(acceptedAssessment['由工作人員確認']).toBe('STAFF_VERIFIED');
     expect(acceptedSource['來源未明']).toBe('UNKNOWN');
   });

@@ -238,12 +238,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .map-topbar > div:first-child > span:first-of-type:not(:last-child), .map-topbar > div:first-child > svg:first-child, .map-topbar > div:first-child > svg:nth-child(3) { display: none; }
 }
 @media (max-width: 760px) {
-  .app-header { height: 84px; display: grid; grid-template-columns: 1fr 44px; gap: 3px 8px; padding: 10px 16px; }
-  .brand { grid-column: 1; grid-row: 1; }
-  .brand strong { font-size: 19px; }
-  .demo-badge { grid-column: 1; grid-row: 2; margin: 0; width: max-content; font-size: 12px; padding: 0; background: transparent; border: 0; }
-  .help-button { grid-column: 2; grid-row: 1/3; }
-  .workspace, .workspace.has-selection { min-height: calc(100dvh - 116px); }
+  /* The phone header is owned by theme-atlas.css (loaded last, --app-header-height). */
   .map-topbar { gap: 8px; padding-inline: 12px; height: 50px; }
   .map-topbar > div:first-child { font-size: 12px; gap: 4px; }
   .map-view-switch button { min-width: 62px; font-size: 13px; }
@@ -264,7 +259,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .cf-issue-row span { padding: 7px 5px; }
   .cf-import-actions { flex-wrap: wrap; }
   .cf-dialog__footer > div { justify-content: flex-end; }
-  .help-popover { top: 77px; }
   .toast { width: calc(100% - 28px); max-width: 420px; bottom: 18px; font-size: 13px; line-height: 1.6; }
   .app-statusbar { padding-inline: 14px; }
   .map-prompt { max-width: calc(100% - 28px); white-space: normal; width: max-content; }

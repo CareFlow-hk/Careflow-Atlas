@@ -34,6 +34,13 @@ interface MapSceneProps {
   selectedFloorId?: string;
   expanded: boolean;
   onSelectBuilding: (id: string) => void;
+  onBlankClick?: () => void;
+  /**
+   * Ids matched by the local list search. The map always receives every building, so a
+   * search only outlines these and dims the rest: it must never remove a building from the
+   * layer, the click target or the overlap check the add panel relies on.
+   */
+  searchMatchIds?: ReadonlySet<string>;
   onSelectFloor: (id: string) => void;
   onToggleExpanded: () => void;
   onOverview: () => void;
@@ -81,6 +88,9 @@ export default function MapScene(props: MapSceneProps) {
   const extentKey = JSON.stringify(props.buildings.map(b => [b.id, b.longitude, b.latitude, b.footprint]));
   const recordedUnits = props.buildings.reduce((sum, b) => sum + b.floors.reduce((n, f) => n + f.recorded, 0), 0);
   const knownUnits = props.buildings.reduce((sum, b) => sum + b.floors.reduce((n, f) => n + f.total, 0), 0);
+  // A search that found nothing dims nothing: the empty list is said by the list, not the map.
+  const searchMatchIds = props.searchMatchIds;
+  const searchActive = (searchMatchIds?.size ?? 0) > 0;
 
   const frameDistrict = (map: LibreMap) => {
     const bounds = districtBounds(current.current.buildings);
@@ -128,6 +138,12 @@ export default function MapScene(props: MapSceneProps) {
         window.clearTimeout(timeout);
         setFailed(false);
         setNotice('');
+        // MapLibre opens the compact attribution on its first paint. On a phone that becomes a
+        // full-width licence strip over the legend and scale; start it as the small info button,
+        // which still expands on tap.
+        if (window.matchMedia('(max-width: 760px)').matches) {
+          map.getContainer().querySelector('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show');
+        }
         const firstLabel = map.getStyle().layers.find(layer => layer.type === 'symbol')?.id;
         // Re-ink the basemap in the atlas tones; layers it does not recognise keep their style.
         for (const layer of map.getStyle().layers) {
@@ -208,6 +224,9 @@ export default function MapScene(props: MapSceneProps) {
         if (hits[0]) { current.current.onSelectBuilding(String(hits[0].properties.id)); return; }
         if (map.getLayer('building') && map.queryRenderedFeatures(e.point, { layers: ['building'] }).length) {
           setNotice(current.current.onAddBuilding ? '這幢大廈未加入外展名單。可用右邊的「＋」按鈕在地圖上新增。' : '這幢大廈暫無示範記錄。請選擇有標記的大廈。');
+        } else {
+          setNotice('');
+          current.current.onBlankClick?.();
         }
       };
       map.on('click', onClick);
@@ -263,9 +282,11 @@ export default function MapScene(props: MapSceneProps) {
     markers.current = visibleBuildings(props.buildings, props.selectedBuildingId).map(building => {
       // The wording and the class names come from `markerLabel`, so what a marker says
       // can be asserted without a browser; only the assembly happens here.
-      const label = markerLabel(building, building.id === props.selectedBuildingId, overlapPeers.has(building.id));
+      const match = searchActive && Boolean(searchMatchIds?.has(building.id));
+      const label = markerLabel(building, building.id === props.selectedBuildingId, overlapPeers.has(building.id), match, searchActive && !match);
       const button = document.createElement('button');
       button.className = label.className;
+      button.dataset.search = searchActive ? (match ? 'match' : 'other') : '';
       button.setAttribute('aria-label', label.ariaLabel);
       button.title = label.title;
       button.dataset.buildingId = building.id;
@@ -294,7 +315,7 @@ export default function MapScene(props: MapSceneProps) {
     map.setPaintProperty('focused-city', 'fill-extrusion-height', active ? focusHeight : overviewContextHeight);
     map.setPaintProperty('focused-city', 'fill-extrusion-opacity', (active ? .4 : .72) * Math.min(1, map.getPitch() / 45));
     map.setPaintProperty('focused-city', 'fill-extrusion-base', active ? ['min', ['get', 'base'], focusHeight] : overviewContextBase);
-  }, [props.buildings, props.selectedBuildingId, active, ready]);
+  }, [props.buildings, props.selectedBuildingId, searchMatchIds, searchActive, active, ready]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -378,7 +399,7 @@ export default function MapScene(props: MapSceneProps) {
       // gently: floors thinner than their labels would stack the labels on each other.
       const visibleWidth = Math.max(320, map.getCanvas().clientWidth - (props.insets?.left ?? 0) - (props.insets?.right ?? 0));
       const stackZoom = 18.7 + Math.log2(8 / Math.max(8, active.floors.length)) + Math.min(0, Math.log2(map.getCanvas().clientHeight / 700), Math.log2(visibleWidth / 560));
-      focusOffset.current = [((props.insets?.left ?? 0) - (props.insets?.right ?? 0)) / 2 - (compact ? 0 : FLOOR_LABEL_ALLOWANCE / 2), compact ? 20 : active.floors.length > 3 ? Math.min(110, Math.max(0, map.getCanvas().clientHeight / 2 - 225)) : 0];
+      focusOffset.current = [((props.insets?.left ?? 0) - (props.insets?.right ?? 0)) / 2 - (compact ? 0 : FLOOR_LABEL_ALLOWANCE / 2), compact ? -Math.min(170, map.getCanvas().clientHeight * 0.18) : active.floors.length > 3 ? Math.min(110, Math.max(0, map.getCanvas().clientHeight / 2 - 225)) : 0];
       refreshCutaway.current?.();
       map.flyTo({ center: [active.longitude, active.latitude], zoom: compact ? 17.8 : active.floors.length > 3 ? stackZoom : 18.7, pitch: 58, bearing: -24,
         // Reserve space above the floating controls, including on short desktops. The

@@ -40,7 +40,7 @@ describe('stateOf: the one colour switch', () => {
     ['no record at all', {}, false, 'GRAY'],
     ['UNKNOWN coverage', { coverage: 'UNKNOWN' }, false, 'GRAY'],
     ['UNVISITED coverage', { coverage: 'UNVISITED' }, false, 'GRAY'],
-    ['UNVISITED with an open task stays grey', { coverage: 'UNVISITED' }, true, 'GRAY'],
+    ['UNVISITED with an open task is yellow', { coverage: 'UNVISITED' }, true, 'YELLOW'],
     ['visited with no finding', { coverage: 'VISITED_NO_FINDING' }, false, 'GREEN'],
     ['visited with no finding plus a task', { coverage: 'VISITED_NO_FINDING' }, true, 'YELLOW'],
     ['visited with a finding', { coverage: 'VISITED_WITH_FINDING' }, false, 'GREEN'],
@@ -48,11 +48,11 @@ describe('stateOf: the one colour switch', () => {
     ['partial visit', { coverage: 'PARTIAL' }, false, 'RED'],
     ['partial visit plus a task', { coverage: 'PARTIAL' }, true, 'YELLOW'],
     ['attempted, nobody answered', { coverage: 'ATTEMPTED', contactOutcome: 'NO_ANSWER' }, false, 'RED'],
-    ['attempted, nobody answered, with a task', { coverage: 'ATTEMPTED', contactOutcome: 'NO_ANSWER' }, true, 'RED'],
+    ['attempted, nobody answered, with a task', { coverage: 'ATTEMPTED', contactOutcome: 'NO_ANSWER' }, true, 'YELLOW'],
     ['attempted and made contact', { coverage: 'ATTEMPTED', contactOutcome: 'CONTACTED' }, false, 'RED'],
     ['attempted and made contact, with a task', { coverage: 'ATTEMPTED', contactOutcome: 'CONTACTED' }, true, 'YELLOW'],
     ['could not get in', { coverage: 'INACCESSIBLE' }, false, 'RED'],
-    ['could not get in, with a task', { coverage: 'INACCESSIBLE' }, true, 'RED'],
+    ['could not get in, with a task', { coverage: 'INACCESSIBLE' }, true, 'YELLOW'],
     ['could not get in but made contact', { coverage: 'INACCESSIBLE', contactOutcome: 'CONTACTED' }, false, 'RED'],
   ];
   for (const [name, extra, hasOpen, expected] of cases) {
@@ -203,16 +203,16 @@ describe('the manual tag is a separate marker', () => {
   });
 });
 
-describe('a task changes the badge, never the base colour', () => {
-  it('keeps a red unit red and still shows the task', () => {
+describe('an open task takes yellow priority and keeps its badge', () => {
+  it('turns a red unit yellow and still shows the task', () => {
     const scene = snapshot([unitRecord('o1', 'u1', 'INACCESSIBLE', task('再訪樓梯口', { category: 'GENERAL' }))]);
-    expect(unitState(scene, 'b1', 'u1')).toBe('RED');
+    expect(unitState(scene, 'b1', 'u1')).toBe('YELLOW');
     expect(followUpBadges(scene, { buildingId: 'b1', unitId: 'u1' })).toEqual([{ category: 'GENERAL', action: '再訪樓梯口', dueDate: undefined, assignee: undefined, timingNote: undefined }]);
   });
 
-  it('keeps a gray unit gray and still shows the task', () => {
-    const scene = snapshot([observation('o1', { unitId: 'u1', floorId: 'f1', coverage: 'UNVISITED', ...task('確認單位是否存在', { category: 'HOUSING_CHANGE' }) })]);
-    expect(unitState(scene, 'b1', 'u1')).toBe('GRAY');
+  it('turns an unvisited unit yellow and still shows the task', () => {
+    const scene = snapshot([observation('o1', { unitId: 'u1', floorId: 'f1', coverage: 'UNVISITED', assessment: 'UNKNOWN', sourceType: 'STAFF_OBSERVATION', ...task('確認單位是否存在', { category: 'HOUSING_CHANGE' }) })]);
+    expect(unitState(scene, 'b1', 'u1')).toBe('YELLOW');
     expect(followUpBadges(scene, { buildingId: 'b1', unitId: 'u1' })[0]?.category).toBe('HOUSING_CHANGE');
   });
 
@@ -222,13 +222,14 @@ describe('a task changes the badge, never the base colour', () => {
     expect(followUpBadges(scene, { buildingId: 'b1', unitId: 'u1' })).toHaveLength(1);
   });
 
-  it('an open task alone never repaints any level', () => {
+  it('an open task repaints the unit, floor and building yellow', () => {
     const plain = snapshot([unitRecord('o1', 'u1', 'UNVISITED')]);
     const withTask = snapshot([unitRecord('o1', 'u1', 'UNVISITED', task())]);
     expect(getOpenFollowUps(withTask)).toHaveLength(1);
-    expect(unitState(withTask, 'b1', 'u1')).toBe(unitState(plain, 'b1', 'u1'));
-    expect(floorState(withTask, 'b1', 'f1')).toBe(floorState(plain, 'b1', 'f1'));
-    expect(buildingState(withTask, 'b1')).toBe(buildingState(plain, 'b1'));
+    expect(unitState(plain, 'b1', 'u1')).toBe('GRAY');
+    expect(unitState(withTask, 'b1', 'u1')).toBe('YELLOW');
+    expect(floorState(withTask, 'b1', 'f1')).toBe('YELLOW');
+    expect(buildingState(withTask, 'b1')).toBe('YELLOW');
   });
 
   it('groups badges by category and carries the facts a hover needs', () => {
@@ -340,13 +341,11 @@ describe('option simplification keeps every old combination', () => {
   const coverages: CoverageStatus[] = ['UNKNOWN', 'UNVISITED', 'ATTEMPTED', 'PARTIAL', 'VISITED_NO_FINDING', 'VISITED_WITH_FINDING', 'INACCESSIBLE'];
   const contacts: ContactOutcome[] = ['NOT_ATTEMPTED', 'NO_ANSWER', 'DECLINED', 'CONTACTED', 'UNKNOWN'];
   /** The behaviour these 35 combinations had before the options were simplified. */
-  const expected = (coverage: CoverageStatus, contact: ContactOutcome, hasOpen: boolean): State => {
+  const expected = (coverage: CoverageStatus, _contact: ContactOutcome, hasOpen: boolean): State => {
+    if (hasOpen) return 'YELLOW';
     if (coverage === 'UNKNOWN' || coverage === 'UNVISITED') return 'GRAY';
-    if (coverage === 'VISITED_NO_FINDING' || coverage === 'VISITED_WITH_FINDING') return hasOpen ? 'YELLOW' : 'GREEN';
-    // Reaching nobody leaves a failure; only a partial visit, or one that did reach
-    // someone, counts as intermediate — and only a task turns an intermediate yellow.
-    const intermediate = coverage === 'PARTIAL' || contact === 'CONTACTED';
-    return intermediate && hasOpen ? 'YELLOW' : 'RED';
+    if (coverage === 'VISITED_NO_FINDING' || coverage === 'VISITED_WITH_FINDING') return 'GREEN';
+    return 'RED';
   };
   it('covers all 35 combinations', () => expect(coverages.length * contacts.length).toBe(35));
   for (const coverage of coverages) for (const contact of contacts) for (const hasOpen of [false, true]) {
@@ -357,14 +356,10 @@ describe('option simplification keeps every old combination', () => {
   }
 });
 /*
- * 裁定（2026-09-26）：黃色優先於綠色。綠的定義是「完成且無 OPEN 跟進」，所以只要
- * 節點內仍有未結跟進，它就不是綠的——即使它的覆蓋率看起來已經做完。紅與灰不動。
- *
- * 缺口只在聚合那一支：節點自身的舊記錄被較新的子記錄比下去時，`nodeState` 回傳
- * 子節點的聚合色，而那一支從前不看 hasOpen。所以重現必須是「本層舊記錄帶 OPEN
- * 跟進 + 樓下單位較新且已完成」——單位的底色本身已經是黃，測不出這個缺口。
+ * 2026-11-15：OPEN 跟進在所有覆蓋狀態上都優先顯示黃色，包括未到訪與未能完成。
+ * 聚合路徑也必須看 hasOpen，否則較新的子記錄會令仍有任務的父節點丟掉黃色。
  */
-describe('yellow outranks green when a task is still open', () => {
+describe('an open task takes yellow priority at every level', () => {
   const units = [unit('u1', 'f1')];
   const floors = [floor('f1', 1)];
 
@@ -403,16 +398,18 @@ describe('yellow outranks green when a task is still open', () => {
     expect(withOpenTasks('GREEN', false)).toBe('GREEN');
   });
 
-  it('leaves red alone: a failure is still a failure with a task on it', () => {
+  it('turns red yellow while work is open and restores red without it', () => {
     const scene = snapshot([unitRecord('o1', 'u1', 'INACCESSIBLE', task())], { units, floors });
-    expect(unitState(scene, 'b1', 'u1')).toBe('RED');
-    expect(withOpenTasks('RED', true)).toBe('RED');
+    expect(unitState(scene, 'b1', 'u1')).toBe('YELLOW');
+    expect(withOpenTasks('RED', true)).toBe('YELLOW');
+    expect(withOpenTasks('RED', false)).toBe('RED');
   });
 
-  it('leaves grey alone: nothing recorded is not the same as nothing outstanding', () => {
+  it('turns grey yellow while work is open and restores grey without it', () => {
     const scene = snapshot([unitRecord('o1', 'u1', 'UNVISITED', task())], { units, floors });
-    expect(unitState(scene, 'b1', 'u1')).toBe('GRAY');
-    expect(withOpenTasks('GRAY', true)).toBe('GRAY');
+    expect(unitState(scene, 'b1', 'u1')).toBe('YELLOW');
+    expect(withOpenTasks('GRAY', true)).toBe('YELLOW');
+    expect(withOpenTasks('GRAY', false)).toBe('GRAY');
   });
 
   it('a closed task does not hold a green node back', () => {
@@ -422,9 +419,8 @@ describe('yellow outranks green when a task is still open', () => {
     expect(floorState(scene, 'b1', 'f1')).toBe('GREEN');
   });
 
-  it('never makes a node greener or redder than the leaf switch would', () => {
-    // Whatever the branch, a node may only ever move off green; the leaf path already
-    // applies the rule, so applying it again at the node must change nothing there.
+  it('is idempotent when the aggregate applies the same open-task priority again', () => {
+    // The leaf path already applies the rule, so applying it again changes nothing.
     for (const coverage of ['VISITED_NO_FINDING', 'VISITED_WITH_FINDING', 'PARTIAL', 'ATTEMPTED', 'INACCESSIBLE', 'UNVISITED'] as const) {
       for (const hasOpen of [true, false]) {
         const scene = snapshot([unitRecord('o1', 'u1', coverage, hasOpen ? task() : {})], { units, floors });

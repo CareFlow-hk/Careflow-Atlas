@@ -204,10 +204,10 @@ export const exportSourceLabels: Record<SourceType, string> = {
 
 /* --------------------------------------------------------------- options --- */
 /*
- * Entry is reduced to three choices per field (housing and source may also be left
- * blank). The wording a person picks is not what gets stored: each choice resolves
- * to one canonical value from the full vocabulary, so old records keep their exact
- * value and no migration is needed. See COLOR_PIPELINE_DESIGN.md §10.
+ * Entry uses a small set of explicit choices per field. The wording a person picks
+ * is not what gets stored: each choice resolves to one canonical value from the full
+ * vocabulary, so old records keep their exact value and no migration is needed. See
+ * COLOR_PIPELINE_DESIGN.md §10.
  */
 
 export const COVERAGE_GROUPS = ['UNVISITED', 'INCOMPLETE', 'COMPLETED'] as const;
@@ -244,6 +244,8 @@ export const contactOptionGroups: readonly OptionGroup<ContactGroup, ContactOutc
  */
 export const assessmentOptions: readonly { value: HousingAssessment; label: string }[] = [
   { value: 'NO_INDICATION', label: assessmentLabels.NO_INDICATION },
+  // An explicit answer about this visit, not the historical label or a blank update.
+  { value: 'UNKNOWN', label: '今次未能判斷住房情況' },
   { value: 'SUSPECTED', label: assessmentLabels.SUSPECTED },
   { value: 'STAFF_VERIFIED', label: assessmentLabels.STAFF_VERIFIED },
 ];

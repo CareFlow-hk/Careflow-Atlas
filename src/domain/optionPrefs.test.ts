@@ -9,8 +9,9 @@ import {
 const allFields: OptionField[] = [...OPTION_FIELDS];
 
 describe('the built-in choices stay locked', () => {
-  it('offers exactly three per field, which is what the pipeline is written against', () => {
-    for (const field of allFields) expect({ field, count: builtInChoices(field).length }).toEqual({ field, count: 3 });
+  it('offers four housing choices and three choices for each other field', () => {
+    const expected: Record<OptionField, number> = { coverage: 3, contactOutcome: 3, assessment: 4, sourceType: 3 };
+    for (const field of allFields) expect({ field, count: builtInChoices(field).length }).toEqual({ field, count: expected[field] });
   });
 
   it('never lets an option be added without a state to map to (§10.4)', () => {

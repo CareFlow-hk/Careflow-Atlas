@@ -13,7 +13,7 @@ import { nextSelection, pruneSelection } from "./unitSelection";
 import { features } from "../app/features";
 import { FollowUpActions, type FollowUpActionHandler } from "./FollowUpActions";
 
-export interface BuildingDetailProps { snapshot: OutreachSnapshot; selectedBuildingId?: string; selectedFloorId?: string; selectedUnitId?: string; onBack?: () => void; onSelectFloor: (floorId: string) => void; /** Undefined goes back to the building itself. */ onSelectUnit: (unitId?: string) => void; onToggleTag: (subject: { buildingId: string; floorId?: string }, tag?: NodeTag) => void; onFollowUpAction?: FollowUpActionHandler; onStartObservation: (subject: { buildingId: string; floorId?: string; unitId?: string; label: string; /** Several units at once, for a batch. */ unitIds?: string[] }) => void;
+export interface BuildingDetailProps { snapshot: OutreachSnapshot; selectedBuildingId?: string; selectedFloorId?: string; selectedUnitId?: string; onBack?: () => void; onSelectFloor: (floorId: string) => void; /** Undefined goes back to the building itself. */ onSelectUnit: (unitId?: string) => void; onToggleTag: (subject: { buildingId: string; floorId?: string }, tag?: NodeTag) => void; onFollowUpAction?: FollowUpActionHandler; onStartObservation: (subject: { buildingId: string; floorId?: string; unitId?: string; label: string; /** Several units at once, for a batch. */ unitIds?: string[]; onRemoveUnit?: (unitId: string) => void; onComplete?: () => void }) => void;
   /** Experimental structure editing. Returns a refusal in staff wording, if any. Without it the editor is not offered. */
   onStructureChange?: (change: StructureChange) => string | undefined;
   /** The current workbook, offered to the browser when staff delete records. Answers whether it was taken. */
@@ -57,10 +57,12 @@ export function BuildingDetail(props: BuildingDetailProps) {
    * is just a selected unit, so nothing extra is offered until a second one joins.
    */
   const [chosen, setChosen] = useState<string[]>([]);
+  const [multiSelect, setMultiSelect] = useState(false);
+  const selectionActive = multiSelect || chosen.length > 1;
   /* What a delete of the picked set would take with it, read once per selection rather than
      once per render: the bar shows the count before the click, not only in the question after. */
-  const pickedImpact = useMemo(() => (chosen.length > 1 ? structureImpact(snapshot, { kind: "removeUnits", unitIds: chosen }) : undefined), [snapshot, chosen]);
-  useEffect(() => { setEditing(false); setSplitTarget(undefined); setPending(undefined); setChosen([]); }, [selectedBuildingId]);
+  const pickedImpact = useMemo(() => (chosen.length ? structureImpact(snapshot, { kind: "removeUnits", unitIds: chosen }) : undefined), [snapshot, chosen]);
+  useEffect(() => { setEditing(false); setSplitTarget(undefined); setPending(undefined); setChosen([]); setMultiSelect(false); }, [selectedBuildingId]);
   /*
    * The structure can change under a selection: ＋／－, ✕ on a floor, or a split all rewrite the
    * units while the pick is still held. An id that no longer names anything would go on counting
@@ -95,6 +97,7 @@ export function BuildingDetail(props: BuildingDetailProps) {
   const blankAreaClick = (event: MouseEvent<HTMLElement>) => {
     if ((event.target as HTMLElement).closest("button, input, .cf-structure, .cf-structure__confirm")) return;
     setChosen([]);
+    setMultiSelect(false);
     onSelectUnit(undefined);
   };
   /*
@@ -162,10 +165,15 @@ export function BuildingDetail(props: BuildingDetailProps) {
    */
   const pick = (unit: Unit, event: MouseEvent<HTMLButtonElement>) => {
     if (editing) { setSplitTarget(unit.parentUnitId ?? unit.id); return; }
-    if (!event.shiftKey) { setChosen([unit.id]); onSelectUnit(unit.id); return; }
-    const next = nextSelection(chosen, unit.id, true);
-    setChosen(next);
-    onSelectUnit(next.includes(unit.id) ? unit.id : next.at(-1));
+    if (multiSelect || event.shiftKey) {
+      const next = nextSelection(chosen, unit.id, true);
+      setMultiSelect(true);
+      setChosen(next);
+      onSelectUnit(next.includes(unit.id) ? unit.id : next.at(-1));
+      return;
+    }
+    setChosen([unit.id]);
+    onSelectUnit(unit.id);
   };
   const unitCell = (unit: Unit, room: boolean) => {
     const unitStateValue = unitState(snapshot, building.id, unit.id);
@@ -179,10 +187,10 @@ export function BuildingDetail(props: BuildingDetailProps) {
     const owner = unit.parentUnitId ?? unit.id;
     const active = editing ? splitTarget === owner : selectedUnitId === unit.id;
     // A single picked unit is just the selection, which already has its own mark.
-    const picked = chosen.length > 1 && chosen.includes(unit.id);
+    const picked = selectionActive && chosen.includes(unit.id);
     const label = `${unit.label} · ${stateLabels[unitStateValue]}${tasks ? ` · ${tasks} 項待跟進` : ""}${clue ? ` · ${clueLabels[clue]}` : ""}${editing ? " · 設定劏房間數" : ""}${picked ? " · 已選" : ""}`;
     return <button key={unit.id} role="gridcell" className={`cf-cell is-${unitStateValue.toLowerCase()}${active ? " is-selected" : ""}${room ? " is-room" : ""}${picked ? " is-picked" : ""}`}
-      style={{ "--cf-state": stateColors[unitStateValue] } as CSSProperties} aria-label={label} title={label} aria-pressed={active} onClick={event => pick(unit, event)}>
+      style={{ "--cf-state": stateColors[unitStateValue] } as CSSProperties} aria-label={label} title={label} aria-pressed={multiSelect ? picked : active} onClick={event => pick(unit, event)}>
       {tasks > 0 && <span className="cf-cell__task">↻{tasks > 1 ? tasks : ""}</span>}{!room && clueMark(clue)}
     </button>;
   };
@@ -216,6 +224,17 @@ export function BuildingDetail(props: BuildingDetailProps) {
           <h2>{building.name}{!!props.overlapPeers?.length && <> <small className="building-overlap-badge">可能重複</small></>}</h2>
           <p>{floors.length ? `${floors.length} 層 · ${drawnUnits.length} 個單位` : "樓層未知"} · <span className="cf-plate__state" style={{ "--cf-state": stateColors[state] } as CSSProperties}><i />整幢{stateLabels[state]}</span></p>
         </div>
+        <button type="button" className={`cf-multiselect-toggle${multiSelect ? ' is-active' : ''}`} aria-pressed={multiSelect} onClick={() => {
+          if (multiSelect) {
+            const remaining = selectedUnitId && chosen.includes(selectedUnitId) ? selectedUnitId : chosen.at(-1);
+            setChosen(remaining ? [remaining] : []);
+            onSelectUnit(remaining);
+            setMultiSelect(false);
+          } else {
+            setChosen(selectedUnitId ? [selectedUnitId] : []);
+            setMultiSelect(true);
+          }
+        }}>{multiSelect ? '退出多選' : '多選記錄'}</button>
         {features.nodeTags && <button className="cf-tag-button" aria-pressed={buildingTagged} onClick={() => onToggleTag({ buildingId: building.id }, buildingTagged ? undefined : "FOLLOW_UP")} title={buildingTagged ? "取消大廈的跟進標記" : "為全幢加上跟進標記"}><Flag size={15} />{buildingTagged ? "已標記" : "標記跟進"}</button>}
       </header>
       <div className="cf-building-content" key={building.id}>
@@ -280,7 +299,7 @@ export function BuildingDetail(props: BuildingDetailProps) {
                    * so it gets its own mark at the end rather than sharing the minus.
                    */
                   ? <span key={`${floor.id}-edit`} className="cf-matrix__edit"><button type="button" aria-label={`在${floor.label}加一個單位`} title="加一個單位" onClick={() => runChange({ kind: "addUnit", floorId: floor.id })}><Plus size={11} /></button>{canDeleteStructure && <><button type="button" disabled={!lastUnit} aria-label={lastUnit ? `移除${lastUnit.label}` : `${floor.label}沒有單位可移除`} title={lastUnit ? `移除最後一個單位（${lastUnit.label}）` : "這一層沒有單位"} onClick={() => lastUnit && runChange({ kind: "removeUnits", unitIds: [lastUnit.id] })}><Minus size={11} /></button><button type="button" className="is-danger" aria-label={`刪除${floor.label}`} title="刪除整層（有記錄會先問）" onClick={() => runChange({ kind: "removeFloor", floorId: floor.id })}><X size={11} /></button></>}</span>
-                  : <span key={`${floor.id}-sum`} className="cf-matrix__sum">{scoped.completed}/{list.length}</span>,
+                  : <span key={`${floor.id}-sum`} className="cf-matrix__sum">{scoped.completed}/{scoped.total ?? list.length}</span>,
               ];
             })}
           </div> : <p className="cf-layout-note">尚未有已聲明的樓層或單位佈局，仍可記錄大廈層面的到訪。{onStructureChange && !editing && " 可按「編輯結構」直接加樓層。"}</p>}
@@ -288,7 +307,7 @@ export function BuildingDetail(props: BuildingDetailProps) {
               discoverable on its own, and the batch bar that would otherwise explain it only
               appears once the thing it explains has already been done. Hidden while the
               structure editor is open: there a click sets a 劏房 count instead of picking. */}
-          {hasMatrix && !editing && <p className="cf-plate__hint">按住 Shift 點色塊，可以一次記錄多個單位。</p>}
+          {hasMatrix && !editing && <p className="cf-plate__hint">{multiSelect ? '逐戶點按加入或取消；下方可看清已選單位。' : '按「多選記錄」後直接點多戶；桌面也可按住 Shift 點色塊。'}</p>}
           {editing && onStructureChange && <StructureBar snapshot={snapshot} buildingId={building.id} splitUnitId={splitTarget} onCloseSplit={() => setSplitTarget(undefined)} onChange={runChange} onDeleteUnit={canDeleteStructure ? deleteUnit : undefined} canDelete={canDeleteStructure} />}
           {/* Only ever shown for a delete that would take records with it, so the count is on
               screen at the moment staff decide — not after the fact. It sits outside the
@@ -311,11 +330,22 @@ export function BuildingDetail(props: BuildingDetailProps) {
           <ObservationHistory snapshot={snapshot} subjectId={building.id} subjectType="BUILDING" onFollowUpAction={onFollowUpAction} onWithdraw={onWithdrawObservation} canWithdraw={canWithdraw} emptyLabel="大廈層面尚未有記錄；在上方選擇單位查看。" />
         </section>}
       </div>
-      {chosen.length > 1 ? (
+      {selectionActive ? (
         <UnitPickerBar count={chosen.length} recordCount={pickedImpact?.records ?? 0}
-          onClear={() => { setChosen([]); onSelectUnit(undefined); }}
-          onDelete={onStructureChange && canDeleteStructure ? deletePicked : undefined}
-          onRecord={() => onStartObservation({ buildingId: building.id, label: `${building.name} · 已選 ${chosen.length} 個單位`, unitIds: [...chosen] })} />
+          units={chosen.map(id => ({ id, label: buildingUnits.find(unit => unit.id === id)?.label ?? id }))}
+          onRemove={unitId => {
+            setChosen(previous => nextSelection(previous, unitId, true));
+            if (selectedUnitId === unitId) onSelectUnit(chosen.find(id => id !== unitId));
+          }}
+          onClear={() => { setChosen([]); setMultiSelect(false); onSelectUnit(undefined); }}
+          onDelete={onStructureChange && canDeleteStructure && chosen.length ? deletePicked : undefined}
+          onRecord={() => { if (chosen.length) onStartObservation({
+            buildingId: building.id,
+            label: `${building.name} · 已選 ${chosen.length} 個單位`,
+            unitIds: [...chosen],
+            onRemoveUnit: unitId => setChosen(previous => nextSelection(previous, unitId, true)),
+            onComplete: () => { setChosen([]); setMultiSelect(false); onSelectUnit(undefined); },
+          }); }} />
       ) : (
         <footer className="cf-record-action"><span>{building.name} · {selectedUnit?.label ?? "大廈層面"}</span><button className="cf-button cf-button--primary cf-button--full" onClick={() => onStartObservation(selectedUnit ? { buildingId: building.id, floorId: selectedUnit.floorId, unitId: selectedUnit.id, label: `${building.name} · ${selectedUnit.label}` } : { buildingId: building.id, label: `${building.name} · 大廈到訪` })}><ClipboardPlus size={18} />{selectedUnit ? "記錄今次結果" : "記錄大廈到訪"}</button></footer>
       )}

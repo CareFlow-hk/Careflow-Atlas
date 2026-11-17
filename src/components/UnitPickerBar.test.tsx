@@ -63,6 +63,21 @@ describe('the bar that acts on a picked set', () => {
     expect(render()).not.toContain('--cf-state');
   });
 
+  it('names every unit and provides an individual touch removal action', () => {
+    const markup = render({ units: [{ id: 'a', label: '1樓 A室' }, { id: 'b', label: '1樓 B室' }], onRemove: noop });
+    expect(markup).toContain('aria-label="已選單位"');
+    expect(markup).toContain('取消選取 1樓 A室');
+    expect(markup).toContain('取消選取 1樓 B室');
+  });
+
+  it('allows an empty touch selection but disables recording until a unit is picked', () => {
+    const markup = render({ count: 0, units: [] });
+    expect(markup).toContain('請點選要記錄的單位');
+    expect(markup).toContain('退出多選');
+    expect(markup).toContain('請先選擇單位');
+    expect(markup).toContain('disabled=""');
+  });
+
   /* Recording a set does not depend on structure editing; deleting a set does. */
   it('offers no delete where units cannot be removed', () => {
     const markup = renderToStaticMarkup(<UnitPickerBar count={3} recordCount={2} onClear={noop} onRecord={noop} />);

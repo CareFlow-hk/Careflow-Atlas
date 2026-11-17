@@ -416,6 +416,17 @@ export function getCoverageStatus(snapshot: OutreachSnapshot, buildingId: string
 }
 
 export interface CoverageSummary { total?: number; recorded: number; completed: number; followUps: number; status: CoverageStatus; }
+
+/**
+ * The units that currently occupy a visitable slot. A split parent is only a container;
+ * its leaf rooms replace it. This filters structure, never observations: each room still
+ * inherits the parent's records through `latestForUnit` / `latestCoverageForUnit`.
+ */
+export function currentVisitableUnits(snapshot: OutreachSnapshot, buildingId: string, floorId?: string): Unit[] {
+  const splitIds = new Set(snapshot.units.map((unit) => unit.parentUnitId).filter((id): id is string => id !== undefined));
+  return snapshot.units.filter((unit) => unit.buildingId === buildingId && (!floorId || unit.floorId === floorId) && !splitIds.has(unit.id));
+}
+
 /**
  * Counting and the paper/Excel 覆蓋概況 column only. `status` is the older seven-value
  * vocabulary and is deliberately kept: the workbook round-trip and the W0 recognition
@@ -433,8 +444,7 @@ export function getCoverageSummary(snapshot: OutreachSnapshot, buildingId: strin
    * unit's records as its starting point — the same reading the colour uses. Without this
    * the figures would count a place that is no longer drawn and miss the rooms that are.
    */
-  const splitIds = new Set(snapshot.units.map((unit) => unit.parentUnitId).filter((id): id is string => id !== undefined));
-  const scopeUnits = snapshot.units.filter((unit) => unit.buildingId === buildingId && (!floorId || unit.floorId === floorId) && !splitIds.has(unit.id));
+  const scopeUnits = currentVisitableUnits(snapshot, buildingId, floorId);
   const scopedRecords = effectiveObservations(snapshot).filter((item) => item.buildingId === buildingId && (!floorId || item.floorId === floorId));
   /*
    * Two answers per unit, deliberately read apart: which units were visited at all (the
@@ -591,19 +601,20 @@ export function openFollowUpsInScope(snapshot: OutreachSnapshot, scope: Scope): 
 }
 
 /**
- * Coverage plus contact plus the open-task flag decide the state. The one statement
- * of the rule; `stateOf` is this applied to a recorded event, and the entry form asks
- * the same question about a choice it has not saved yet.
+ * An open follow-up takes priority at every level: the unit needs attention even
+ * when its latest visit was unvisited or unsuccessful. Once the task is closed,
+ * coverage decides the colour again. The entry preview uses this same rule.
  */
-function stateFor(coverage: CoverageStatus, contactOutcome: ContactOutcome | undefined, hasOpen: boolean): State {
+function stateFor(coverage: CoverageStatus, _contactOutcome: ContactOutcome | undefined, hasOpen: boolean): State {
+  if (hasOpen) return "YELLOW";
   switch (coverage) {
     case "UNKNOWN":
     case "UNVISITED": return "GRAY";
     case "VISITED_NO_FINDING":
-    case "VISITED_WITH_FINDING": return hasOpen ? "YELLOW" : "GREEN";
-    case "PARTIAL": return hasOpen ? "YELLOW" : "RED";
+    case "VISITED_WITH_FINDING": return "GREEN";
+    case "PARTIAL":
     case "ATTEMPTED":
-    case "INACCESSIBLE": return contactOutcome === "CONTACTED" ? (hasOpen ? "YELLOW" : "RED") : "RED";
+    case "INACCESSIBLE": return "RED";
     default: return "GRAY";
   }
 }
@@ -618,18 +629,17 @@ export function previewState(coverage: CoverageStatus, contactOutcome: ContactOu
 }
 
 /**
- * Coverage plus the open-task flag decide the state. One function, three levels.
- *
- * `hasOpen` is an input, not an override: it only chooses between the two outcomes
- * of an inconclusive or intermediate visit. A failure stays red and an unvisited
- * node stays grey whether or not a task is outstanding — the task shows as a badge.
+ * Coverage and open follow-ups decide the state. One function, three levels.
+ * An open task is checked before coverage so even an unvisited or failed unit
+ * is visibly yellow until its outstanding work is done or cancelled.
  */
 export function stateOf(snapshot: OutreachSnapshot, scope: Scope, hasOpen: boolean): State {
-  // Only a record that states a coverage can decide a colour; a visit recorded without
-  // one leaves the earlier result — and therefore the colour — as it was.
+  if (hasOpen) return "YELLOW";
+  // Without an open task, only a record that states coverage can decide a colour;
+  // a visit without coverage leaves the earlier result as it was.
   const observation = latestCoverageInScope(snapshot, scope);
   if (!observation) return "GRAY";
-  return stateFor(observation.coverage, observation.contactOutcome, hasOpen);
+  return stateFor(observation.coverage, observation.contactOutcome, false);
 }
 
 /** All children the same colour → that colour. Any mixture → yellow. Nothing to read → undefined. */
@@ -650,16 +660,12 @@ export function latestChildInScope(snapshot: OutreachSnapshot, scope: Scope): Co
 }
 
 /**
- * Yellow outranks green. Green means "done, with nothing outstanding" (§3.1), so a node
- * that still carries an open task anywhere inside it is not done, however finished its
- * coverage looks. Only green moves: red stays red (a failure is a fact, and the task
- * shows as a badge) and grey stays grey (nothing was ever recorded).
- *
- * This closes the aggregate path in `nodeState`, where a floor or building whose
- * children were all green came back green with a task still open under it.
+ * Open follow-up work has the same yellow priority on an aggregate as on a unit.
+ * This also covers the branch where newer children supply the aggregate colour;
+ * closing the last task lets the underlying coverage colour show through again.
  */
 export function withOpenTasks(state: State, hasOpen: boolean): State {
-  return hasOpen && state === "GREEN" ? "YELLOW" : state;
+  return hasOpen ? "YELLOW" : state;
 }
 
 /**
@@ -692,7 +698,7 @@ export function unitState(snapshot: OutreachSnapshot, buildingId: string, unitId
  * floor-level event, if one exists, is history only and never decides the colour.
  */
 export function floorState(snapshot: OutreachSnapshot, buildingId: string, floorId: string): State {
-  const childStates = snapshot.units.filter(unit => unit.floorId === floorId).map(unit => unitState(snapshot, buildingId, unit.id));
+  const childStates = currentVisitableUnits(snapshot, buildingId, floorId).map(unit => unitState(snapshot, buildingId, unit.id));
   return withOpenTasks(aggregate(childStates) ?? "GRAY", openFollowUpsInScope(snapshot, { buildingId, floorId }).length > 0);
 }
 
