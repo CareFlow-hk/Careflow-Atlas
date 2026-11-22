@@ -25,6 +25,7 @@ import type { ReminderTask, ReminderViewer } from '../domain/reminders';
 import { useHkToday } from './useHkToday';
 import { features } from './features';
 import { useAccount } from '../auth/accountContext';
+import { useDeviceLocation } from '../location/deviceLocationContext';
 import { stateColors, stateLabels, stateLegendNotes } from '../domain/presentation';
 import { roomFormDefaults } from '../components/observationDefaults';
 import { mergeWorkflow } from '../data/workflowMerge';
@@ -92,6 +93,7 @@ export default function App() {
   const workspace = useWorkspace();
   // Photo intake sends pages to Azure, so it only appears once an administrator has turned it on.
   const account = useAccount();
+  const deviceLocation = useDeviceLocation();
   const photoIntake = account?.features.photoIntake === true;
   const { snapshot, selectedBuildingId, selectedFloorId, selectedUnitId, expanded } = workspace;
   const [importOpen, setImportOpen] = useState(false);
@@ -494,7 +496,7 @@ export default function App() {
       {floating && finder}
       <section className="spatial-workspace" aria-label="街區探索">
         <div className="map-topbar"><div><MapPin size={15} /><span>西營盤</span>{selectedBuildingId && <><ChevronRight size={13} /><strong>{snapshot?.buildings.find(b => b.id === selectedBuildingId)?.name}</strong>{selectedFloorId && <><ChevronRight size={13} /><span>{snapshot?.floors.find(f => f.id === selectedFloorId)?.label}</span></>}{selectedUnitId && <><ChevronRight size={13} /><span>{snapshot?.units.find(u => u.id === selectedUnitId)?.label.replace(/^.*? /, '')}</span></>}</>}</div></div>
-        <div className="spatial-content"><Suspense fallback={<div className="map-loading">正在準備地圖…</div>}><MapScene buildings={mapBuildings} searchMatchIds={searchMatchIds} insets={mapInsets} placeSearch={placeSearch} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} expanded={expanded} onSelectBuilding={id => { workspace.selectBuilding(id); setSheetSnap('half'); }} onBlankClick={() => { if (!floating) setSheetSnap('collapsed'); }} onSelectFloor={workspace.selectFloor} onToggleExpanded={workspace.toggleExpanded} onOverview={() => { workspace.selectBuilding(); setSheetSnap('half'); }} onSaveFootprint={(id, ring) => { try { workspace.setFootprint(id, ring); setToast('已儲存大廈形狀。記錄沒有改變。'); } catch { setToast('形狀未能儲存，請重試。'); } }} onAddBuilding={input => { try { const refused = workspace.addBuilding(input); if (!refused) { setToast(`已新增「${input.name.trim()}」。`); setFinderOpen(false); setSheetSnap('half'); } return refused; } catch { return { error: '未能儲存，請重試。', field: '' }; } }} /></Suspense></div>
+        <div className="spatial-content"><Suspense fallback={<div className="map-loading">正在準備地圖…</div>}><MapScene buildings={mapBuildings} searchMatchIds={searchMatchIds} insets={mapInsets} placeSearch={placeSearch} deviceLocation={deviceLocation.fix} selectedBuildingId={selectedBuildingId} selectedFloorId={selectedFloorId} expanded={expanded} onSelectBuilding={id => { workspace.selectBuilding(id); setSheetSnap('half'); }} onBlankClick={() => { if (!floating) setSheetSnap('collapsed'); }} onSelectFloor={workspace.selectFloor} onToggleExpanded={workspace.toggleExpanded} onOverview={() => { workspace.selectBuilding(); setSheetSnap('half'); }} onSaveFootprint={(id, ring) => { try { workspace.setFootprint(id, ring); setToast('已儲存大廈形狀。記錄沒有改變。'); } catch { setToast('形狀未能儲存，請重試。'); } }} onAddBuilding={input => { try { const refused = workspace.addBuilding(input); if (!refused) { setToast(`已新增「${input.name.trim()}」。`); setFinderOpen(false); setSheetSnap('half'); } return refused; } catch { return { error: '未能儲存，請重試。', field: '' }; } }} /></Suspense></div>
         {!selectedBuildingId && snapshot && !explored && floating && <div className="map-prompt"><span><Building2 size={19} /></span><div><strong>從一幢大廈開始</strong><p>選擇地圖標記，讓每一層的記錄展開。</p></div><ChevronRight size={18} /></div>}
         {!floating && <MobileSheet title={observationEditor ? '記錄今次結果' : detail ? '大廈與單位' : '搜尋／大廈清單'} hasSelection={Boolean(detail)} snap={sheetSnap} onSnapChange={setSheetSnap} list={finder} detail={detail} editor={observationEditor} toast={toastNotice} />}
       </section>

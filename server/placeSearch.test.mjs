@@ -117,6 +117,7 @@ test('a block keeps its building name, its estate, and its block number', async 
     address: '九龍 · 九龍城區 · 德朗邨 · 1座 · 承啟道 28',
     lng: 114.20303,
     lat: 22.3307,
+    relevance: 1,
   });
 });
 

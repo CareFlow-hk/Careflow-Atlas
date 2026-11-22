@@ -13,6 +13,7 @@ import { suggestNearbyAddress, type KnownBuilding } from './nearbyAddress';
 import { nearbyBuilding, type PlaceResult } from './placeSearch';
 import { CLOSED, searchBox, showsNothing } from './searchBox';
 import { useFootprintShape } from './useFootprintShape';
+import { formatDeviceDistance, rankPlacesByProximity, usableDeviceFix, type DeviceFix } from '../domain/deviceLocation';
 
 interface Props {
   map: LibreMap;
@@ -28,6 +29,8 @@ interface Props {
    * lives on the server, which refuses the request whether or not the box is drawn.
    */
   search?: (query: string) => Promise<PlaceResult[]>;
+  /** A device-only fix, sampled once when each search returns; never sent to the address service. */
+  deviceLocation?: DeviceFix;
 }
 const SOURCE = 'add-preview', LAYERS = ['add-preview-point'];
 const C = footprintEditorColors;
@@ -35,7 +38,7 @@ const C = footprintEditorColors;
 const NOWHERE: Origin = { lng: 0, lat: 0 };
 
 /** Pick a spot on the flat map — left-click for a mapped building, right-click for a new one — then name it and shape it. */
-export function AddBuildingPanel({ map, neighbours, buildings, onSelectBuilding, onAdd, onCancel, find = findOsmFootprint, search }: Props) {
+export function AddBuildingPanel({ map, neighbours, buildings, onSelectBuilding, onAdd, onCancel, find = findOsmFootprint, search, deviceLocation }: Props) {
   const [picked, setPicked] = useState<Picked>();
   const [form, setForm] = useState<AddBuildingForm>({ name: '', address: '' });
   const [problem, setProblem] = useState<{ text: string; field?: string }>();
@@ -47,6 +50,8 @@ export function AddBuildingPanel({ map, neighbours, buildings, onSelectBuilding,
   /** The spot came from a search result, so only that pick raises 「可能重複」. */
   const [chosenBySearch, setChosenBySearch] = useState(false);
   const searchTicket = useRef(0);
+  const locationRef = useRef(deviceLocation);
+  locationRef.current = deviceLocation;
   const pickCount = useRef(0);
   const nameRef = useRef<HTMLInputElement>(null);
   const addressRef = useRef<HTMLInputElement>(null);
@@ -131,11 +136,21 @@ export function AddBuildingPanel({ map, neighbours, buildings, onSelectBuilding,
     send({ kind: 'asked', requestId: ticket });
     try {
       const found = await search(words);
-      send({ kind: 'found', requestId: ticket, results: found });
+      // One position snapshot per returned result set; later watch updates cannot reorder a
+      // list under someone's finger. Both orders pass the reducer's request guard together,
+      // so a late response cannot replace the restoration copy of a newer search.
+      send({ kind: 'found', requestId: ticket, results: rankPlacesByProximity(found, locationRef.current), originalResults: found });
     } catch (error) {
       send({ kind: 'failed', requestId: ticket, message: error instanceof Error ? error.message : '搜尋未成功，請再試一次。' });
     }
   };
+
+  // Turning location off (or losing a usable fix) removes local distance labels immediately
+  // and restores this same result set to the server's order, without another network request.
+  useEffect(() => {
+    if (usableDeviceFix(deviceLocation) || !box.results.some(result => result.distanceMetres !== undefined)) return;
+    send({ kind: 'restored' });
+  }, [deviceLocation, box.results]);
 
   /**
    * A result is a place to look at, not a record: it moves the pick and fills the two fields.
@@ -186,10 +201,12 @@ export function AddBuildingPanel({ map, neighbours, buildings, onSelectBuilding,
       </form>}
       {box.problem && <p className="fp-editor__note is-problem" role="status">{box.problem}</p>}
       {box.results.length > 0 && <ul className="add-building__results" aria-label="搜尋結果">
+        {box.results.some(result => result.distanceMetres !== undefined) && <li className="add-building__distance-note">已按搜尋相關度及裝置距離排序；距離只作參考。</li>}
         {box.results.map(result => <li key={result.id}>
           <button type="button" onClick={() => choosePlace(result)}>
             <span className="add-building__result-name">{result.name}</span>
             {result.address && result.address !== result.name && <small>{result.address}</small>}
+            {result.distanceMetres !== undefined && <small className="add-building__distance">{formatDeviceDistance(result.distanceMetres)}</small>}
           </button>
         </li>)}
       </ul>}

@@ -1,0 +1,25 @@
+.location-consent{box-sizing:border-box;width:min(440px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:auto;margin:auto;padding:26px;border:0;border-radius:var(--radius-lg);background:#fff;color:#183b30;box-shadow:0 24px 80px #102d2660;font:15px/1.55 system-ui,sans-serif}
+.location-consent::backdrop{background:#102d2680;backdrop-filter:blur(3px)}
+.location-consent__icon{display:grid;place-items:center;width:46px;height:46px;border-radius:50%;background:#e7f2ec;color:#205b45}
+.location-consent__eyebrow{margin:16px 0 3px;color:#5f716d;font-size:12px;font-weight:700;letter-spacing:.04em}
+.location-consent h2{margin:0 0 10px;font-size:24px;line-height:1.25}
+.location-consent>p{margin:10px 0}.location-consent ul{display:grid;gap:10px;margin:16px 0;padding:0;list-style:none}
+.location-consent li{display:flex;align-items:flex-start;gap:10px}.location-consent li svg{flex:none;margin-top:3px;color:#205b45}
+.location-consent .location-consent__privacy{padding:12px;border-radius:var(--radius-md);background:#f3f7f4;color:#536b60;font-size:13px}
+.location-consent .location-consent__note{color:#536b60;font-size:13px}
+.location-consent__actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:20px}
+.location-consent__actions button{min-height:46px;padding:10px 14px;border:1px solid #8aa495;border-radius:var(--radius-md);font:600 15px system-ui,sans-serif;cursor:pointer}
+.location-consent__actions .is-primary{border-color:#205b45;background:#205b45;color:#fff}
+.location-consent__actions .is-secondary{background:#fff;color:#183b30}
+.account-page .account-location{margin:20px 0}
+.account-location__heading{display:flex;align-items:center;justify-content:space-between;gap:18px}
+.account-location__heading h2{margin-top:0}.account-location__heading p{margin-bottom:0}
+.account-page .account-location__switch{flex:none;min-width:82px;min-height:44px;border-color:#8aa495;background:#fff;color:#183b30;font-weight:700}
+.account-page .account-location__switch.is-on{border-color:#205b45;background:#205b45;color:#fff}
+.account-location__status{display:flex;align-items:flex-start;gap:12px;margin:18px 0 0;padding:12px 14px;border-radius:var(--radius-md);background:#f3f7f4;line-height:1.55}
+.account-location__status strong{flex:none}.account-location__status span{color:#40594e}
+.account-page .account-location__privacy{margin:12px 0 0;color:#536b60;font-size:13px;line-height:1.6}
+.account-page .account-location__warning{padding:10px 12px;border-radius:var(--radius-md);background:#fff1f1;color:#9d2020;font-size:13px}
+.device-location-marker{position:relative;width:20px;height:20px;border:3px solid #fff;border-radius:50%;background:#2563eb;box-shadow:0 0 0 2px #2563eb55,0 2px 8px #102d2650;pointer-events:none}
+@media(max-width:760px){.location-consent{width:calc(100vw - 24px);max-height:calc(100dvh - 24px - env(safe-area-inset-bottom));padding:22px;border-radius:var(--radius-lg)}.location-consent__actions{position:sticky;bottom:0;padding-top:8px;background:#fff}.location-consent__actions button{min-height:50px}.account-location__heading{align-items:flex-start;gap:12px}.account-location__status{display:grid;gap:4px}}
+@media(max-width:360px){.location-consent__actions{grid-template-columns:1fr}.location-consent__actions .is-primary{grid-row:1}}

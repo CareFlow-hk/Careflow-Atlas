@@ -35,6 +35,27 @@ describe('responses belong to the submitted search, not the current input', () =
     expect(found.searching).toBe(false);
   });
 
+  it('restores the current rows locally without reviving a settled network request', () => {
+    const asked = searchBox(typed('福滿'), { kind: 'asked', requestId: 1 });
+    const found = searchBox(asked, { kind: 'found', requestId: 1, results: [{ ...fuMun, distanceMetres: 20 }], originalResults: [fuMun] });
+    const restored = searchBox(found, { kind: 'restored' });
+    expect(restored.results).toEqual([fuMun]);
+    expect(restored.requestId).toBeUndefined();
+    expect(restored.searched).toBe(true);
+    expect(searchBox(restored, { kind: 'found', requestId: 1, results: [] })).toEqual(restored);
+  });
+
+  it('keeps the latest restoration copy when an older search finishes last', () => {
+    const older = { ...fuMun, id: 'als-old', name: '舊請求結果' };
+    const latest = { ...fuMun, id: 'als-new', name: '新請求結果' };
+    const first = searchBox(typed('福滿'), { kind: 'asked', requestId: 1 });
+    const second = searchBox(searchBox(first, { kind: 'typed', words: '福滿大廈' }), { kind: 'asked', requestId: 2 });
+    const accepted = searchBox(second, { kind: 'found', requestId: 2, results: [{ ...latest, distanceMetres: 10 }], originalResults: [latest] });
+    const late = searchBox(accepted, { kind: 'found', requestId: 1, results: [{ ...older, distanceMetres: 30 }], originalResults: [older] });
+    expect(late).toEqual(accepted);
+    expect(searchBox(late, { kind: 'restored' }).results).toEqual([latest]);
+  });
+
   it('does not reopen the result list after a result has been chosen', () => {
     const asked = searchBox(typed('福滿'), { kind: 'asked', requestId: 1 });
     const found = searchBox(asked, { kind: 'found', requestId: 1, results: [fuMun] });
