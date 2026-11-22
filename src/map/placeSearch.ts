@@ -12,8 +12,14 @@ import { toLocal } from './footprintGeometry';
  * "this coordinate is that building".
  */
 
-/** What the server returns per place: exactly the fields the panel fills in. */
-export interface PlaceResult { id: string; name: string; address: string; lng: number; lat: number }
+/** Server fields plus optional local display metadata. A device position is never sent here. */
+export interface PlaceResult {
+  id: string; name: string; address: string; lng: number; lat: number;
+  /** Our server's normalised text relevance; absent on an older server. */
+  relevance?: number;
+  /** Computed only in the browser for this result snapshot. */
+  distanceMetres?: number;
+}
 /** A building already on the atlas, for the "this looks like it is already here" check. */
 export interface ExistingBuilding { id: string; name: string; lng: number; lat: number }
 
@@ -43,7 +49,10 @@ export function readPlaces(value: unknown): PlaceResult[] {
     const address = text(item.address);
     const name = text(item.name) || address;
     if (!name) return [];
-    return [{ id: text(item.id) || `place-${index}`, name, address, lng, lat }];
+    const relevance = typeof item.relevance === 'number' && Number.isFinite(item.relevance)
+      && item.relevance >= 0 && item.relevance <= 1 ? item.relevance : undefined;
+    // Never accept a distance from the server: it is derived locally from the current device fix.
+    return [{ id: text(item.id) || `place-${index}`, name, address, lng, lat, ...(relevance === undefined ? {} : { relevance }) }];
   });
 }
 

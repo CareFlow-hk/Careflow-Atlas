@@ -16,6 +16,14 @@ describe('rows from the server', () => {
     expect(readPlaces({ places: [place()] })).toEqual([place()]);
   });
 
+  it('keeps our relevance metadata but never trusts a distance from the server', () => {
+    const [row] = readPlaces({ places: [{ ...place(), relevance: 0.75, distanceMetres: 12 }] });
+    expect(row.relevance).toBe(0.75);
+    expect(row.distanceMetres).toBeUndefined();
+    expect(readPlaces({ places: [{ ...place(), relevance: 1.2 }] })[0].relevance).toBeUndefined();
+    expect(readPlaces({ places: [{ ...place(), relevance: -0.1 }] })[0].relevance).toBeUndefined();
+  });
+
   it('drops a place without a position rather than placing it at zero', () => {
     expect(readPlaces({ places: [place({ lng: 0, lat: 0 })] })).toEqual([]);
     expect(readPlaces({ places: [{ ...place(), lng: undefined, lat: undefined }] })).toEqual([]);

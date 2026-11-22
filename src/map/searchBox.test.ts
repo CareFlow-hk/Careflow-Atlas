@@ -35,6 +35,16 @@ describe('responses belong to the submitted search, not the current input', () =
     expect(found.searching).toBe(false);
   });
 
+  it('restores the current rows locally without reviving a settled network request', () => {
+    const asked = searchBox(typed('福滿'), { kind: 'asked', requestId: 1 });
+    const found = searchBox(asked, { kind: 'found', requestId: 1, results: [{ ...fuMun, distanceMetres: 20 }] });
+    const restored = searchBox(found, { kind: 'restored', results: [fuMun] });
+    expect(restored.results).toEqual([fuMun]);
+    expect(restored.requestId).toBeUndefined();
+    expect(restored.searched).toBe(true);
+    expect(searchBox(restored, { kind: 'found', requestId: 1, results: [] })).toEqual(restored);
+  });
+
   it('does not reopen the result list after a result has been chosen', () => {
     const asked = searchBox(typed('福滿'), { kind: 'asked', requestId: 1 });
     const found = searchBox(asked, { kind: 'found', requestId: 1, results: [fuMun] });

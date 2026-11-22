@@ -191,7 +191,7 @@ lang:     en | tc | sc
 1. 取 `prh-estates` 与 `hos-courts` 的繁体（`tc`）与英文（`en`）共四份，按座标配对（今日两语顺序一致，但不依赖顺序）。
 2. 词做 `NFKC` + 去空白 + 小写后，比对**中文名与英文名**：`德朗` 与 `Tak Long` 都能找到德朗邨。
 3. 排序：以该词开头的优先，其次名字短的在前。
-4. 结果与 ALS 同一格式 `{id, name, address, lng, lat}`；`address` 由来源的「区域 · 分区」拼成（例：`九龍 · 九龍城`），**不是街道门牌，也不替它补门牌**。
+4. 结果与 ALS 同一格式 `{id, name, address, lng, lat, relevance}`；`address` 由来源的「区域 · 分区」拼成（例：`九龍 · 九龍城`），**不是街道门牌，也不替它补门牌**。`relevance` 是服务器按来源自身文字匹配归一化的 0–1 分数，不是 ALS 厂商原始 Score。
 
 英文那半失败时只用中文名继续（有降级、不静默）；繁体那半失败就报错，不回空列表。
 
@@ -216,6 +216,9 @@ lang:     en | tc | sc
 - 修改输入立即清除旧候选和提示，并允许提交新查询；成功、失败响应都必须属于仍有效的请求编号。旧请求即使更晚返回，也不得修改新查询的界面。
 - 选中一条结果后，**名称和地址都填进表单**（名称覆盖已打的字），两个字段之后都可改。
 - 选中后复用现有的 `picked` 状态与 `seedRing` / `buildingInput` 逻辑，不新建第二条写入路径。
+- **装置定位开启时（2026-11-22）**：浏览器对服务器返回的同一批结果计算 `0.70 × relevance + 0.30 × proximity`，`proximity = 1 / (1 + distanceMetres / 300)`。坐标由 Haversine 算直线距离，超过 5 分钟或准确度差于 500 米时不加权。
+- 一次搜索只使用返回那一刻的位置，后续 `watchPosition` 不让候选在手指下跳动；关闭定位或位置失效时，用本地 `restored` 事件恢复服务器顺序和移除距离，不重发请求。装置坐标不进入 `/api/place-search`。
+- 距离只改变候选显示顺序，不自动选择、定位或建楼；关闭／拒绝／不支持定位时仍走原服务器顺序。详见 [GPS_LOCATION_PLAN.md](GPS_LOCATION_PLAN.md)。
 
 ### 3.4 决策：Google 先不接，槽位留着（2026-11-01）
 
@@ -293,14 +296,15 @@ lang:     en | tc | sc
 
 | 文件 | 作用 |
 | --- | --- |
-| `server/placeSearch.mjs` | 唯一对外请求的出口：两个来源（ALS、HA 名册）、超时、上限（8 条）、香港边界过滤、查询词比对（3.1.3）与去重、名册缓存与比对、`google` 槽位 |
-| `server/placeSearch.test.mjs` | 50 项：ALS 的 `q`／`n`／JSON、真实响应结构（中英块顺序、`SuggestedAddress` 缺失、去重、XML 回退）、查询词拆分／容错／门牌与座数／`3樓` 不当门牌、超时／拒绝／密钥，以及 HA 的两种字段拼法／全角空格／中英匹配／缓存与过期／并发合并／空 body／越界／资源选择 |
+| `server/placeSearch.mjs` | 唯一对外请求的出口：两个来源（ALS、HA 名册）、超时、上限（8 条）、香港边界过滤、查询词比对（3.1.3）与去重、0–1 文字相关性、名册缓存与比对、`google` 槽位 |
+| `server/placeSearch.test.mjs` | 56 项：ALS 的 `q`／`n`／JSON、真实响应结构（中英块顺序、`SuggestedAddress` 缺失、去重、XML 回退）、查询词拆分／容错／门牌与座数／`3樓` 不当门牌、超时／拒绝／密钥，以及 HA 的两种字段拼法／全角空格／中英匹配／缓存与过期／并发合并／空 body／越界／资源选择 |
 | `server/http.mjs` | `GET /api/place-search`：开关 `403`、每账号 60 次 / 15 分钟、断线即中止上游请求、查询不落审计不落日志 |
 | `server/features.mjs` | `placeSearch`：`scope: 'org'`、`who: 'platform'`、默认关闭 |
 | `src/map/placeSearch.ts` | 浏览器侧：`readPlaces` 边界复检、`nearbyBuilding`（15 米）、`searchPlaces` |
-| `src/map/placeSearch.test.ts` | 16 项：保留 / 丢弃、名称回退、重复判定、查询编码、短查询不打扰服务器、失败不被吞成「找不到」 |
-| `src/map/AddBuildingPanel.tsx` | 面板顶部搜索框、结果列表、选中后 `pickAt` + 以结果填入名称与地址、疑似重复提示与跳转 |
-| `src/map/MapScene.tsx` / `src/app/App.tsx` | 按 `account.features.placeSearch` 决定是否把搜索能力交给面板 |
+| `src/map/placeSearch.test.ts` | 17 项：保留 / 丢弃、名称回退、重复判定、查询编码、短查询不打扰服务器、失败不被吞成「找不到」、相关性边界与坐标不进入查询 |
+| `src/map/AddBuildingPanel.tsx` | 面板顶部搜索框、结果列表、定位有效时的本地距离加权与距离显示、失效时恢复服务器顺序、选中后 `pickAt` + 以结果填入名称与地址、疑似重复提示与跳转 |
+| `src/domain/deviceLocation.ts` / `src/location/` | 装置 fix 有效期与精度、距离及权重、每账号本地偏好、浏览器定位生命周期、首次说明和个人设置 |
+| `src/map/MapScene.tsx` / `src/app/App.tsx` | 按 `account.features.placeSearch` 决定是否把搜索能力交给面板；每次地图挂载最多用有效装置位置初始居中一次 |
 | `src/auth/AccountPanel.tsx` / `accountContext.ts` | 开关文案；平台管理员可切换，机构管理员只看到「已開啟的功能」 |
 | `.env.example` | `PLACE_PROVIDER`（默认 `als`）／`ALS_ENDPOINT`／`ALS_API_KEY`（可留空）／HA 的 `HA_BASE`、`HA_RESOURCES` |
 

@@ -29,6 +29,8 @@ export type SearchEvent =
   | { kind: 'asked'; requestId: number }
   | { kind: 'found'; requestId: number; results: PlaceResult[] }
   | { kind: 'failed'; requestId: number; message: string }
+  /** Local display metadata changed; restore this same result set, never another request's rows. */
+  | { kind: 'restored'; results: PlaceResult[] }
   /** A result was chosen: the list closes, and so does anything said about it. */
   | { kind: 'chosen' };
 
@@ -41,6 +43,7 @@ export function searchBox(state: SearchBox, event: SearchEvent): SearchBox {
     // A failure is said out loud: an empty list would read as 「沒有這幢大廈」, which is a different thing.
     case 'failed': return event.requestId === state.requestId
       ? { ...state, requestId: undefined, searching: false, results: [], searched: true, problem: event.message } : state;
+    case 'restored': return { ...state, results: event.results };
     case 'chosen': return { ...CLOSED, query: state.query };
   }
 }

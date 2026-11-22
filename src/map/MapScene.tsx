@@ -16,6 +16,7 @@ import { easeInOutCubic, motionDuration, spatialMotion } from '../app/motion';
 import { contextPosition, cutawayEnabled, CutawayTransition, CUTAWAY_DURATION, focusCameraState, focusHeight, shouldLowerBuilding, sightBearing, cameraGroundPoint } from './focusContext';
 import { breakdownLabel, mapSceneColors, nodeTagLabel, stateColors, stateLabels, stateLegendNotes } from '../domain/presentation';
 import { OUTREACH_STATES } from '../domain/types';
+import { usableDeviceFix, type DeviceFix } from '../domain/deviceLocation';
 import './map.css';
 
 // MapLibre 6 ships a separate worker. Let Vite bundle and resolve it in both modes.
@@ -52,6 +53,8 @@ interface MapSceneProps {
   onAddBuilding?: (input: NewBuildingInput) => { error: string; field: string } | undefined;
   /** Offer name search in the add-building panel. The address service is the server's to call, and its switch is the server's to enforce. */
   placeSearch?: boolean;
+  /** In-memory only. A valid fix centres the initial overview once; later fixes only move its marker. */
+  deviceLocation?: DeviceFix;
 }
 
 export default function MapScene(props: MapSceneProps) {
@@ -71,6 +74,8 @@ export default function MapScene(props: MapSceneProps) {
   const [bearing, setBearing] = useState(DISTRICT_CAMERA.bearing);
   const [compact, setCompact] = useState(() => window.matchMedia('(max-width: 760px)').matches);
   const markers = useRef<Marker[]>([]);
+  const deviceMarker = useRef<Marker | null>(null);
+  const initialLocationHandled = useRef(false);
   const floorLabelElements = useRef(new Map<string, HTMLButtonElement>());
   const active = props.buildings.find(b => b.id === props.selectedBuildingId);
   // Shape editing: which building, and the camera to return to afterwards.
@@ -389,12 +394,38 @@ export default function MapScene(props: MapSceneProps) {
     };
   }, [active, ready]);
 
+  const centreInitialDeviceLocation = (map: LibreMap) => {
+    if (initialLocationHandled.current) return false;
+    const fix = current.current.deviceLocation;
+    if (!usableDeviceFix(fix)) return false;
+    if (current.current.selectedBuildingId || addingRef.current || editingRef.current) {
+      initialLocationHandled.current = true;
+      return false;
+    }
+    initialLocationHandled.current = true;
+    const { left = 0, right = 0 } = current.current.insets ?? {};
+    const height = map.getCanvas().clientHeight;
+    map.stop();
+    map.flyTo({
+      center: [fix.lng, fix.lat], zoom: 17.2, pitch: DISTRICT_CAMERA.pitch, bearing: DISTRICT_CAMERA.bearing,
+      // Keep the point clear of the desktop finder and the phone's bottom sheet.
+      offset: [(left - right) / 2, compact ? -Math.min(120, height * .14) : 0], padding: 0,
+      duration: motionDuration(spatialMotion.overview), easing: easeInOutCubic, essential: false,
+    });
+    return true;
+  };
+  const cancelInitialDeviceLocation = () => {
+    mapRef.current?.stop();
+    initialLocationHandled.current = true;
+  };
+
   const restoreDefaultView = (map: LibreMap) => {
     // Recover from a stale edit lock as well as arbitrary pan/zoom/pitch/rotation.
     cancelPitchLock.current?.(); cancelPitchLock.current = undefined;
     map.stop();
     map.setMaxPitch(85);
     if (active) {
+      initialLocationHandled.current = true;
       // Size the stack to the part of the map the floating cards leave visible, but only
       // gently: floors thinner than their labels would stack the labels on each other.
       const visibleWidth = Math.max(320, map.getCanvas().clientWidth - (props.insets?.left ?? 0) - (props.insets?.right ?? 0));
@@ -408,7 +439,11 @@ export default function MapScene(props: MapSceneProps) {
         offset: focusOffset.current,
         duration: motionDuration(spatialMotion.focus), easing: easeInOutCubic, essential: false });
     } else {
-      frameDistrict(map);
+      if (addingRef.current || editingRef.current) {
+        initialLocationHandled.current = true;
+        return;
+      }
+      if (!centreInitialDeviceLocation(map)) frameDistrict(map);
     }
   };
 
@@ -422,6 +457,33 @@ export default function MapScene(props: MapSceneProps) {
   // Camera changes follow selection, not observation edits.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.selectedBuildingId, ready, compact, extentKey]);
+
+  // The fix may arrive after the map. Consume one valid fix per mounted scene; watch updates
+  // only move the marker below, so neither GPS drift nor snapshot edits can steal the camera.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map && ready) centreInitialDeviceLocation(map);
+  }, [props.deviceLocation, ready]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const fix = props.deviceLocation;
+    if (!usableDeviceFix(fix)) {
+      deviceMarker.current?.remove(); deviceMarker.current = null;
+      return;
+    }
+    if (deviceMarker.current) {
+      deviceMarker.current.setLngLat([fix.lng, fix.lat]);
+      return;
+    }
+    const element = document.createElement('div');
+    element.className = 'device-location-marker';
+    element.title = '裝置大約位置';
+    element.setAttribute('role', 'img');
+    element.setAttribute('aria-label', '裝置大約位置');
+    deviceMarker.current = new Marker({ element, anchor: 'center' }).setLngLat([fix.lng, fix.lat]).addTo(map);
+  }, [props.deviceLocation, ready]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -580,7 +642,8 @@ export default function MapScene(props: MapSceneProps) {
       duration: motionDuration(650), easing: easeInOutCubic });
   };
 
-  return <div className={`map-scene ${active ? 'is-focused' : ''}`} aria-label="西營盤外展地圖">
+  return <div className={`map-scene ${active ? 'is-focused' : ''}`} aria-label="西營盤外展地圖"
+    onPointerDownCapture={cancelInitialDeviceLocation} onWheelCapture={cancelInitialDeviceLocation} onKeyDownCapture={cancelInitialDeviceLocation}>
     <div ref={container} className="map-canvas" data-testid="map-canvas" />
     <div className="floor-map-labels" aria-hidden={!props.expanded || !is3D}>{active?.floors.map(floor => <button key={floor.id} ref={element => { if (element) floorLabelElements.current.set(floor.id, element); else floorLabelElements.current.delete(floor.id); }}
       className={`floor-map-label ${floor.hasFollowUp ? 'needs-followup' : ''} ${props.selectedFloorId === floor.id ? 'selected' : ''}`}
@@ -614,7 +677,7 @@ export default function MapScene(props: MapSceneProps) {
     </div>}
     </div>
     {adding && mapRef.current && props.onAddBuilding && <div className="fp-editor-dock" style={{ left: (props.insets?.left ?? 0) + 16, right: (props.insets?.right ?? 0) + 16 }}>
-      <AddBuildingPanel map={mapRef.current} neighbours={neighbours} buildings={props.buildings} search={props.placeSearch ? searchPlaces : undefined}
+      <AddBuildingPanel map={mapRef.current} neighbours={neighbours} buildings={props.buildings} search={props.placeSearch ? searchPlaces : undefined} deviceLocation={props.deviceLocation}
         onSelectBuilding={id => { stopAdding(false); props.onSelectBuilding(id); }}
         onCancel={() => stopAdding(true)}
         onAdd={input => props.onAddBuilding?.(input)} />

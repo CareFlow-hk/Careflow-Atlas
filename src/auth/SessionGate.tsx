@@ -7,6 +7,8 @@ import { WorkspaceAdvancedSettings } from '../components/WorkspaceAdvancedSettin
 import { WorkspaceUnlock } from './WorkspaceUnlock';
 import { forgetKeys, recalledKeys, type LockedKey } from '../data/orgKey';
 import { createCipher, type WorkspaceCipher } from '../data/workspaceCipher';
+import { DeviceLocationProvider } from '../location/DeviceLocationProvider';
+import '../location/deviceLocation.css';
 import './accounts.css';
 
 /**
@@ -193,7 +195,7 @@ export function SessionGate({ children }: { children: ReactNode }) {
   // The workspace header shows the account; this gate only supplies what it needs.
   const where = sync.mode === 'on' ? 'shared' : 'device';
   const controls = { name: session.user.name, role: session.user.role, busy, features, workspace: where, openSettings: () => setSettings(true), logout: () => void logout() } as const;
-  return <AccountContext.Provider value={controls}><div className="authenticated-app">
+  return <DeviceLocationProvider key={session.user.id} accountId={session.user.id} active={sync.mode !== 'locked'} allowPrompt={!settings && sync.mode !== 'locked'}><AccountContext.Provider value={controls}><div className="authenticated-app">
     {error && <p role="alert" className="account-error">{error}</p>}
     {!settings && sync.mode === 'locked' && <WorkspaceUnlock orgId={scope} locked={sync.key} onUnlocked={keys => settle({ mode: 'on', key: sync.key }, createCipher(keys))} />}
     {!settings && sync.mode === 'local' && sync.reason !== 'off' && <p className="workspace-unlock is-later" role="status">{sync.reason === 'error'
@@ -202,5 +204,5 @@ export function SessionGate({ children }: { children: ReactNode }) {
     {settings ? <AccountPanel session={session} features={features} onFeaturesChanged={setFeatures} onKeyChanged={() => setSyncRound(round => round + 1)} onClose={() => setSettings(false)} onSignedOut={signedOut} advanced={<WorkspaceAdvancedSettings role={session.user.role} />} />
       // Keyed on where the workspace lives, so switching to the shared copy loads it afresh.
       : <div key={`${session.user.id}:${sync.mode === 'on' ? sync.key.keyId : 'local'}`} className="authenticated-workspace">{children}</div>}
-  </div></AccountContext.Provider>;
+  </div></AccountContext.Provider></DeviceLocationProvider>;
 }

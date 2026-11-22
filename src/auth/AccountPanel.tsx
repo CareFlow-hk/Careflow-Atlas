@@ -3,6 +3,7 @@ import { api, type Account, type Session } from './api';
 import type { FeatureSwitches } from './accountContext';
 import { WorkspaceKeyPanel } from './WorkspaceKeyPanel';
 import { AiSettingsPanel } from './AiSettingsPanel';
+import { DeviceLocationSettings } from '../location/DeviceLocationSettings';
 
 interface Device { id: string; created_at: number; seen_at: number; current: boolean; }
 /** An institution as the platform administrator sees it: who is in it and its own switches. */
@@ -121,6 +122,7 @@ export function AccountPanel({ session, features = {}, onFeaturesChanged, onKeyC
         <button disabled={busy} onClick={() => void perform(async () => { await api('/sessions/revoke-others', 'POST'); await reload(); setMessage('其他裝置已登出。'); })}>登出其他裝置</button>
       </section>
     </div>
+    <DeviceLocationSettings />
     {/* Shown only while the assistant is on: with the switch off there is nothing to set up,
         and a panel describing a service this institution cannot use is noise. */}
     {features.aiAssistant === true && <AiSettingsPanel />}

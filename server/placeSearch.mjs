@@ -488,9 +488,11 @@ export function createPlaceSearch({ fetcher = fetch, env = process.env, now = Da
     const narrowed = wanted.numbers.length > 0 && closest.some(row => row.numbered);
     const fitting = narrowed ? closest.filter(row => row.numbered) : closest;
     const kept = [];
-    for (const { item } of fitting) {
+    for (const { item, score } of fitting) {
       if (kept.some(previous => sameSuggestion(previous, item))) continue;
-      kept.push({ id: item.id, name: item.name, address: item.address, lng: item.lng, lat: item.lat });
+      // This is our text-match result (0–1), not the address vendor's opaque Score. The
+      // browser may combine it with a device-only distance; the coordinate never comes here.
+      kept.push({ id: item.id, name: item.name, address: item.address, lng: item.lng, lat: item.lat, relevance: score });
     }
     return kept;
   }
@@ -563,12 +565,14 @@ export function createPlaceSearch({ fetcher = fetch, env = process.env, now = Da
     // Names that begin with the words first, then the closest match, then the shortest — 「德朗」
     // should offer 德朗邨 before anything that merely contains it.
     hits.sort((a, b) => Number(b.exact) - Number(a.exact) || b.same - a.same || a.row.name.length - b.row.name.length);
-    return hits.map(({ row }, index) => ({
+    return hits.map(({ row, same, exact }, index) => ({
       id: `ha-${row.lng},${row.lat}-${index}`,
       name: row.name,
       address: haAddress(row),
       lng: row.lng,
       lat: row.lat,
+      // Prefix matching is part of our existing HA order, so keep it in the metadata too.
+      relevance: Math.min(1, 0.8 * same / wanted.text.length + (exact ? 0.2 : 0)),
     }));
   }
 
