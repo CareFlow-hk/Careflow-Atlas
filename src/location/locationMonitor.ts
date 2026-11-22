@@ -94,7 +94,7 @@ export class DeviceLocationMonitor {
 
   /** A first-consent acceptance and a settings switch both use this one entry point. */
   enable = () => {
-    if (!this.supported) { this.patch({ status: 'unsupported' }); return; }
+    if (!this.supported) { this.preferences(true, true, { status: 'unsupported', fix: undefined }); return; }
     this.preferences(true, true, { status: 'idle', fix: undefined });
     this.start();
   };
@@ -137,7 +137,7 @@ export class DeviceLocationMonitor {
     this.patch({ status: 'requesting', fix: undefined });
     const success = (position: DevicePosition) => {
       if (!this.running || generation !== this.generation) return;
-      const fix = readDeviceFix(position);
+      const fix = readDeviceFix(position, Date.now());
       if (!fix) { this.patch({ status: 'unavailable', fix: undefined }); return; }
       this.patch({ status: 'ready', fix });
       this.expireFixAt(fix, generation);

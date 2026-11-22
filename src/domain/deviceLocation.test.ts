@@ -7,10 +7,20 @@ const place = (id: string, relevance: number | undefined, lat: number, lng = 114
 
 describe('device fixes', () => {
   it('reads a browser position without ever substituting 0,0 for a bad coordinate', () => {
-    expect(readDeviceFix({ coords: { latitude: 22.2865, longitude: 114.14175, accuracy: 25 }, timestamp: now })).toEqual(fix({ observedAt: now }));
+    expect(readDeviceFix({ coords: { latitude: 22.2865, longitude: 114.14175, accuracy: 25 }, timestamp: now }, now)).toEqual(fix({ observedAt: now }));
     expect(readDeviceFix({ coords: { latitude: Number.NaN, longitude: 114.14175, accuracy: 25 }, timestamp: now })).toBeUndefined();
     expect(readDeviceFix({ coords: { latitude: 22.2865, longitude: 181, accuracy: 25 }, timestamp: now })).toBeUndefined();
     expect(readDeviceFix({ coords: { latitude: 22.2865, longitude: 114.14175, accuracy: 0 }, timestamp: now })).toBeUndefined();
+  });
+
+  it('uses receipt time when Safari uses another epoch or a browser timestamp is ahead', () => {
+    const coords = { latitude: 22.2865, longitude: 114.14175, accuracy: 35 };
+    const safariEpoch = readDeviceFix({ coords, timestamp: now - 978_307_200_030 }, now);
+    const slightlyAhead = readDeviceFix({ coords, timestamp: now + 5_000 }, now);
+    expect(safariEpoch).toEqual(fix({ accuracy: 35, observedAt: now }));
+    expect(slightlyAhead).toEqual(fix({ accuracy: 35, observedAt: now }));
+    expect(usableDeviceFix(safariEpoch, now)).toBe(true);
+    expect(usableDeviceFix(slightlyAhead, now)).toBe(true);
   });
 
   it('accepts only fresh fixes accurate enough for building work', () => {

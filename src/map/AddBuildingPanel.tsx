@@ -50,7 +50,6 @@ export function AddBuildingPanel({ map, neighbours, buildings, onSelectBuilding,
   /** The spot came from a search result, so only that pick raises 「可能重複」. */
   const [chosenBySearch, setChosenBySearch] = useState(false);
   const searchTicket = useRef(0);
-  const originalResults = useRef<PlaceResult[]>([]);
   const locationRef = useRef(deviceLocation);
   locationRef.current = deviceLocation;
   const pickCount = useRef(0);
@@ -137,10 +136,10 @@ export function AddBuildingPanel({ map, neighbours, buildings, onSelectBuilding,
     send({ kind: 'asked', requestId: ticket });
     try {
       const found = await search(words);
-      originalResults.current = found;
       // One position snapshot per returned result set; later watch updates cannot reorder a
-      // list under someone's finger. The next search takes the newer position.
-      send({ kind: 'found', requestId: ticket, results: rankPlacesByProximity(found, locationRef.current) });
+      // list under someone's finger. Both orders pass the reducer's request guard together,
+      // so a late response cannot replace the restoration copy of a newer search.
+      send({ kind: 'found', requestId: ticket, results: rankPlacesByProximity(found, locationRef.current), originalResults: found });
     } catch (error) {
       send({ kind: 'failed', requestId: ticket, message: error instanceof Error ? error.message : '搜尋未成功，請再試一次。' });
     }
@@ -150,7 +149,7 @@ export function AddBuildingPanel({ map, neighbours, buildings, onSelectBuilding,
   // and restores this same result set to the server's order, without another network request.
   useEffect(() => {
     if (usableDeviceFix(deviceLocation) || !box.results.some(result => result.distanceMetres !== undefined)) return;
-    send({ kind: 'restored', results: originalResults.current });
+    send({ kind: 'restored' });
   }, [deviceLocation, box.results]);
 
   /**

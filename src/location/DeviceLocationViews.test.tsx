@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { DeviceLocationConsent } from './DeviceLocationConsent';
 import { DeviceLocationSettings } from './DeviceLocationSettings';
+import { DeviceLocationNotice } from './DeviceLocationNotice';
 import { DeviceLocationContextProvider, type DeviceLocationContextValue } from './deviceLocationContext';
 
 const value = (over: Partial<DeviceLocationContextValue> = {}): DeviceLocationContextValue => ({
@@ -38,5 +39,24 @@ describe('device location consent and personal settings', () => {
     expect(html).toContain('>開啟</button>');
     expect(html).toContain('瀏覽器已拒絕定位');
     expect(html).toContain('網站設定');
+  });
+
+  it.each([
+    { status: 'denied', enabled: false, words: '瀏覽器已拒絕定位' },
+    { status: 'timeout', enabled: true, words: '定位逾時' },
+    { status: 'unavailable', enabled: true, words: '暫時未能定位' },
+    { status: 'unsupported', enabled: true, words: 'HTTPS' },
+  ] as const)('reports $status on the current map interface with a remedy', ({ status, enabled, words }) => {
+    const html = renderToStaticMarkup(<DeviceLocationContextProvider value={value({ status, enabled, prompted: true })}><DeviceLocationNotice /></DeviceLocationContextProvider>);
+    expect(html).toContain('role="alert"');
+    expect(html).toContain('定位未能使用');
+    expect(html).toContain(words);
+    expect(html).toContain('關閉定位錯誤提示');
+  });
+
+  it('does not alarm the map before an unsupported browser has been opted in or while requesting', () => {
+    for (const state of [value(), value({ status: 'unsupported' }), value({ status: 'requesting', enabled: true })]) {
+      expect(renderToStaticMarkup(<DeviceLocationContextProvider value={state}><DeviceLocationNotice /></DeviceLocationContextProvider>)).toBe('');
+    }
   });
 });

@@ -17,6 +17,7 @@ import { contextPosition, cutawayEnabled, CutawayTransition, CUTAWAY_DURATION, f
 import { breakdownLabel, mapSceneColors, nodeTagLabel, stateColors, stateLabels, stateLegendNotes } from '../domain/presentation';
 import { OUTREACH_STATES } from '../domain/types';
 import { usableDeviceFix, type DeviceFix } from '../domain/deviceLocation';
+import { DeviceLocationNotice } from '../location/DeviceLocationNotice';
 import './map.css';
 
 // MapLibre 6 ships a separate worker. Let Vite bundle and resolve it in both modes.
@@ -690,6 +691,7 @@ export default function MapScene(props: MapSceneProps) {
         onRestoreOsm={async () => { const m = await findOsmFootprint({ lng: active.longitude, lat: active.latitude }); return m.kind === 'none' ? undefined : m.ring; }} />
     </div>}
     {hover && <div className="map-hover" style={{ left: hover.x, top: hover.y }}><strong>{hover.title}</strong><span>{hover.subtitle}</span></div>}
+    <DeviceLocationNotice />
     {notice && <button className="map-notice" onClick={() => setNotice('')} role="status">{notice}<span>×</span></button>}
     {/* One compact row; what each colour means is in the help panel (and the tooltip). */}
     <div className="map-legend">{OUTREACH_STATES.map(state => <span key={state} title={stateLegendNotes[state]}><i className="legend-swatch" style={{ background: stateColors[state] }} />{stateLabels[state]}</span>)}</div>

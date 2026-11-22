@@ -21,12 +21,15 @@ const finitePoint = (point: { lat: number; lng: number }) => Number.isFinite(poi
 export function readDeviceFix(value: {
   coords: { latitude: number; longitude: number; accuracy: number };
   timestamp: number;
-}): DeviceFix | undefined {
+}, receivedAt = Date.now()): DeviceFix | undefined {
   const fix = {
     lat: value.coords.latitude,
     lng: value.coords.longitude,
     accuracy: value.coords.accuracy,
-    observedAt: value.timestamp,
+    // Safari 26 can report a 2001-epoch timestamp, and other browsers can return a timestamp
+    // slightly ahead of the wall clock. Receipt time is our freshness clock; maximumAge still
+    // limits the browser's cached fix before this callback arrives.
+    observedAt: receivedAt,
   };
   return finitePoint(fix) && Number.isFinite(fix.accuracy) && fix.accuracy > 0 && Number.isFinite(fix.observedAt) ? fix : undefined;
 }

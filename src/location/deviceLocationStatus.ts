@@ -3,6 +3,12 @@ import type { DeviceLocationSnapshot } from './locationMonitor';
 
 const time = (timestamp: number) => new Intl.DateTimeFormat('zh-HK', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(timestamp);
 
+/** Only an attempted opt-in belongs on the map; an unsupported, never-enabled browser stays silent. */
+export function deviceLocationFailed(location: Pick<DeviceLocationSnapshot, 'enabled' | 'status'>): boolean {
+  return location.status === 'denied' || location.status === 'timeout' || location.status === 'unavailable'
+    || (location.status === 'unsupported' && location.enabled);
+}
+
 /** The status is deliberately separate from the settings switch's 開啟／關閉 label. */
 export function deviceLocationStatusText(location: Pick<DeviceLocationSnapshot, 'enabled' | 'status' | 'fix'>, now = Date.now()): string {
   if (location.status === 'unsupported') return '此瀏覽器或目前連線不支援定位。請使用 HTTPS 或本機 localhost，並使用支援定位的瀏覽器。';

@@ -217,7 +217,7 @@ lang:     en | tc | sc
 - 选中一条结果后，**名称和地址都填进表单**（名称覆盖已打的字），两个字段之后都可改。
 - 选中后复用现有的 `picked` 状态与 `seedRing` / `buildingInput` 逻辑，不新建第二条写入路径。
 - **装置定位开启时（2026-11-22）**：浏览器对服务器返回的同一批结果计算 `0.70 × relevance + 0.30 × proximity`，`proximity = 1 / (1 + distanceMetres / 300)`。坐标由 Haversine 算直线距离，超过 5 分钟或准确度差于 500 米时不加权。
-- 一次搜索只使用返回那一刻的位置，后续 `watchPosition` 不让候选在手指下跳动；关闭定位或位置失效时，用本地 `restored` 事件恢复服务器顺序和移除距离，不重发请求。装置坐标不进入 `/api/place-search`。
+- 一次搜索只使用返回那一刻的位置，后续 `watchPosition` 不让候选在手指下跳动；关闭定位或位置失效时，用本地 `restored` 事件恢复服务器顺序和移除距离，不重发请求。加权结果与 `originalResults` 恢复副本在 `searchBox` 的同一个 requestId 守卫中接受，旧请求最后返回时两者都不得覆盖新搜索。装置坐标不进入 `/api/place-search`。
 - 距离只改变候选显示顺序，不自动选择、定位或建楼；关闭／拒绝／不支持定位时仍走原服务器顺序。详见 [GPS_LOCATION_PLAN.md](GPS_LOCATION_PLAN.md)。
 
 ### 3.4 决策：Google 先不接，槽位留着（2026-11-01）

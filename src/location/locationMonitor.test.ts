@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEVICE_POSITION_OPTIONS, DeviceLocationMonitor, type DeviceGeolocation, type DevicePosition, type DevicePositionError } from './locationMonitor';
 import { readDeviceLocationPrefs, writeDeviceLocationPrefs } from './locationPrefs';
+import { usableDeviceFix } from '../domain/deviceLocation';
 
 const now = Date.UTC(2026, 10, 22, 8);
 const position = (over: Partial<DevicePosition> = {}): DevicePosition => ({
@@ -51,6 +52,19 @@ describe('DeviceLocationMonitor', () => {
     expect(geo.clearWatch).toHaveBeenCalledWith(1);
     expect(monitor.getSnapshot()).toMatchObject({ enabled: false, status: 'idle', fix: undefined });
     expect(readDeviceLocationPrefs('user-1', storage).prefs.enabled).toBe(false);
+  });
+
+  it('keeps Safari epoch and slightly future browser timestamps usable from callback receipt', () => {
+    const { monitor, current, watches } = harness();
+    monitor.setActive(true);
+    monitor.enable();
+    current[0].success(position({ timestamp: now - 978_307_200_030, coords: { latitude: 22.2865, longitude: 114.14175, accuracy: 35 } }));
+    expect(monitor.getSnapshot()).toMatchObject({ status: 'ready', fix: { observedAt: now, accuracy: 35 } });
+    expect(usableDeviceFix(monitor.getSnapshot().fix, now)).toBe(true);
+    vi.advanceTimersByTime(1_000);
+    watches[0].success(position({ timestamp: now + 5_000 }));
+    expect(monitor.getSnapshot().fix?.observedAt).toBe(now + 1_000);
+    expect(usableDeviceFix(monitor.getSnapshot().fix, now + 1_000)).toBe(true);
   });
 
   it('starts automatically for an opted-in account only after the workspace is active', () => {
@@ -133,13 +147,16 @@ describe('DeviceLocationMonitor', () => {
   });
 
   it('does not call an unsupported or insecure browser, but still permits turning off a stored preference', () => {
-    const { monitor, storage } = harness();
+    const { monitor, geo, storage } = harness();
     writeDeviceLocationPrefs('user-1', { version: 1, prompted: true, enabled: true }, storage);
     const insecure = new DeviceLocationMonitor('user-1', { geolocation: undefined, storage, secure: false });
     insecure.setActive(true);
     expect(insecure.getSnapshot().status).toBe('unsupported');
     insecure.disable();
     expect(insecure.getSnapshot().enabled).toBe(false);
+    insecure.enable();
+    expect(insecure.getSnapshot()).toMatchObject({ enabled: true, prompted: true, status: 'unsupported', fix: undefined });
+    expect(geo.getCurrentPosition).not.toHaveBeenCalled();
     expect(monitor.getSnapshot().supported).toBe(true);
   });
 });
